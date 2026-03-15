@@ -1,0 +1,36 @@
+---
+title: 'Web UI'
+description: 'Visual interface for browsing, searching, and inspecting memories'
+---
+
+The web app provides a visual surface for memories, search results, graph relationships, embedding space, chat, and namespace-aware inspection.
+
+## Setup
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+By default, the UI expects the Anima API at `http://localhost:3000`.
+
+## Features
+
+- **Memory browser** — list, filter, and inspect stored memories with full metadata
+- **Search** — run hybrid, vector, or keyword searches from the UI
+- **Chat** — conversational interface backed by memory-augmented retrieval
+- **Graph view** — visualize relationships between memories
+- **Embedding view** — explore the embedding space of your memory store
+- **Namespace selector** — switch between namespaces without changing code
+
+## Production Build
+
+For production use, build the static assets and serve them from the Anima server:
+
+```bash
+cd web
+npm run build
+```
+
+The built files in `web/dist/` are served by the Rust server at port 3000.

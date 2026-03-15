@@ -1,0 +1,16 @@
+---
+title: 'List Namespaces'
+description: 'Get all known namespaces'
+---
+
+## GET /api/v1/namespaces
+
+Returns a list of all namespace identifiers that have been used in the current database. This endpoint does not require the `X-Anima-Namespace` header.
+
+## Response
+
+Returns an array of namespace strings.
+
+```json
+["default", "project-alpha", "testing"]
+```

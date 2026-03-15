@@ -1,0 +1,49 @@
+---
+title: 'Create Memory'
+description: 'Store a new memory'
+---
+
+## POST /api/v1/memories
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="content" type="string" required>
+  Memory text content
+</ParamField>
+
+<ParamField body="tags" type="string[]">
+  Optional tags for categorization
+</ParamField>
+
+<ParamField body="consolidate" type="boolean" default="true">
+  Whether to trigger background consolidation (reflection/deduction). Requires an LLM backend.
+</ParamField>
+
+<ParamField body="episode_id" type="string">
+  Optional episode identifier to group related memories
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Arbitrary key-value metadata to attach to the memory
+</ParamField>
+
+## Response
+
+Returns the created memory object with its assigned `id`, `created_at`, and `status`.
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "content": "I love hiking on weekends.",
+    "tags": ["preference", "outdoors"],
+    "consolidate": true
+  }'
+```

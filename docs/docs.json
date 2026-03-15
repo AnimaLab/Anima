@@ -1,0 +1,112 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Anima",
+  "colors": {
+    "primary": "#7C3AED",
+    "light": "#A78BFA",
+    "dark": "#5B21B6"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "index",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/memory-types",
+              "concepts/retrieval",
+              "concepts/namespaces"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/mcp",
+              "integrations/web-ui"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/introduction"
+            ]
+          },
+          {
+            "group": "Memories",
+            "pages": [
+              "api-reference/memories/create",
+              "api-reference/memories/create-batch",
+              "api-reference/memories/list",
+              "api-reference/memories/get",
+              "api-reference/memories/update",
+              "api-reference/memories/delete",
+              "api-reference/memories/search",
+              "api-reference/memories/merge"
+            ]
+          },
+          {
+            "group": "Revisions",
+            "pages": [
+              "api-reference/revisions/list",
+              "api-reference/revisions/rollback"
+            ]
+          },
+          {
+            "group": "Chat & Ask",
+            "pages": [
+              "api-reference/chat/chat",
+              "api-reference/chat/chat-stream",
+              "api-reference/chat/ask"
+            ]
+          },
+          {
+            "group": "Audit",
+            "pages": [
+              "api-reference/audit/events"
+            ]
+          },
+          {
+            "group": "System",
+            "pages": [
+              "api-reference/system/health",
+              "api-reference/system/stats",
+              "api-reference/system/namespaces"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/AnimaLab/Anima"
+      },
+      {
+        "label": "Support",
+        "href": "mailto:contact@runanima.com"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/AnimaLab"
+    }
+  }
+}

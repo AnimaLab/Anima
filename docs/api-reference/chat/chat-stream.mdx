@@ -1,0 +1,38 @@
+---
+title: 'Chat (Streaming)'
+description: 'Streaming chat via Server-Sent Events'
+---
+
+## POST /api/v1/chat/stream
+
+Same parameters as the [chat endpoint](/api-reference/chat/chat), but returns the response as a stream of Server-Sent Events (SSE).
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="message" type="string" required>
+  The user message
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  Previous messages in the conversation
+</ParamField>
+
+<ParamField body="mode" type="string">
+  Chat mode: `rag` or `tool`
+</ParamField>
+
+<ParamField body="llm" type="string">
+  Optional LLM override
+</ParamField>
+
+<ParamField body="attachments" type="object[]">
+  Optional file attachments
+</ParamField>
+
+## Response
+
+Returns an SSE stream. Each event contains a chunk of the assistant's response. The final event includes retrieved memory references.

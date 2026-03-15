@@ -1,0 +1,32 @@
+---
+title: 'List Memories'
+description: 'Retrieve memories with pagination and filtering'
+---
+
+## GET /api/v1/memories
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="offset" type="integer" default="0">
+  Pagination offset
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Number of memories to return
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by memory status
+</ParamField>
+
+<ParamField query="memory_type" type="string">
+  Filter by memory type: `raw`, `reflected`, `deduced`, or `induced`
+</ParamField>
+
+## Response
+
+Returns a paginated list of memory objects.

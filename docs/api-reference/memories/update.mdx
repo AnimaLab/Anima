@@ -1,0 +1,32 @@
+---
+title: 'Update Memory'
+description: 'Update an existing memory'
+---
+
+## PUT /api/v1/memories/{id}
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID
+</ParamField>
+
+## Request Body
+
+<ParamField body="content" type="string">
+  Updated memory text
+</ParamField>
+
+<ParamField body="importance" type="number">
+  Updated importance score
+</ParamField>
+
+<ParamField body="tags" type="string[]">
+  Updated tags
+</ParamField>
+
+## Response
+
+Returns the updated memory object. A new revision is created automatically.

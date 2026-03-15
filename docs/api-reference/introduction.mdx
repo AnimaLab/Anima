@@ -1,0 +1,39 @@
+---
+title: 'API Reference'
+description: 'Overview of the Anima REST API'
+---
+
+## Base URL
+
+```
+http://localhost:3000
+```
+
+All API endpoints are prefixed with `/api/v1/` except for the health check at `/health`.
+
+## Authentication
+
+Anima uses namespace-based isolation rather than token-based authentication. Include the `X-Anima-Namespace` header on all `/api/v1/` requests:
+
+```
+X-Anima-Namespace: default
+```
+
+## Error Format
+
+Errors are returned as JSON with an `error` field:
+
+```json
+{
+  "error": "Memory not found"
+}
+```
+
+HTTP status codes follow standard conventions: `400` for bad requests, `404` for not found, `500` for internal errors.
+
+## Common Headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Content-Type` | Yes (for POST/PUT) | Always `application/json` |
+| `X-Anima-Namespace` | Yes | Target namespace for the request |

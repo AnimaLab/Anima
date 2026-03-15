@@ -1,0 +1,57 @@
+---
+title: 'Search Memories'
+description: 'Search memories using hybrid, vector, or keyword modes'
+---
+
+## POST /api/v1/memories/search
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="query" type="string" required>
+  Search query text
+</ParamField>
+
+<ParamField body="limit" type="integer" default="10">
+  Maximum number of results
+</ParamField>
+
+<ParamField body="search_mode" type="string" default="hybrid">
+  Search strategy: `hybrid`, `vector`, or `keyword`
+</ParamField>
+
+<ParamField body="temporal_weight" type="number">
+  Weight for temporal (recency) ranking signal
+</ParamField>
+
+<ParamField body="max_tier" type="string">
+  Maximum memory tier to include: `raw`, `reflected`, `deduced`, or `induced`
+</ParamField>
+
+<ParamField body="date_start" type="string">
+  ISO 8601 date to filter memories created after this time
+</ParamField>
+
+<ParamField body="date_end" type="string">
+  ISO 8601 date to filter memories created before this time
+</ParamField>
+
+## Response
+
+Returns an array of memory objects ranked by relevance, each with a `score` field.
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories/search \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "query": "What does the user like to do on weekends?",
+    "search_mode": "hybrid",
+    "limit": 5
+  }'
+```

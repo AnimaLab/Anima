@@ -1,0 +1,7 @@
+# Ignore everything by default
+*
+
+# Only include what's needed for the build
+!Cargo.toml
+!Cargo.lock
+!crates/

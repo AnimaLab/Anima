@@ -1,0 +1,28 @@
+---
+title: 'Rollback'
+description: 'Rollback a memory to a previous revision'
+---
+
+## POST /api/v1/memories/{id}/rollback
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID
+</ParamField>
+
+## Request Body
+
+<ParamField body="revision_number" type="integer" required>
+  The revision number to rollback to
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Reason for the rollback (recorded in audit trail)
+</ParamField>
+
+## Response
+
+Returns the memory object restored to the specified revision state. A new revision is created to record the rollback.

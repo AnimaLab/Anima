@@ -1,0 +1,70 @@
+[server]
+host = "127.0.0.1"
+port = 3000
+
+[database]
+path = "./anima.db"
+
+# Embedding backend: "local" (default, ONNX) or "openai" (API-based).
+# Local runs offline with no API calls. OpenAI requires an API key.
+[embedding]
+backend = "local"
+model_dir = "./models/qwen3-embedding-0.6b"
+model_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_int8.onnx"
+tokenizer_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json"
+dimension = 512
+pooling = "last_token"
+query_instruction = "Instruct: Given a question about someone's memories or past conversations, retrieve the most relevant memory excerpts\nQuery:"
+# To use OpenAI text-embedding-3-small instead, set:
+#   backend = "openai"
+#   api_base_url = "https://api.openai.com/v1"
+#   api_model = "text-embedding-3-small"
+#   api_key = ""  # or set OPENAI_API_KEY env var
+#   dimension = 1536
+
+[search]
+rrf_k = 60.0
+weight_vector = 0.6
+weight_keyword = 0.4
+temporal_weight = 0.2
+temporal_lambda = 0.001
+similarity_threshold = 0.85
+# Minimum cosine similarity for vector search results.
+# Tune this per embedding model and domain to filter noise.
+min_vector_similarity = 0.55
+# Minimum spread between best and worst vector scores to accept results.
+# Set to 0 to disable.
+min_score_spread = 0.0
+# Score bonus per tier level above tier-1 (raw).
+# tier 1 (raw) → +0.000, tier 2 (reflected) → +0.025, tier 3 (deduced) → +0.050
+tier_boost = 0.05
+
+[consolidation]
+enabled = true
+backend = "ollama"
+
+[consolidation.ollama]
+base_url = "http://localhost:11434"
+model = "qwen3.5:4b"
+
+# Example: use any OpenAI-compatible endpoint (Groq, Together, vLLM, etc.)
+[consolidation.openai_compat]
+base_url = "https://api.example.com/v1"
+api_key = ""
+model = "your-model-name"
+
+# LLM used for /ask, /chat, and answer generation.
+# Point at any OpenAI-compatible endpoint.
+[llm]
+base_url = "http://localhost:11434/v1"
+model = "qwen3.5:4b"
+api_key = ""
+
+# LLM for background processor (reflection + deduction).
+# Uses a stronger model for better reasoning quality.
+# API key resolution: config value > PROCESSOR_API_KEY env > OPENAI_API_KEY env.
+[processor]
+enabled = true
+base_url = "http://localhost:11434/v1"
+model = "qwen3.5:4b"
+api_key = ""

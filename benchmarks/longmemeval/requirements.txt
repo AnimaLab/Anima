@@ -1,0 +1,4 @@
+httpx>=0.27
+openai>=1.50
+rich>=13.0
+python-dotenv>=1.0

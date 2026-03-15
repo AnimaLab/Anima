@@ -1,0 +1,48 @@
+---
+title: 'Chat'
+description: 'Memory-augmented chat with LLM reasoning'
+---
+
+## POST /api/v1/chat
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="message" type="string" required>
+  The user message
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  Previous messages in the conversation. Each object has `role` and `content` fields.
+</ParamField>
+
+<ParamField body="mode" type="string">
+  Chat mode: `rag` (retrieval-augmented) or `tool` (tool-calling)
+</ParamField>
+
+<ParamField body="llm" type="string">
+  Optional LLM override (model name or endpoint)
+</ParamField>
+
+<ParamField body="attachments" type="object[]">
+  Optional file attachments
+</ParamField>
+
+## Response
+
+Returns a response object with the assistant's `message` and any `memories` that were retrieved to inform the response.
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "message": "What do you know about my hobbies?",
+    "mode": "rag"
+  }'
+```

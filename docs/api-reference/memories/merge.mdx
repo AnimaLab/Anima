@@ -1,0 +1,32 @@
+---
+title: 'Merge Memories'
+description: 'Merge multiple memories into one'
+---
+
+## POST /api/v1/memories/merge
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="source_memory_ids" type="string[]" required>
+  IDs of the memories to merge
+</ParamField>
+
+<ParamField body="content" type="string">
+  Content for the merged memory. If omitted, content is synthesized from sources.
+</ParamField>
+
+<ParamField body="tags" type="string[]">
+  Tags for the merged memory
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Reason for the merge (recorded in audit trail)
+</ParamField>
+
+## Response
+
+Returns the newly created merged memory. Source memories are marked as merged.

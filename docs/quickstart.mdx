@@ -1,0 +1,154 @@
+---
+title: 'Quickstart'
+description: 'Get Anima running and store your first memory'
+---
+
+## Smoke Mode
+
+Smoke mode is the fastest path from clone to working API. No Ollama, no API keys, no LLM required — it disables features that need an LLM backend (reflection, deduction, answer generation) so you can test the core memory loop immediately.
+
+<Steps>
+  <Step title="Build and start the server">
+    ```bash
+    cargo build --release -p anima-server
+    eval "$(./scripts/start_local.sh --detached --print-env)"
+    until curl -fsS "$BASE_URL/health" >/dev/null; do sleep 1; done
+    curl -sS "$BASE_URL/health"
+    ```
+  </Step>
+  <Step title="Store a memory">
+    ```bash
+    curl -X POST "$BASE_URL/api/v1/memories" \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{
+        "content": "I love hiking on weekends.",
+        "tags": ["preference", "outdoors"],
+        "consolidate": true
+      }'
+    ```
+  </Step>
+  <Step title="Retrieve it with hybrid search">
+    ```bash
+    curl -X POST "$BASE_URL/api/v1/memories/search" \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{
+        "query": "What does the user like to do on weekends?",
+        "search_mode": "hybrid",
+        "limit": 5
+      }'
+    ```
+  </Step>
+</Steps>
+
+That is enough to validate the core loop: write memory, search memory, inspect results.
+
+## Full Cognitive Mode
+
+For reflection, deduction, and answer generation, run the server with the default config and point it at the models or API backends you want to use.
+
+<Steps>
+  <Step title="Start Ollama and pull a model">
+    ```bash
+    ollama serve
+    ollama pull qwen3.5:4b
+    ```
+  </Step>
+  <Step title="Start Anima with full config">
+    ```bash
+    cargo build --release -p anima-server
+    ./target/release/anima-server config.default.toml
+    ```
+  </Step>
+  <Step title="Store some memories">
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/memories \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{"content": "I have a golden retriever named Max.", "tags": ["pets"]}'
+
+    curl -X POST http://localhost:3000/api/v1/memories \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{"content": "I love hiking on weekends.", "tags": ["preference"]}'
+    ```
+  </Step>
+  <Step title="Ask a question">
+    `/ask` answers a question directly from stored memories.
+
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/ask \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{"question": "What pet does the user have?"}'
+    ```
+
+    Response:
+    ```json
+    {
+      "answer": "The user has a golden retriever named Max.",
+      "memories_referenced": [{"id": "...", "content": "I have a golden retriever named Max.", "score": 0.89}],
+      "elapsed_ms": 1234
+    }
+    ```
+  </Step>
+  <Step title="Chat with memory context">
+    `/chat` is a conversational interface — it retrieves relevant memories, generates a response, and automatically extracts new facts from the exchange.
+
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/chat \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{"message": "What do you know about my dog?"}'
+    ```
+
+    Response:
+    ```json
+    {
+      "reply": "You have a golden retriever named Max!",
+      "memories_used": [{"id": "...", "content": "I have a golden retriever named Max.", "score": 0.89}],
+      "memories_added": [],
+      "mode": "rag"
+    }
+    ```
+
+    You can also pass conversation history for multi-turn chat:
+
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/chat \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      -d '{
+        "message": "He just turned 3 years old!",
+        "history": [
+          {"role": "user", "content": "What do you know about my dog?"},
+          {"role": "assistant", "content": "You have a golden retriever named Max!"}
+        ]
+      }'
+    ```
+  </Step>
+</Steps>
+
+**Notes:**
+- On first run, Anima downloads the local embedding model automatically.
+- The default config uses Ollama for both consolidation and LLM reasoning.
+- To use a remote backend instead, edit `config.default.toml` and point the `[llm]` and `[processor]` sections to any OpenAI-compatible endpoint. Set credentials via `PROCESSOR_API_KEY` or `OPENAI_API_KEY`.
+
+## Embedding Backend
+
+By default, Anima uses a local ONNX embedding model (Qwen3-Embedding-0.6B) — no API calls required. To use OpenAI embeddings instead, update `config.default.toml`:
+
+```toml
+[embedding]
+backend = "openai"
+api_base_url = "https://api.openai.com/v1"
+api_model = "text-embedding-3-small"
+api_key = "sk-..."    # or set OPENAI_API_KEY env var
+dimension = 1536
+```
+
+<Warning>
+  Switching embedding backends on an existing database will produce incompatible
+  vectors. Start with a fresh database when changing backends.
+</Warning>

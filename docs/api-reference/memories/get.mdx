@@ -1,0 +1,18 @@
+---
+title: 'Get Memory'
+description: 'Retrieve a single memory by ID'
+---
+
+## GET /api/v1/memories/{id}
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID
+</ParamField>
+
+## Response
+
+Returns the full memory object including `id`, `content`, `tags`, `memory_type`, `importance`, `created_at`, `updated_at`, and `metadata`.

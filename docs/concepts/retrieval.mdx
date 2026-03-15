@@ -1,0 +1,45 @@
+---
+title: 'Retrieval'
+description: 'Hybrid search combining vector, keyword, and temporal signals'
+---
+
+Anima uses a hybrid retrieval pipeline that combines three search strategies to surface the most relevant memories.
+
+## Vector Search
+
+Queries are embedded and compared against stored memory embeddings via cosine similarity. This captures semantic meaning — a query about "weekend activities" will match memories about "hiking on Saturdays" even without shared keywords.
+
+Anima supports two embedding backends:
+
+- **Local** (default) — Qwen3-Embedding-0.6B via ONNX. Runs offline, no API calls, no cost.
+- **OpenAI** — `text-embedding-3-small` or any OpenAI-compatible endpoint. Requires an API key.
+
+See the [configuration guide](/quickstart#embedding-backend) for setup.
+
+## Keyword Search
+
+Full-text search provides exact-match recall. This ensures that specific names, identifiers, or technical terms are not missed by the vector search.
+
+## Temporal Ranking
+
+Recency matters. Temporal weighting lets you bias results toward more recent memories or toward older ones, depending on your use case. The `temporal_weight` parameter in search requests controls this signal.
+
+## Search Modes
+
+The `search_mode` parameter on the search endpoint controls which strategies are combined:
+
+- **hybrid** (default) — combines vector, keyword, and temporal signals
+- **vector** — vector similarity only
+- **keyword** — keyword matching only
+
+## Enriched Retrieval
+
+Both `/api/v1/ask` and `/api/v1/chat` use an enriched retrieval pipeline that goes beyond a single search:
+
+1. **Keyword expansion** — extracts content words from the query and runs additional searches
+2. **Entity resolution** — detects names, resolves aliases, and searches by canonical identities
+3. **Episode expansion** — fetches co-episode memories for multi-hop context
+4. **Entity-linked retrieval** — traverses the knowledge graph to find memories connected to mentioned entities
+5. **Score-based filtering** — drops results below 25% of the top score to reduce noise
+
+You can control search depth with `search_limit`, filter by `memory_types` and `max_tier`, and restrict by date range.

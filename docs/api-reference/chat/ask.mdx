@@ -1,0 +1,64 @@
+---
+title: 'Ask'
+description: 'Ask a question with enriched memory retrieval'
+---
+
+## POST /api/v1/ask
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="question" type="string" required>
+  The question to answer
+</ParamField>
+
+<ParamField body="llm" type="string">
+  Optional LLM override
+</ParamField>
+
+<ParamField body="search_limit" type="integer" default="30">
+  Maximum number of memories to search
+</ParamField>
+
+<ParamField body="max_results" type="integer" default="30">
+  Maximum number of results to return
+</ParamField>
+
+<ParamField body="skip_llm" type="boolean">
+  If true, return retrieved memories without LLM synthesis
+</ParamField>
+
+<ParamField body="memory_types" type="string[]">
+  Filter by memory types: `raw`, `reflected`, `deduced`, `induced`
+</ParamField>
+
+<ParamField body="max_tier" type="string">
+  Maximum memory tier to include
+</ParamField>
+
+<ParamField body="date_start" type="string">
+  ISO 8601 date filter (after)
+</ParamField>
+
+<ParamField body="date_end" type="string">
+  ISO 8601 date filter (before)
+</ParamField>
+
+## Response
+
+Returns an object with `answer` (the synthesized response) and `memories` (the retrieved memories used to generate it).
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/ask \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "question": "What are the user'\''s weekend preferences?",
+    "search_limit": 10
+  }'
+```

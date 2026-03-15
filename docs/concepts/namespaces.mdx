@@ -1,0 +1,35 @@
+---
+title: 'Namespaces'
+description: 'Isolate memories by namespace for multi-tenant or multi-context use'
+---
+
+Namespaces provide logical isolation between sets of memories. Each API request targets a specific namespace, and memories in one namespace are invisible to queries in another.
+
+## Setting the Namespace
+
+Include the `X-Anima-Namespace` header on every request:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: project-alpha" \
+  -d '{"content": "The deadline is March 30."}'
+```
+
+If the namespace does not exist, it is created automatically on the first write.
+
+## Use Cases
+
+- **Multi-user** — give each user their own namespace so memories do not leak across accounts.
+- **Multi-project** — separate work context from personal context, or isolate memories per client engagement.
+- **Testing** — use a throwaway namespace for integration tests without polluting production data.
+
+## Listing Namespaces
+
+Retrieve all known namespaces via:
+
+```
+GET /api/v1/namespaces
+```
+
+This returns a list of namespace identifiers that have been used in the current database.

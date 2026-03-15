@@ -1,0 +1,28 @@
+---
+title: 'Audit Events'
+description: 'Retrieve audit trail events'
+---
+
+## GET /api/v1/audit/events
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="entity_type" type="string">
+  Filter by entity type (e.g., `memory`)
+</ParamField>
+
+<ParamField query="entity_id" type="string">
+  Filter by specific entity ID
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of events to return
+</ParamField>
+
+## Response
+
+Returns an array of audit event objects, each containing `event_type`, `entity_type`, `entity_id`, `details`, and `created_at`.

@@ -1,0 +1,26 @@
+---
+title: 'Memory Types'
+description: 'Understanding raw, reflected, deduced, and induced memory tiers'
+---
+
+Anima organizes memories into four tiers. Each tier represents a different level of processing and abstraction.
+
+## Raw
+
+The original memory as ingested. This is the verbatim content provided via the API. Raw memories are always stored and are the foundation for all higher-tier processing.
+
+## Reflected
+
+A distilled version of one or more raw memories. During background consolidation, Anima's reflection pipeline extracts key facts, preferences, and patterns from raw memories and produces reflected summaries. This requires an LLM backend (not available in smoke mode).
+
+## Deduced
+
+Higher-order inferences drawn from reflected memories. The deduction pipeline identifies implications, connections, and conclusions that span multiple reflected memories. For example, if reflected memories indicate a user prefers morning meetings and dislikes interruptions, a deduced memory might note they value focused deep-work time.
+
+## Induced
+
+The highest tier. Induced memories represent broad generalizations or principles synthesized from deduced memories. These capture overarching behavioral patterns and long-term preferences.
+
+## Tier Filtering
+
+When searching or using the ask endpoint, you can filter by `max_tier` to control which levels of memory are included in results. You can also filter by `memory_type` when listing memories.

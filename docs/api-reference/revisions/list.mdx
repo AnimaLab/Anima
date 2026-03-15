@@ -1,0 +1,24 @@
+---
+title: 'List Revisions'
+description: 'Get revision history for a memory'
+---
+
+## GET /api/v1/memories/{id}/revisions
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="integer">
+  Maximum number of revisions to return
+</ParamField>
+
+## Response
+
+Returns an array of revision objects ordered by revision number, each containing the memory content at that point in time, the `revision_number`, and `created_at` timestamp.

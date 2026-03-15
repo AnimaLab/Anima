@@ -1,0 +1,18 @@
+---
+title: 'Delete Memory'
+description: 'Delete a memory by ID'
+---
+
+## DELETE /api/v1/memories/{id}
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID
+</ParamField>
+
+## Response
+
+Returns a confirmation that the memory was deleted. An audit event is recorded.

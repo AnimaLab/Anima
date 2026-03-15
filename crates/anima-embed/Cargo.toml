@@ -1,0 +1,15 @@
+[package]
+name = "anima-embed"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ort = { workspace = true }
+ndarray = { workspace = true }
+tokenizers = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+

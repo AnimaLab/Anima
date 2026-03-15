@@ -1,0 +1,32 @@
+---
+title: 'MCP Bridge'
+description: 'Connect AI assistants to Anima via the Model Context Protocol'
+---
+
+The MCP server wraps Anima as a set of tools that any MCP-compatible assistant can call. Available tools include `memory_search`, `memory_add`, `memory_update`, `memory_delete`, `memory_stats`, `memory_ask`, and `memory_reflect`.
+
+## Setup
+
+```bash
+cd mcp
+npm install
+npm run build
+```
+
+## Configuration
+
+Point your MCP client (Claude Desktop, Cursor, etc.) at the built MCP server. The MCP bridge connects to the Anima REST API, which must be running.
+
+The bridge expects the Anima API at `http://localhost:3000` by default.
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `memory_search` | Hybrid search over stored memories |
+| `memory_add` | Store a new memory |
+| `memory_update` | Update an existing memory |
+| `memory_delete` | Delete a memory |
+| `memory_stats` | Get memory store statistics |
+| `memory_ask` | Ask a question with enriched retrieval |
+| `memory_reflect` | Trigger reflection on recent memories |

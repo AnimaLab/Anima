@@ -1,0 +1,24 @@
+---
+title: 'Create Batch'
+description: 'Store multiple memories in a single request'
+---
+
+## POST /api/v1/memories/batch
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="items" type="object[]" required>
+  Array of memory objects, each with `content` (required), `tags`, `episode_id`, and `metadata` fields.
+</ParamField>
+
+<ParamField body="reflect" type="boolean" default="true">
+  Whether to trigger reflection on the batch after ingestion
+</ParamField>
+
+## Response
+
+Returns an array of created memory objects.
