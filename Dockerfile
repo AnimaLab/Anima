@@ -13,7 +13,7 @@ RUN cargo build --release --bin anima-server
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl openssl \
+    ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/anima-server /usr/local/bin/
