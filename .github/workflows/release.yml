@@ -120,6 +120,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: anima-server-*
 
       - name: Collect archives
         run: |
