@@ -22,6 +22,7 @@ use tracing::warn;
 
 use crate::app::{AppError, AppState, ExtractNamespace};
 use crate::dto::*;
+use crate::telemetry::FeatureFlags;
 
 pub async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
@@ -5343,4 +5344,37 @@ pub async fn delete_conversation(
         return Err(AppError::NotFound("conversation not found".into()));
     }
     Ok(Json(serde_json::json!({"deleted": true})))
+}
+
+// ── Telemetry ──────────────────────────────────────────────
+
+pub async fn get_telemetry_config(
+    State(state): State<Arc<AppState>>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "enabled": state.telemetry_enabled()
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetTelemetryConfigRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub feature_flags: Option<FeatureFlags>,
+}
+
+pub async fn set_telemetry_config(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SetTelemetryConfigRequest>,
+) -> Json<serde_json::Value> {
+    state
+        .telemetry_enabled
+        .store(body.enabled, std::sync::atomic::Ordering::Relaxed);
+
+    if let Some(flags) = body.feature_flags {
+        let mut current = state.telemetry_feature_flags.write().await;
+        *current = flags;
+    }
+
+    Json(serde_json::json!({"updated": true}))
 }

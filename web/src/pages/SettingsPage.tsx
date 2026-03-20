@@ -47,6 +47,7 @@ export function SettingsPage() {
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
   const [cognitive, setCognitiveState] = useState<CognitiveConfig>(loadCognitiveConfig)
+  const [telemetryEnabled, setTelemetryEnabled] = useState(true)
   const setCognitive = (cfg: CognitiveConfig) => {
     setCognitiveState(cfg)
     saveCognitiveConfig(cfg)
@@ -92,6 +93,25 @@ export function SettingsPage() {
   useEffect(() => {
     refreshNamespaces()
   }, [])
+
+  // Fetch telemetry config on mount
+  useEffect(() => {
+    api.getTelemetryConfig()
+      .then(res => setTelemetryEnabled(res.enabled))
+      .catch(() => {})
+  }, [])
+
+  const toggleTelemetry = (enabled: boolean) => {
+    setTelemetryEnabled(enabled)
+    api.setTelemetryConfig(enabled, {
+      vision: config.vision ?? false,
+      tool_use: config.tool_use ?? true,
+      streaming: config.streaming ?? true,
+      reflection_enabled: cognitive.reflection_enabled,
+      deduction_enabled: cognitive.deduction_enabled,
+      induction_enabled: cognitive.induction_enabled,
+    }).catch(() => {})
+  }
 
   const createNamespace = () => {
     const ns = newNs.trim()
@@ -354,6 +374,34 @@ export function SettingsPage() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Telemetry */}
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Telemetry</h3>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer group">
+            <div className="relative shrink-0">
+              <input
+                type="checkbox"
+                checked={telemetryEnabled}
+                onChange={e => toggleTelemetry(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-8 h-[18px] bg-gray-700 rounded-full peer-checked:bg-blue-600 transition-colors" />
+              <div className="absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-gray-400 rounded-full peer-checked:translate-x-[14px] peer-checked:bg-white transition-all" />
+            </div>
+            <div>
+              <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Usage Analytics</span>
+              <p className="text-[11px] text-gray-600">Help improve Anima by sharing anonymous usage data</p>
+            </div>
+          </label>
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            Anima collects anonymous usage metrics — model names (not keys), memory counts (not content),
+            OS info, and feature settings. No personal data, namespace names, or memory content is ever sent.
+            You can disable this at any time.
+          </p>
         </div>
       </section>
 

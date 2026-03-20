@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub llm: LlmServerConfig,
     #[serde(default)]
     pub processor: ProcessorLlmConfig,
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -216,6 +218,30 @@ impl ProcessorLlmConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelemetryConfig {
+    #[serde(default = "telemetry_default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "telemetry_default_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "telemetry_default_interval_secs")]
+    pub interval_secs: u64,
+}
+
+fn telemetry_default_enabled() -> bool { true }
+fn telemetry_default_endpoint() -> String { "https://telemetry.anima-memory.dev/v1/report".into() }
+fn telemetry_default_interval_secs() -> u64 { 86400 }
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: telemetry_default_enabled(),
+            endpoint: telemetry_default_endpoint(),
+            interval_secs: telemetry_default_interval_secs(),
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -267,6 +293,7 @@ impl Default for AppConfig {
             },
             llm: LlmServerConfig::default(),
             processor: ProcessorLlmConfig::default(),
+            telemetry: TelemetryConfig::default(),
         }
     }
 }

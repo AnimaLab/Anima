@@ -238,3 +238,9 @@ export interface AskResponse {
   total_search_results: number
   elapsed_ms: number
 }
+
+// --- Telemetry ---
+
+export interface TelemetryConfig {
+  enabled: boolean
+}

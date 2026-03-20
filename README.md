@@ -220,6 +220,23 @@ npm install
 npm run build
 ```
 
+## Telemetry
+
+Anima collects anonymous usage analytics to help improve the product. This
+includes model names (not keys), memory counts (not content), OS and
+architecture info, and feature flag settings. No personal data, namespace
+names, or memory content is ever transmitted.
+
+Telemetry is enabled by default. To opt out, set `enabled = false` in
+`config.toml`:
+
+```toml
+[telemetry]
+enabled = false
+```
+
+Or toggle it off in the Settings page of the web UI.
+
 ## Contact
 
 For partnerships, pilots, or product questions: [contact@runanima.com](mailto:contact@runanima.com)

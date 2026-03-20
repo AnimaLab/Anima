@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use axum::extract::FromRequestParts;
 use axum::http::Method;
@@ -21,6 +21,7 @@ use crate::config::AppConfig;
 use crate::dto::ErrorResponse;
 use crate::handlers;
 use crate::processor::BackgroundProcessor;
+use crate::telemetry::FeatureFlags;
 
 /// Shared application state.
 pub struct AppState {
@@ -33,6 +34,9 @@ pub struct AppState {
     /// Ingestion tracking
     pub ingested_count: AtomicU64,
     pub ingested_started_at: std::time::Instant,
+    /// Telemetry
+    pub telemetry_enabled: AtomicBool,
+    pub telemetry_feature_flags: tokio::sync::RwLock<FeatureFlags>,
 }
 
 impl AppState {
@@ -45,6 +49,10 @@ impl AppState {
         let elapsed = self.ingested_started_at.elapsed().as_secs_f64();
         let rate = if elapsed > 0.0 { count as f64 / elapsed } else { 0.0 };
         (count, rate)
+    }
+
+    pub fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled.load(Ordering::Relaxed)
     }
 }
 
@@ -178,6 +186,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/conversations/{id}/title",
             post(handlers::generate_title),
+        )
+        .route(
+            "/api/v1/telemetry/config",
+            get(handlers::get_telemetry_config).put(handlers::set_telemetry_config),
         )
         .with_state(state)
         .fallback_service(spa)

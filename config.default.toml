@@ -68,3 +68,11 @@ enabled = true
 base_url = "http://localhost:11434/v1"
 model = "qwen3.5:4b"
 api_key = ""
+
+# Anonymous usage telemetry. Set enabled = false to opt out.
+# Sends only: model names, memory counts, OS info, feature flags.
+# Never sends: memory content, namespace names, API keys.
+[telemetry]
+enabled = true
+endpoint = "https://telemetry.anima-memory.dev/v1/report"
+interval_secs = 86400

@@ -4,6 +4,7 @@ mod dto;
 mod handlers;
 mod processor;
 mod prompts;
+mod telemetry;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -218,10 +219,19 @@ async fn start_server(
         consolidator,
         processor: bg_processor,
         scorer_config,
+        telemetry_enabled: std::sync::atomic::AtomicBool::new(config.telemetry.enabled),
+        telemetry_feature_flags: tokio::sync::RwLock::new(telemetry::FeatureFlags::default()),
         config: config.clone(),
         ingested_count: std::sync::atomic::AtomicU64::new(0),
         ingested_started_at: std::time::Instant::now(),
     });
+
+    // Spawn telemetry loop
+    if config.telemetry.enabled {
+        telemetry::spawn_telemetry_loop(state.clone());
+    } else {
+        tracing::info!("Telemetry disabled by config");
+    }
 
     // Periodic calibration model updater (offline/periodic maintenance loop).
     let calibrate_secs = std::env::var("ANIMA_CALIBRATION_RECOMPUTE_SECS")

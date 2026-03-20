@@ -21,7 +21,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   }
-  if (!path.startsWith('/api/v1/namespaces') && !path.startsWith('/health')) {
+  if (!path.startsWith('/api/v1/namespaces') && !path.startsWith('/health') && !path.startsWith('/api/v1/telemetry')) {
     headers['X-Anima-Namespace'] = currentNamespace
   }
   const res = await fetch(path, { ...options, headers })
@@ -176,5 +176,15 @@ export const api = {
     request<{ title: string }>(`/api/v1/conversations/${convId}/title`, {
       method: 'POST',
       body: JSON.stringify(llm),
+    }),
+
+  // Telemetry
+  getTelemetryConfig: () =>
+    request<{ enabled: boolean }>('/api/v1/telemetry/config'),
+
+  setTelemetryConfig: (enabled: boolean, featureFlags?: Record<string, boolean>) =>
+    request<{ updated: boolean }>('/api/v1/telemetry/config', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, feature_flags: featureFlags }),
     }),
 }
