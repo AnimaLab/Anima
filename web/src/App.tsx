@@ -22,8 +22,8 @@ const queryClient = new QueryClient({
 })
 
 const DEFAULT_LLM_CONFIG: LlmConfig = {
-  base_url: 'http://localhost:8080/v1',
-  model: 'mlx-community/Qwen2.5-14B-Instruct-4bit',
+  base_url: 'http://localhost:11434/v1',
+  model: '',
   api_key: '',
 }
 

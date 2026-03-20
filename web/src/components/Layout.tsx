@@ -85,11 +85,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <div className={`flex items-center ${showLabels ? 'justify-between p-3' : 'justify-center p-2'} border-b border-gray-800`}>
         {showLabels ? (
           <div className="flex items-center gap-2.5">
-            <img src="/favicon.svg" alt="" className="w-7 h-7" />
             <h1 className="text-xl font-bold text-white tracking-tight">Anima</h1>
           </div>
         ) : (
-          <img src="/favicon.svg" alt="" className="w-6 h-6 mb-1" />
+          <span className="text-sm font-bold text-white">A</span>
         )}
         <button
           onClick={() => {

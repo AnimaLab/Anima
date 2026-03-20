@@ -121,7 +121,7 @@ export function SettingsPage() {
               type="text"
               value={config.base_url}
               onChange={e => setConfig({ ...config, base_url: e.target.value })}
-              placeholder="http://localhost:8080/v1"
+              placeholder="http://localhost:11434/v1"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
             />
             <p className="text-[11px] text-gray-600 mt-1">OpenAI-compatible API endpoint</p>

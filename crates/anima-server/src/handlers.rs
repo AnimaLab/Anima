@@ -2629,23 +2629,46 @@ pub async fn top_accessed(
 
 /// Resolve an optional client-provided LLM config, falling back to server-side [llm] config.
 fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState) -> LlmConfig {
-    llm.unwrap_or_else(|| {
-        let cfg = &state.config.llm;
-        let api_key = Some(cfg.api_key.clone())
-            .filter(|k| !k.is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
-        LlmConfig {
-            base_url: cfg.base_url.clone(),
-            model: cfg.model.clone(),
-            api_key,
-            temperature: None,
-            max_tokens: None,
-            system_prompt: None,
-            vision: false,
-            tool_use: false,
-            streaming: false,
+    match llm {
+        Some(mut client_llm) => {
+            // If the client sends a localhost URL that the server can't reach
+            // (e.g. inside Docker), substitute the server's configured base_url.
+            let server_url = &state.config.llm.base_url;
+            if client_llm.base_url.contains("localhost") || client_llm.base_url.contains("127.0.0.1") {
+                if !server_url.contains("localhost") && !server_url.contains("127.0.0.1") {
+                    client_llm.base_url = server_url.clone();
+                }
+            }
+            // Fall back to server api_key if client didn't provide one
+            if client_llm.api_key.as_ref().map_or(true, |k| k.is_empty()) {
+                client_llm.api_key = Some(state.config.llm.api_key.clone())
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
+            }
+            // Fall back to server model if client didn't provide one
+            if client_llm.model.is_empty() {
+                client_llm.model = state.config.llm.model.clone();
+            }
+            client_llm
         }
-    })
+        None => {
+            let cfg = &state.config.llm;
+            let api_key = Some(cfg.api_key.clone())
+                .filter(|k| !k.is_empty())
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
+            LlmConfig {
+                base_url: cfg.base_url.clone(),
+                model: cfg.model.clone(),
+                api_key,
+                temperature: None,
+                max_tokens: None,
+                system_prompt: None,
+                vision: false,
+                tool_use: false,
+                streaming: false,
+            }
+        }
+    }
 }
 
 pub async fn chat(
