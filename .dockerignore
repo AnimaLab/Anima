@@ -6,4 +6,4 @@
 !Cargo.lock
 !crates/
 !config.default.toml
-!web/dist/
+!web/
