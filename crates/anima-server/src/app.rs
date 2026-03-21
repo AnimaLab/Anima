@@ -84,6 +84,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/health", get(handlers::health))
+        .route("/health/ready", get(handlers::health_ready))
         .route("/api/v1/calibration/metrics", get(handlers::calibration_metrics))
         .route(
             "/api/v1/memories",
@@ -381,6 +382,20 @@ pub enum AppError {
     Internal(String),
 }
 
+impl AppError {
+    /// Return the error domain for structured logging.
+    fn domain(&self) -> &'static str {
+        match self {
+            Self::NotFound(_) => "retrieval",
+            Self::BadRequest(_) => "request",
+            Self::Forbidden(_) => "auth",
+            Self::Database(_) => "db",
+            Self::Embedding(_) => "embedding",
+            Self::Internal(_) => "internal",
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
@@ -391,6 +406,19 @@ impl IntoResponse for AppError {
             Self::Embedding(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Self::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
+
+        // Structured log with error domain for filtering
+        match status {
+            StatusCode::INTERNAL_SERVER_ERROR => {
+                tracing::error!(domain = self.domain(), "{message}");
+            }
+            StatusCode::FORBIDDEN => {
+                tracing::warn!(domain = self.domain(), "{message}");
+            }
+            _ => {
+                tracing::debug!(domain = self.domain(), "{message}");
+            }
+        }
 
         let body = Json(ErrorResponse { error: message });
         (status, body).into_response()

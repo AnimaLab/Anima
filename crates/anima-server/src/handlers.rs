@@ -24,12 +24,70 @@ use crate::app::{AppError, AppState, ExtractNamespace};
 use crate::dto::*;
 use crate::telemetry::FeatureFlags;
 
+/// Liveness probe — is the process alive and responding?
+/// Served at `/health` (primary) and `/health/live` (explicit).
 pub async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
         "service": "anima",
         "version": env!("CARGO_PKG_VERSION")
     }))
+}
+
+/// Readiness probe — are all dependencies healthy?
+pub async fn health_ready(
+    State(state): State<Arc<AppState>>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    let mut checks = serde_json::Map::new();
+    let mut all_ok = true;
+
+    // DB check
+    match state.store.ping().await {
+        Ok(()) => { checks.insert("db".into(), "ok".into()); }
+        Err(e) => {
+            all_ok = false;
+            checks.insert("db".into(), serde_json::json!({"error": e.to_string()}));
+            tracing::warn!(domain = "db", "Readiness check failed — database: {e}");
+        }
+    }
+
+    // Embedder check — run a trivial embedding
+    match state.embedder.embed("health check") {
+        Ok(_) => { checks.insert("embedder".into(), "ok".into()); }
+        Err(e) => {
+            all_ok = false;
+            checks.insert("embedder".into(), serde_json::json!({"error": e.to_string()}));
+            tracing::warn!(domain = "embedding", "Readiness check failed — embedder: {e}");
+        }
+    }
+
+    // Processor check
+    match &state.processor {
+        Some(p) => {
+            checks.insert("processor".into(), serde_json::json!({
+                "status": "running",
+                "queue_depth": p.queue_depth(),
+                "in_flight": p.in_flight(),
+            }));
+        }
+        None => {
+            checks.insert("processor".into(), "disabled".into());
+        }
+    }
+
+    let status = if all_ok { "ready" } else { "degraded" };
+    let http_status = if all_ok {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (http_status, Json(serde_json::json!({
+        "status": status,
+        "service": "anima",
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": checks,
+    })))
 }
 
 pub async fn processor_status(

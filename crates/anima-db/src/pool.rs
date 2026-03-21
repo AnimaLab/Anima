@@ -76,6 +76,13 @@ impl DbPool {
         Ok(conn)
     }
 
+    /// Quick health check: run a trivial query to verify the DB is accessible.
+    pub async fn ping(&self) -> Result<(), DbError> {
+        let conn = self.writer.lock().await;
+        conn.execute_batch("SELECT 1").map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
     pub fn db_path(&self) -> &str {
         &self.db_path
     }

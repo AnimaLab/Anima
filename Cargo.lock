@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "anima-consolidate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anima-core",
  "async-trait",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "anima-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -62,7 +62,7 @@ dependencies = [
 
 [[package]]
 name = "anima-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anima-core",
  "chrono",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "anima-embed"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ndarray",
  "ort",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "anima-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anima-consolidate",
  "anima-core",

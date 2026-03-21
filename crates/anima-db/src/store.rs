@@ -396,6 +396,11 @@ impl MemoryStore {
         Self { pool }
     }
 
+    /// Quick health check: verify the database is accessible.
+    pub async fn ping(&self) -> Result<(), DbError> {
+        self.pool.ping().await
+    }
+
     /// Insert a new memory with three-table sync.
     pub async fn insert(
         &self,

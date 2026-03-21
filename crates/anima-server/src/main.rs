@@ -4,6 +4,7 @@ mod dto;
 mod handlers;
 mod processor;
 mod prompts;
+mod service;
 mod telemetry;
 
 use std::net::SocketAddr;
@@ -19,6 +20,7 @@ use anima_embed::Embedder;
 use anima_embed::download::ensure_model_files;
 use anima_embed::model::{EmbeddingModel, PoolingStrategy};
 use anima_embed::openai::OpenAiEmbedder;
+use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -27,6 +29,18 @@ use crate::config::AppConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Handle service management commands before anything else.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--install") {
+        return service::run(service::ServiceAction::Install);
+    }
+    if args.iter().any(|a| a == "--uninstall") {
+        return service::run(service::ServiceAction::Uninstall);
+    }
+    if args.iter().any(|a| a == "--service-status") {
+        return service::run(service::ServiceAction::Status);
+    }
+
     // Load .env file (if present)
     dotenvy::dotenv().ok();
 
@@ -38,18 +52,29 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // Load config
-    let config_path = std::env::args().nth(1);
+    // Load config — skip flags when looking for config path
+    let config_path = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
     let config = AppConfig::load(config_path.as_deref());
 
     tracing::info!("Starting Anima v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Database: {}", config.database.path);
 
-    // Initialize database
-    let pool = DbPool::open(&config.database.path, config.embedding.dimension)?;
-    let store = MemoryStore::new(pool);
+    // --- Startup self-test: validate dependencies before serving ---
 
-    // Initialize embedding model
+    // 1. Database
+    let pool = DbPool::open(&config.database.path, config.embedding.dimension)
+        .map_err(|e| {
+            tracing::error!(domain = "db", "Startup check failed — database: {e}");
+            e
+        })?;
+    let store = MemoryStore::new(pool);
+    store.ping().await.map_err(|e| {
+        tracing::error!(domain = "db", "Startup check failed — database ping: {e}");
+        anyhow::anyhow!("database unreachable: {e}")
+    })?;
+    tracing::info!(domain = "db", "Startup check passed — database OK");
+
+    // 2. Embedding model
     let embedder: Arc<dyn Embedder> = match config.embedding.backend.as_str() {
         "openai" => {
             let base_url = config.embedding.api_base_url.clone()
@@ -59,10 +84,14 @@ async fn main() -> anyhow::Result<()> {
             let api_key = config.embedding.api_key.clone()
                 .filter(|k| !k.is_empty())
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()))
-                .ok_or_else(|| anyhow::anyhow!(
-                    "OpenAI embedding backend requires api_key in config or OPENAI_API_KEY env var"
-                ))?;
+                .ok_or_else(|| {
+                    tracing::error!(domain = "embedding", "Startup check failed — OpenAI API key missing");
+                    anyhow::anyhow!(
+                        "OpenAI embedding backend requires api_key in config or OPENAI_API_KEY env var"
+                    )
+                })?;
             tracing::info!(
+                domain = "embedding",
                 "Using OpenAI embedding: model={}, dim={}, base_url={}",
                 model, config.embedding.dimension, base_url
             );
@@ -76,11 +105,18 @@ async fn main() -> anyhow::Result<()> {
                 &config.embedding.model_url,
                 &config.embedding.tokenizer_url,
             )
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(domain = "embedding", "Startup check failed — model download: {e}");
+                e
+            })?;
 
             tracing::info!("Loading local embedding model from {}", model_path.display());
             let pooling = PoolingStrategy::parse(&config.embedding.pooling)
-                .map_err(|e| anyhow::anyhow!("invalid embedding config: {e}"))?;
+                .map_err(|e| {
+                    tracing::error!(domain = "embedding", "Startup check failed — invalid pooling: {e}");
+                    anyhow::anyhow!("invalid embedding config: {e}")
+                })?;
             let query_instruction = config.embedding.query_instruction.clone()
                 .filter(|s| !s.is_empty());
             let embedder = EmbeddingModel::load(
@@ -90,9 +126,20 @@ async fn main() -> anyhow::Result<()> {
                 pooling,
                 query_instruction.clone(),
             )
-            .map_err(|e| anyhow::anyhow!("failed to load embedding model: {e}"))?;
+            .map_err(|e| {
+                tracing::error!(domain = "embedding", "Startup check failed — model load: {e}");
+                anyhow::anyhow!("failed to load embedding model: {e}")
+            })?;
+
+            // Smoke test: embed a short string to verify the model works
+            embedder.embed("startup self-test").map_err(|e| {
+                tracing::error!(domain = "embedding", "Startup check failed — embedding smoke test: {e}");
+                anyhow::anyhow!("embedding model smoke test failed: {e}")
+            })?;
+
             tracing::info!(
-                "Embedding model loaded (dim={}, pooling={}, query_instruction={})",
+                domain = "embedding",
+                "Startup check passed — embedding OK (dim={}, pooling={}, query_instruction={})",
                 config.embedding.dimension,
                 pooling.as_str(),
                 if query_instruction.is_some() { "yes" } else { "none" }
@@ -101,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Initialize consolidator (optional)
+    // 3. Consolidation LLM (optional — warn but don't fail)
     let consolidator = if config.consolidation.enabled {
         let llm_client: Arc<dyn anima_consolidate::llm_client::LlmClient> =
             match config.consolidation.backend.as_str() {
@@ -120,11 +167,11 @@ async fn main() -> anyhow::Result<()> {
                     ).with_temperature(0.2))
                 }
                 other => {
-                    tracing::warn!("Unknown consolidation backend '{other}', disabling");
+                    tracing::warn!(domain = "llm", "Unknown consolidation backend '{other}', disabling");
                     return Ok(start_server(store, embedder, None, &config).await?);
                 }
             };
-
+        tracing::info!(domain = "llm", "Startup check passed — consolidation LLM configured");
         Some(Arc::new(Consolidator::new(
             llm_client,
             config.search.similarity_threshold,
@@ -198,7 +245,6 @@ async fn start_server(
 
     // At startup, enqueue induction for every namespace that already has
     // reflected or deduced facts but may be missing induced patterns.
-    // process_induction() internally skips namespaces that are already up-to-date.
     if let Some(ref proc) = bg_processor {
         match store.list_namespaces().await {
             Ok(namespaces) => {
@@ -233,7 +279,7 @@ async fn start_server(
         tracing::info!("Telemetry disabled by config");
     }
 
-    // Periodic calibration model updater (offline/periodic maintenance loop).
+    // Periodic calibration model updater
     let calibrate_secs = std::env::var("ANIMA_CALIBRATION_RECOMPUTE_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -247,7 +293,7 @@ async fn start_server(
             loop {
                 interval.tick().await;
                 if let Err(e) = store.recompute_calibration_models().await {
-                    tracing::warn!("Calibration recompute failed: {e}");
+                    tracing::warn!(domain = "db", "Calibration recompute failed: {e}");
                 } else {
                     tracing::debug!("Calibration recompute completed");
                 }
@@ -255,7 +301,7 @@ async fn start_server(
         });
     }
 
-    // Periodic retention loop to cool stale low-value memories.
+    // Periodic retention loop
     let retention_secs = std::env::var("ANIMA_RETENTION_RECOMPUTE_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -282,7 +328,7 @@ async fn start_server(
                 } else if let Err(e) =
                     processor::run_retention_sync(&store, None, retention_limit).await
                 {
-                    tracing::warn!("Retention run failed: {e}");
+                    tracing::warn!(domain = "db", "Retention run failed: {e}");
                 } else {
                     tracing::debug!("Retention run completed");
                 }
@@ -290,7 +336,7 @@ async fn start_server(
         });
     }
 
-    let app = build_router(state)
+    let app = build_router(state.clone())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
@@ -301,7 +347,68 @@ async fn start_server(
     tracing::info!("Listening on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+
+    // --- Graceful shutdown ---
+    // Wait for SIGINT (ctrl-c) or SIGTERM, then drain in-flight work.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(state))
+        .await?;
 
     Ok(())
+}
+
+/// Wait for a shutdown signal (ctrl-c on all platforms, SIGTERM on Unix).
+/// Once received, drain the background processor with a timeout.
+async fn shutdown_signal(state: Arc<AppState>) {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install ctrl+c handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("Received SIGINT, starting graceful shutdown..."),
+        _ = terminate => tracing::info!("Received SIGTERM, starting graceful shutdown..."),
+    }
+
+    // Drain the background processor: drop the sender so workers see channel closed,
+    // then wait for in-flight jobs to finish (with a timeout).
+    if let Some(ref proc) = state.processor {
+        let in_flight = proc.in_flight();
+        let queued = proc.queue_depth();
+        if in_flight > 0 || queued > 0 {
+            tracing::info!(
+                "Waiting for background processor to drain ({in_flight} in-flight, {queued} queued)..."
+            );
+            let drain_timeout = std::time::Duration::from_secs(30);
+            let start = std::time::Instant::now();
+            loop {
+                if proc.in_flight() == 0 {
+                    tracing::info!("Background processor drained successfully");
+                    break;
+                }
+                if start.elapsed() > drain_timeout {
+                    tracing::warn!(
+                        "Drain timeout (30s) — {} jobs still in-flight, shutting down anyway",
+                        proc.in_flight()
+                    );
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+
+    tracing::info!("Shutdown complete");
 }

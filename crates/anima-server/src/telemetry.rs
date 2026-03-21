@@ -229,5 +229,8 @@ pub fn spawn_telemetry_loop(state: Arc<AppState>) {
         }
     });
 
-    tracing::info!("Telemetry enabled (interval={}s)", interval_secs);
+    tracing::info!(
+        "Anima collects anonymous usage telemetry (model names, memory counts, OS info — never content or keys). \
+         To opt out, set [telemetry] enabled = false in config.toml or toggle it in the web UI Settings page."
+    );
 }

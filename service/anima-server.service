@@ -1,0 +1,33 @@
+[Unit]
+Description=Anima Memory Server
+Documentation=https://github.com/anthropics/anima
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=anima
+Group=anima
+WorkingDirectory=/opt/anima
+ExecStart=/opt/anima/anima-server /opt/anima/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=35
+
+# Environment
+EnvironmentFile=-/opt/anima/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/anima
+PrivateTmp=true
+
+# Logging — stdout/stderr go to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=anima-server
+
+[Install]
+WantedBy=multi-user.target

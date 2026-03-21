@@ -1,7 +1,7 @@
 # Anima
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Benchmarks](https://img.shields.io/badge/Benchmarks-LoCoMo_87.7%25-green.svg)](https://github.com/AnimaLab/Anima-Benchmarks)
+[License: Apache 2.0](LICENSE)
+[Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks)
 
 Anima is a local-first memory engine for AI assistants and agent workflows. It
 helps systems remember facts, preferences, decisions, and prior context across
@@ -19,9 +19,21 @@ items, not shipped features.
 
 Your memories belong to you, not your LLM provider.
 
-
 ## Benchmark
-**87.73% on LOCOMO** — the academic benchmark for long-term conversational memory. Human baseline: 87.9%. Gap: 0.17%.
+
+**87.73% on LOCOMO** — the academic benchmark for long-term conversational
+memory. Human baseline: 87.9%. Gap: 0.17%.
+
+Full results and methodology live in
+[Anima-Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks). Headline
+numbers:
+
+- **87.7%** full-dataset LoCoMo accuracy across all 10 conversations, 1,540 questions
+- **93.4%** on `conv-26` only, 152 questions, single-conversation focused run
+- **0.864** broad continuous judge score
+
+Dataset guidance lives in [DATASETS.md](DATASETS.md). See also
+[CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR expectations.
 
 ## Why Anima
 
@@ -114,35 +126,31 @@ Notes:
 - To use a remote backend instead, edit `config.default.toml` and point the
 `[llm]` and `[processor]` sections to any OpenAI-compatible endpoint. Set
 credentials via `PROCESSOR_API_KEY` or `OPENAI_API_KEY`.
-
-## What Makes Anima Different
-
-
-| Area               | Anima                                                                      |
-| ------------------ | -------------------------------------------------------------------------- |
-| Storage model      | Local-first SQLite database you can move, back up, and inspect             |
-| Retrieval          | Hybrid search with vector, keyword, and temporal signals                   |
-| Inspection         | Revision history, rollback, audit trail, graph view, embedding view        |
-| Interfaces         | REST API, MCP bridge, and web UI in one repo                               |
-| Deployment posture | Start locally, then decide how much reasoning you want on-device or remote |
-
+- Environment variables can also be set in a `.env` file in the project root
+(loaded automatically via dotenvy). See `.env.example` for available keys.
 
 ## Interfaces
 
 ### REST API
 
-The HTTP server exposes health, memory CRUD, search, revisions, audit events,
-chat, ask, graph, embeddings, planning, and conversation endpoints.
+The HTTP server exposes memory CRUD, search, revisions, audit events, chat,
+ask, graph, embeddings, planning, and conversation endpoints.
 
-Key routes include:
+Key routes:
 
-- `GET /health`
-- `POST /api/v1/memories`
-- `POST /api/v1/memories/search`
-- `GET /api/v1/memories/{id}/revisions`
-- `GET /api/v1/audit/events`
-- `POST /api/v1/ask`
-- `POST /api/v1/chat`
+
+| Route                                 | Description                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `GET /health`                         | Liveness probe — always 200 if the process is alive                       |
+| `GET /health/ready`                   | Readiness probe — checks DB, embedder, processor; returns 503 if degraded |
+| `POST /api/v1/memories`               | Add a memory                                                              |
+| `POST /api/v1/memories/search`        | Hybrid search                                                             |
+| `GET /api/v1/memories/{id}/revisions` | Revision history                                                          |
+| `GET /api/v1/audit/events`            | Audit trail                                                               |
+| `POST /api/v1/ask`                    | Retrieval-augmented answer                                                |
+| `POST /api/v1/chat`                   | Conversational interface                                                  |
+| `GET /api/v1/processor/status`        | Background processor metrics                                              |
+
 
 ### MCP bridge
 
@@ -150,51 +158,65 @@ The MCP server wraps Anima as tools such as `memory_search`, `memory_add`,
 `memory_update`, `memory_delete`, `memory_stats`, `memory_ask`, and
 `memory_reflect`.
 
-```bash
-cd mcp
-npm install
-npm run build
-```
-
 ### Web UI
 
 The web app gives you a visual surface for memories, search results, graph
-relationships, embedding space, chat, and namespace-aware inspection.
+relationships, embedding space, chat, and namespace-aware inspection. By
+default it expects the Anima API at `http://localhost:3000`.
+
+## Deployment
+
+### Docker
 
 ```bash
-cd web
-npm install
-npm run dev
+docker build -t anima-server .
+docker run -p 3000:3000 -v ./anima.db:/app/anima.db anima-server
 ```
 
-By default, the UI expects the Anima API at `http://localhost:3000`.
+The Dockerfile uses a multi-stage build (Rust compile → Debian slim runtime).
+The default config is patched to bind `0.0.0.0:3000` and point Ollama URLs at
+`host.docker.internal`.
 
-## Benchmarks
+### Running as a Service
 
-Anima's public benchmark harnesses and curated reports live in
-[anima-benches](https://github.com/AnimaLab/Anima-Benchmarks). This repo keeps
-the benchmark code under [`benchmarks/`](benchmarks) for local development, but
-the public benchmark surface and headline reporting are maintained in the
-dedicated benchmark repo.
+Anima can install itself as a system service that starts on boot.
 
-Current headline public LoCoMo results:
+```bash
+# Install (auto-detects platform)
+anima-server --install
 
-- **93.4%** on `conv-26` only, 152 questions, single-conversation focused run
-- **87.7%** best published full-dataset LoCoMo accuracy across all 10 conversations, 1,540 questions
-- **86.0%** curated March full-dataset LoCoMo report across all 10 conversations
-- **0.864** best published broad continuous judge score
+# Check status
+anima-server --service-status
 
-Dataset guidance lives in [DATASETS.md](DATASETS.md). See also
-[CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR expectations.
+# Uninstall
+anima-server --uninstall
+```
 
-## Repository Map
 
-- `[crates/](crates)`: Rust workspace for core memory types, database,
-embeddings, consolidation, and server code
-- `[mcp/](mcp)`: TypeScript MCP server for tool-based integrations
-- `[web/](web)`: React frontend for memory browsing and inspection
-- `[scripts/](scripts)`: local startup helpers
-- `[benchmarks/](benchmarks)`: benchmark harnesses and curated benchmark notes
+| Platform | Backend         | Details                                                                                   |
+| -------- | --------------- | ----------------------------------------------------------------------------------------- |
+| Linux    | systemd         | Unit at `/etc/systemd/system/anima-server.service`, logs via `journalctl -u anima-server` |
+| macOS    | launchd         | Plist at `~/Library/LaunchAgents/dev.anima.server.plist`, starts on login                 |
+| Windows  | NSSM / schtasks | Uses [NSSM](https://nssm.cc) if available, otherwise prints a `schtasks` command          |
+
+
+The install command uses the current working directory and binary path, so run
+it from the directory where your `config.toml` and `anima.db` live.
+
+A pre-built systemd unit template is also available at
+[service/anima-server.service](service/anima-server.service) for manual setup.
+
+### Graceful Shutdown
+
+Anima handles SIGINT (ctrl-c) and SIGTERM cleanly:
+
+1. Stops accepting new HTTP connections
+2. Finishes in-flight requests
+3. Waits up to 30 seconds for background processor jobs to drain
+4. Exits
+
+This means `systemctl stop` and `docker stop` work without losing in-flight
+work.
 
 ## Development
 
@@ -220,6 +242,15 @@ npm install
 npm run build
 ```
 
+## Repository Map
+
+- [crates/](crates): Rust workspace — core types, database, embeddings, consolidation, server
+- [mcp/](mcp): TypeScript MCP server for tool-based integrations
+- [web/](web): React frontend for memory browsing and inspection
+- [scripts/](scripts): local startup helpers
+- [service/](service): systemd and launchd service templates
+- [benchmarks/](benchmarks): benchmark harnesses and curated notes
+
 ## Telemetry
 
 Anima collects anonymous usage analytics to help improve the product. This
@@ -227,15 +258,16 @@ includes model names (not keys), memory counts (not content), OS and
 architecture info, and feature flag settings. No personal data, namespace
 names, or memory content is ever transmitted.
 
-Telemetry is enabled by default. To opt out, set `enabled = false` in
-`config.toml`:
+Telemetry is enabled by default. To opt out permanently, set `enabled = false`
+in `config.toml`:
 
 ```toml
 [telemetry]
 enabled = false
 ```
 
-Or toggle it off in the Settings page of the web UI.
+The web UI Settings page can also toggle telemetry off, but that only lasts
+until the next restart. Edit the config file for a persistent opt-out.
 
 ## Contact
 
