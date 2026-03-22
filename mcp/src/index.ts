@@ -32,9 +32,10 @@ server.tool(
     content: z.string().describe("The memory content to store"),
     tags: z.array(z.string()).optional().describe("Tags for categorization (e.g. ['food', 'health'])"),
     consolidate: z.boolean().optional().describe("Auto-consolidate with similar memories (default: true)"),
+    category: z.enum(["identity", "preference", "environment", "routine", "task", "inferred", "general"]).optional().describe("Semantic category — controls decay rate and ranking. identity=near-permanent, task=fast-expiring, general=default"),
   },
-  async ({ content, tags, consolidate }) => {
-    const result = await client.addMemory(content, tags, consolidate ?? true);
+  async ({ content, tags, consolidate, category }) => {
+    const result = await client.addMemory(content, tags, consolidate ?? true, category);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );

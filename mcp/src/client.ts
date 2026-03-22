@@ -38,6 +38,7 @@ export async function addMemory(
   content: string,
   tags?: string[],
   consolidate = true,
+  category?: string,
 ) {
   return request(`${BASE_URL}/api/v1/memories`, {
     method: "POST",
@@ -45,6 +46,7 @@ export async function addMemory(
       content,
       tags,
       consolidate,
+      category,
     }),
   });
 }

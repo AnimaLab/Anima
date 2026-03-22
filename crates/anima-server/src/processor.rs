@@ -1254,7 +1254,7 @@ pub async fn run_retention_sync(
 
     for ns in namespaces {
         let (memories, _) = store
-            .list(&ns, Some("active"), None, 0, limit_per_namespace.max(1))
+            .list(&ns, Some("active"), None, None, 0, limit_per_namespace.max(1))
             .await?;
         for memory in memories {
             let age_days = (now - memory.created_at).num_days();
@@ -1417,6 +1417,10 @@ async fn process_reflection(
                 vec!["reflected".to_string()],
                 Some("reflected".to_string()),
             );
+            // Set category from LLM classification (fallback to general)
+            memory.category = fact.category.as_deref()
+                .and_then(anima_core::memory::MemoryCategory::from_str)
+                .unwrap_or_default();
             // Inherit episode_id from source chunk (most common)
             {
                 let mut ep_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -1499,7 +1503,7 @@ fn reflection_prompt_template() -> &'static str {
         r#"Task: extract atomic factual claims from RAW_MEMORIES.
 
 Output JSON only (no markdown, no prose):
-{"facts":[{"content":"","confidence":0.0,"source_ids":[""],"corrections":null,"event_date":null,"location":null}]}
+{"facts":[{"content":"","confidence":0.0,"source_ids":[""],"corrections":null,"event_date":null,"location":null,"category":"general"}]}
 
 Rules:
 - Keep only factual claims with confidence >= 0.5.
@@ -1508,6 +1512,14 @@ Rules:
 - event_date: YYYY-MM-DD only for specific dated events, else null.
 - Convert relative time references to absolute dates using the memory timestamp.
 - location: most specific place string available, else null.
+- category: classify each fact as one of: identity, preference, environment, routine, task, inferred, general.
+  identity = who the person is, names, relationships, how to address them.
+  preference = likes, dislikes, style, communication preferences.
+  environment = ports, paths, services, technical infra, workarounds.
+  routine = recurring tasks, schedules, habits.
+  task = current work, temporary context.
+  inferred = conclusions not directly stated by the person.
+  general = anything else.
 - Max 12 facts.
 - If no valid facts, return {"facts":[]}.
 
@@ -1687,6 +1699,9 @@ pub struct ReflectedFact {
     /// Format: "City, State, Country" or subset. Null if no location is mentioned.
     #[serde(default)]
     pub location: Option<String>,
+    /// Semantic category: identity, preference, environment, routine, task, inferred, general.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 fn parse_reflection_response(response: &str) -> anyhow::Result<Vec<ReflectedFact>> {
@@ -2558,6 +2573,7 @@ mod tests {
             episode_id: None,
             event_date: None,
             hash: "h1".into(),
+            category: anima_core::memory::MemoryCategory::General,
         };
         let newer = Memory {
             id: "b".into(),
@@ -2575,6 +2591,7 @@ mod tests {
             episode_id: None,
             event_date: None,
             hash: "h2".into(),
+            category: anima_core::memory::MemoryCategory::General,
         };
         assert!(should_supersede(&older, &newer));
     }

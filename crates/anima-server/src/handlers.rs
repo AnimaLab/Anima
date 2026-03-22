@@ -1006,7 +1006,12 @@ pub async fn add_memory(
         consolidate,
         tags,
         episode_id,
+        category,
     } = req;
+    let parsed_category = category
+        .as_deref()
+        .and_then(anima_core::memory::MemoryCategory::from_str)
+        .unwrap_or_default();
     let (content, metadata, _) = redact_content_and_metadata(&content, metadata);
 
     if content.trim().is_empty() {
@@ -1090,6 +1095,7 @@ pub async fn add_memory(
                             tags,
                             None,
                         );
+                        memory.category = parsed_category;
                         // Resolve episode_id for supersede path
                         memory.episode_id = episode_id.clone().or_else(|| {
                             memory.metadata.as_ref()
@@ -1154,6 +1160,7 @@ pub async fn add_memory(
     });
     let mut memory = Memory::new(ns.as_str().to_string(), final_content, metadata, tags, None);
     memory.episode_id = resolved_episode;
+    memory.category = parsed_category;
     let id = memory.id.clone();
     state.store.insert(&memory, &final_embedding).await?;
     state.record_ingestion(1);
@@ -1287,6 +1294,7 @@ pub async fn search_memories(
                 metadata,
                 tags: memory.tags,
                 memory_type: memory.memory_type,
+                category: memory.category.as_str().to_string(),
                 score: sr.score,
                 vector_score: sr.vector_score,
                 keyword_score: sr.keyword_score,
@@ -1330,6 +1338,7 @@ pub async fn get_memory(
         metadata,
         tags: memory.tags,
         memory_type: memory.memory_type,
+        category: memory.category.as_str().to_string(),
         status: memory.status.as_str().to_string(),
         created_at: memory.created_at.to_rfc3339(),
         updated_at: memory.updated_at.to_rfc3339(),
@@ -2500,8 +2509,9 @@ pub async fn list_memories(
     let limit = params.limit.unwrap_or(50).min(200);
     let status_filter = params.status.as_deref();
     let type_filter = params.memory_type.as_deref();
+    let category_filter = params.category.as_deref();
 
-    let (memories, total) = state.store.list(&ns, status_filter, type_filter, offset, limit).await?;
+    let (memories, total) = state.store.list(&ns, status_filter, type_filter, category_filter, offset, limit).await?;
 
     let memory_responses: Vec<MemoryResponse> = memories
         .into_iter()
@@ -2514,6 +2524,7 @@ pub async fn list_memories(
                 metadata,
                 tags: m.tags,
                 memory_type: m.memory_type,
+                category: m.category.as_str().to_string(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),
@@ -2674,6 +2685,7 @@ pub async fn top_accessed(
                 metadata,
                 tags: m.tags,
                 memory_type: m.memory_type,
+                category: m.category.as_str().to_string(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),
@@ -4209,7 +4221,7 @@ async fn extract_and_store_facts(
     history: &[ChatMessage],
 ) -> Vec<AddedMemory> {
     // Fetch recent memories so the extractor knows what's already stored
-    let existing_context = match state.store.list(ns, Some("active"), None, 0, 30).await {
+    let existing_context = match state.store.list(ns, Some("active"), None, None, 0, 30).await {
         Ok((memories, _)) if !memories.is_empty() => {
             let items: Vec<String> = memories.iter().map(|m| format!("- {}", m.content)).collect();
             format!("\n\nEXISTING MEMORIES (do NOT duplicate these — if a new fact CONTRADICTS one of these, include \"supersedes\" with the exact text of the contradicted memory):\n{}", items.join("\n"))

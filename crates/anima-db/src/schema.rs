@@ -77,6 +77,15 @@ pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
            AND json_extract(metadata, '$.event_date') IS NOT NULL;",
     ).ok();
 
+    // Add category column for semantic memory categories (idempotent migration)
+    conn.execute_batch(
+        "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general';",
+    )
+    .ok();
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(namespace, category);",
+    )?;
+
     // Conversations table for chat history
     conn.execute_batch(
         "

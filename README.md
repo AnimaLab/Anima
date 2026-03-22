@@ -55,9 +55,10 @@ part of the repo.
 | ------------------------- | ------- | ---------------------------------------------------------- |
 | Persistent memory API     | Shipped | Add, search, list, update, merge, and delete memories      |
 | Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking                        |
+| Typed memory categories   | Shipped | Per-category decay rates and filtering                     |
 | Revisions and audit trail | Shipped | Revision history, rollback, and audit events               |
 | Namespace isolation       | Shipped | `X-Anima-Namespace` plus namespace ACL support             |
-| Background consolidation  | Shipped | Reflection and deduction pipeline                          |
+| Background consolidation  | Shipped | Reflection and deduction pipeline with auto-classification |
 | MCP bridge                | Shipped | Tool surface for assistants and coding agents              |
 | Web UI                    | Shipped | Search, chat, graphs, embeddings, and memory inspection    |
 | Multimodal ingestion      | Roadmap | Audio, image, and video are not public-server features yet |
@@ -129,6 +130,38 @@ credentials via `PROCESSOR_API_KEY` or `OPENAI_API_KEY`.
 - Environment variables can also be set in a `.env` file in the project root
 (loaded automatically via dotenvy). See `.env.example` for available keys.
 
+## Memory Categories
+
+Every memory has a semantic `category` that controls how fast it decays and how
+it's ranked in search. Set it on ingestion or let the reflection pipeline
+classify automatically.
+
+| Category      | Decay half-life | Use case                                           |
+| ------------- | --------------- | -------------------------------------------------- |
+| `identity`    | ~2,888 days     | Who the user is, names, relationships              |
+| `preference`  | ~289 days       | Likes, dislikes, communication style               |
+| `routine`     | ~96 days        | Recurring tasks, schedules, habits                 |
+| `environment` | ~58 days        | Ports, paths, services, technical infra            |
+| `inferred`    | ~29 days        | Conclusions Anima drew but user hasn't confirmed   |
+| `general`     | ~29 days        | Default — uncategorized memories                   |
+| `task`        | ~6 days         | Current work, temporary context                    |
+
+```bash
+# Set category on ingestion
+curl -X POST "$BASE_URL/api/v1/memories" \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"content": "Gateway runs on port 18789", "category": "environment"}'
+
+# Filter by category
+curl "$BASE_URL/api/v1/memories?category=identity" \
+  -H "X-Anima-Namespace: default"
+```
+
+When the reflection pipeline extracts facts from raw memories, it auto-classifies
+each fact into the appropriate category. The MCP `memory_add` tool also accepts
+`category` as an optional parameter.
+
 ## Interfaces
 
 ### REST API
@@ -143,8 +176,9 @@ Key routes:
 | ------------------------------------- | ------------------------------------------------------------------------- |
 | `GET /health`                         | Liveness probe — always 200 if the process is alive                       |
 | `GET /health/ready`                   | Readiness probe — checks DB, embedder, processor; returns 503 if degraded |
-| `POST /api/v1/memories`               | Add a memory                                                              |
-| `POST /api/v1/memories/search`        | Hybrid search                                                             |
+| `POST /api/v1/memories`               | Add a memory (supports `category` field)                                  |
+| `POST /api/v1/memories/search`        | Hybrid search (results include `category`)                                |
+| `GET /api/v1/memories?category=X`     | List memories filtered by category                                        |
 | `GET /api/v1/memories/{id}/revisions` | Revision history                                                          |
 | `GET /api/v1/audit/events`            | Audit trail                                                               |
 | `POST /api/v1/ask`                    | Retrieval-augmented answer                                                |

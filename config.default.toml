@@ -27,6 +27,9 @@ rrf_k = 60.0
 weight_vector = 0.6
 weight_keyword = 0.4
 temporal_weight = 0.2
+# Global temporal decay rate. Per-category overrides are applied automatically:
+# identity=0.00001 (~permanent), preference=0.0001, environment=0.0005,
+# routine=0.0003, task=0.005 (~6d half-life), inferred/general=0.001 (~29d half-life).
 temporal_lambda = 0.001
 similarity_threshold = 0.85
 # Minimum cosine similarity for vector search results.

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use anima_core::memory::{content_hash, Memory, MemoryStatus};
+use anima_core::memory::{content_hash, Memory, MemoryCategory, MemoryStatus};
 use anima_core::namespace::Namespace;
 use anima_core::search::{HybridScorer, ScoredResult, ScorerConfig, SearchMode};
 use rusqlite::{params, Connection};
@@ -749,11 +749,12 @@ impl MemoryStore {
         namespace: &Namespace,
         status: Option<&str>,
         memory_type: Option<&str>,
+        category: Option<&str>,
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<Memory>, u64), DbError> {
         let conn = self.pool.writer().await;
-        list_sync(&conn, namespace, status, memory_type, offset, limit)
+        list_sync(&conn, namespace, status, memory_type, category, offset, limit)
     }
 
     /// Get namespace stats.
@@ -1387,7 +1388,7 @@ impl MemoryStore {
         let conn = self.pool.writer().await;
         let ns_pattern = namespace.like_pattern();
         let mut stmt = conn.prepare(
-            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
              FROM memories
              WHERE namespace LIKE ?1
                AND status = 'active'
@@ -1414,7 +1415,7 @@ impl MemoryStore {
         let conn = self.pool.writer().await;
         let ns_pattern = namespace.like_pattern();
         let mut stmt = conn.prepare(
-            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
              FROM memories
              WHERE namespace LIKE ?1
                AND status = 'active'
@@ -1441,7 +1442,7 @@ impl MemoryStore {
         let conn = self.pool.writer().await;
         let ns_pattern = namespace.like_pattern();
         let mut stmt = conn.prepare(
-            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
              FROM memories
              WHERE namespace LIKE ?1
                AND status = 'active'
@@ -1495,7 +1496,7 @@ impl MemoryStore {
         let ns_pattern = namespace.like_pattern();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at,
-                    accessed_at, access_count, hash, tags, memory_type, importance, episode_id
+                    accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
              FROM memories
              WHERE namespace LIKE ?1
                AND episode_id = ?2
@@ -1550,8 +1551,8 @@ fn insert_memory_sync(
     let tx = conn.unchecked_transaction().map_err(DbError::Sqlite)?;
 
     tx.execute(
-        "INSERT INTO memories (id, namespace, content, metadata, embedding, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, episode_id, event_date)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO memories (id, namespace, content, metadata, embedding, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, episode_id, event_date, category)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             memory.id,
             memory.namespace,
@@ -1568,6 +1569,7 @@ fn insert_memory_sync(
             memory.memory_type,
             memory.episode_id,
             event_date,
+            memory.category.as_str(),
         ],
     )?;
 
@@ -1612,8 +1614,8 @@ fn insert_many_memories_sync(
         });
 
         tx.execute(
-            "INSERT INTO memories (id, namespace, content, metadata, embedding, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, episode_id, event_date)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "INSERT INTO memories (id, namespace, content, metadata, embedding, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, episode_id, event_date, category)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 memory.id,
                 memory.namespace,
@@ -1630,6 +1632,7 @@ fn insert_many_memories_sync(
                 memory.memory_type,
                 memory.episode_id,
                 event_date,
+                memory.category.as_str(),
             ],
         )?;
 
@@ -1656,7 +1659,7 @@ fn find_by_hash_sync(
     hash: &str,
 ) -> Result<Option<Memory>, DbError> {
     let mut stmt = conn.prepare(
-        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
          FROM memories
          WHERE namespace LIKE ?1 AND hash = ?2 AND status = 'active'
          LIMIT 1",
@@ -1671,7 +1674,7 @@ fn find_by_hash_sync(
 
 fn get_memory_sync(conn: &Connection, id: &str) -> Result<Option<Memory>, DbError> {
     let mut stmt = conn.prepare(
-        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
          FROM memories WHERE id = ?1 AND status = 'active'",
     )?;
 
@@ -1944,9 +1947,10 @@ fn search_sync(
     let mut access_counts: HashMap<String, u64> = HashMap::new();
     let mut importances: HashMap<String, i32> = HashMap::new();
     let mut tiers: HashMap<String, i32> = HashMap::new();
+    let mut categories: HashMap<String, MemoryCategory> = HashMap::new();
     for id in &all_ids {
         if !timestamps.contains_key(*id) {
-            if let Some((ts, ac, imp, tier, event_date)) = get_scoring_metadata(conn, id)? {
+            if let Some((ts, ac, imp, tier, event_date, category)) = get_scoring_metadata(conn, id)? {
                 // Prefer event_date over updated_at for temporal scoring —
                 // updated_at is ingestion time (useless when all memories ingested together),
                 // event_date is when the event actually happened.
@@ -1954,6 +1958,7 @@ fn search_sync(
                 access_counts.insert((*id).clone(), ac);
                 importances.insert((*id).clone(), imp);
                 tiers.insert((*id).clone(), tier);
+                categories.insert((*id).clone(), category);
             }
         }
     }
@@ -2009,6 +2014,32 @@ fn search_sync(
 
     // Apply access frequency, importance, and tier boosts
     scorer.apply_boosts(&mut results, &access_counts, &importances, &tiers);
+
+    // Per-category temporal decay correction.
+    // The initial fuse used a single global lambda. Here we adjust scores for
+    // memories whose category implies a different decay rate.
+    // Identity memories get a boost (they should barely decay), task memories get penalized.
+    if scorer_config.temporal_weight > 0.0 {
+        let global_lambda = scorer_config.lambda;
+        for r in results.iter_mut() {
+            let cat = categories.get(&r.memory_id).copied().unwrap_or_default();
+            let cat_lambda = cat.default_lambda();
+            if (cat_lambda - global_lambda).abs() > 1e-9 {
+                if let Some(ts) = timestamps.get(&r.memory_id) {
+                    let age_hours = (now - *ts).num_seconds() as f64 / 3600.0;
+                    let age_hours = age_hours.max(0.0);
+                    let global_decay = anima_core::temporal::exponential_decay(age_hours, global_lambda);
+                    let cat_decay = anima_core::temporal::exponential_decay(age_hours, cat_lambda);
+                    // Apply the difference between category-specific and global decay
+                    if global_decay > 1e-9 {
+                        let tw = scorer_config.temporal_weight;
+                        let temporal_delta = tw * (cat_decay - global_decay);
+                        r.score = (r.score + temporal_delta).clamp(0.0, 1.0);
+                    }
+                }
+            }
+        }
+    }
 
     // Graph-aware retrieval: boost memories connected through causal/entity edges.
     // Full boost for causal queries ("why/because"), scaled down for other queries.
@@ -2147,7 +2178,7 @@ fn find_similar_sync(
         }
 
         let mut stmt = conn.prepare_cached(
-            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
              FROM memories
              WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
         )?;
@@ -2214,6 +2245,7 @@ fn list_sync(
     namespace: &Namespace,
     status: Option<&str>,
     memory_type: Option<&str>,
+    category: Option<&str>,
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<Memory>, u64), DbError> {
@@ -2231,11 +2263,15 @@ fn list_sync(
         conditions.push(format!("memory_type = ?{}", count_params.len() + 1));
         count_params.push(Box::new(mt.to_string()));
     }
+    if let Some(cat) = category {
+        conditions.push(format!("category = ?{}", count_params.len() + 1));
+        count_params.push(Box::new(cat.to_string()));
+    }
 
     let where_clause = conditions.join(" AND ");
     let count_sql = format!("SELECT COUNT(*) FROM memories WHERE {where_clause}");
     let data_sql = format!(
-        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
          FROM memories WHERE {where_clause}
          ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
         count_params.len() + 1,
@@ -2549,7 +2585,7 @@ fn access_ranking_sync(
     let ns_pattern = namespace.like_pattern();
     let order = if ascending { "ASC" } else { "DESC" };
     let sql = format!(
-        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date
+        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category
          FROM memories
          WHERE namespace LIKE ?1 AND status = 'active'
          ORDER BY access_count {order}
@@ -5259,11 +5295,11 @@ fn get_content_length(conn: &Connection, id: &str) -> Option<usize> {
 fn get_scoring_metadata(
     conn: &Connection,
     id: &str,
-) -> Result<Option<(DateTime<Utc>, u64, i32, i32, Option<DateTime<Utc>>)>, DbError> {
+) -> Result<Option<(DateTime<Utc>, u64, i32, i32, Option<DateTime<Utc>>, MemoryCategory)>, DbError> {
     let mut stmt = conn.prepare_cached(
         "SELECT updated_at, access_count, importance,
                 COALESCE(CAST(json_extract(metadata, '$.tier') AS INTEGER), 1),
-                event_date
+                event_date, category
          FROM memories WHERE id = ?1",
     )?;
     let result = stmt
@@ -5273,11 +5309,12 @@ fn get_scoring_metadata(
             let imp: i32 = row.get(2)?;
             let tier: i32 = row.get(3)?;
             let event_date_str: Option<String> = row.get(4)?;
-            Ok((ts_str, ac, imp, tier, event_date_str))
+            let cat_str: String = row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "general".to_string());
+            Ok((ts_str, ac, imp, tier, event_date_str, cat_str))
         })
         .optional()?;
 
-    Ok(result.and_then(|(ts_str, ac, imp, tier, ed_str)| {
+    Ok(result.and_then(|(ts_str, ac, imp, tier, ed_str, cat_str)| {
         DateTime::parse_from_rfc3339(&ts_str)
             .ok()
             .map(|dt| {
@@ -5293,7 +5330,8 @@ fn get_scoring_metadata(
                                 .map(|d| d.and_hms_opt(12, 0, 0).unwrap().and_utc())
                         })
                 });
-                (dt.with_timezone(&Utc), ac, imp, tier, event_date)
+                let category = MemoryCategory::from_str(&cat_str).unwrap_or_default();
+                (dt.with_timezone(&Utc), ac, imp, tier, event_date, category)
             })
     }))
 }
@@ -5310,6 +5348,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
 
     let episode_id: Option<String> = row.get::<_, Option<String>>(13).unwrap_or(None);
     let event_date: Option<String> = row.get::<_, Option<String>>(14).unwrap_or(None);
+    let category_str: String = row.get::<_, Option<String>>(15)?.unwrap_or_else(|| "general".to_string());
 
     Ok(Memory {
         id: row.get(0)?,
@@ -5333,6 +5372,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
         episode_id,
         event_date,
         hash: row.get(9)?,
+        category: MemoryCategory::from_str(&category_str).unwrap_or_default(),
     })
 }
 
@@ -5417,6 +5457,7 @@ mod tests {
             hash: content_hash(content),
             episode_id: None,
             event_date: None,
+            category: MemoryCategory::General,
         };
         insert_memory_sync(conn, &mem, embedding).unwrap();
         id
@@ -5498,7 +5539,7 @@ mod tests {
             }
             store.insert_many(&batch).await.unwrap();
 
-            let (memories, total) = store.list(&ns, Some("active"), None, 0, 50).await.unwrap();
+            let (memories, total) = store.list(&ns, Some("active"), None, None, 0, 50).await.unwrap();
             assert_eq!(total, 8);
             assert_eq!(memories.len(), 8);
         });

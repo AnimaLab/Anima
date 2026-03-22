@@ -13,6 +13,9 @@ pub struct AddMemoryRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub episode_id: Option<String>,
+    /// Semantic category: identity, preference, environment, routine, task, inferred, general.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,6 +75,9 @@ pub struct SearchRequest {
     /// ISO 8601 date filter (inclusive end, e.g. "2023-12-31").
     #[serde(default)]
     pub date_end: Option<String>,
+    /// Filter by semantic category (e.g. "identity", "preference", "environment").
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,6 +93,7 @@ pub struct SearchResultDto {
     pub metadata: Option<serde_json::Value>,
     pub tags: Vec<String>,
     pub memory_type: String,
+    pub category: String,
     pub score: f64,
     pub vector_score: Option<f64>,
     pub keyword_score: Option<f64>,
@@ -105,6 +112,7 @@ pub struct MemoryResponse {
     pub metadata: Option<serde_json::Value>,
     pub tags: Vec<String>,
     pub memory_type: String,
+    pub category: String,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -405,6 +413,7 @@ pub struct ListParams {
     pub limit: Option<usize>,
     pub status: Option<String>,
     pub memory_type: Option<String>,
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
