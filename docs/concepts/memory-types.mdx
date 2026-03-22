@@ -24,3 +24,11 @@ The highest tier. Induced memories represent broad generalizations or principles
 ## Tier Filtering
 
 When searching or using the ask endpoint, you can filter by `max_tier` to control which levels of memory are included in results. You can also filter by `memory_type` when listing memories.
+
+## Categories
+
+Each memory also has a semantic `category` (e.g. `identity`, `preference`, `routine`, `task`, `general`). Categories are orthogonal to tiers — a raw memory and a reflected memory can both be in the `preference` category. You can define custom categories in your config file.
+
+## Confidence and Source Tracking
+
+Every memory tracks its `source` (`user_stated`, `agent_observed`, `inferred`, `promoted`) and a numeric `confidence` score. Source determines the default confidence: user-stated facts start at the highest confidence, while inferred memories start lower. Confidence is used during retrieval ranking to prefer more reliable memories.

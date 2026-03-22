@@ -39,9 +39,13 @@ description: 'Search memories using hybrid, vector, or keyword modes'
   ISO 8601 date to filter memories created before this time
 </ParamField>
 
+<ParamField body="category" type="string">
+  Filter results by semantic category (e.g. `preference`, `identity`, `routine`)
+</ParamField>
+
 ## Response
 
-Returns an array of memory objects ranked by relevance, each with a `score` field.
+Returns an array of memory objects ranked by relevance, each with a `score` field. Result objects also include `category`, `confidence`, and `source`.
 
 ## Example
 

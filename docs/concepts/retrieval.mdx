@@ -43,3 +43,11 @@ Both `/api/v1/ask` and `/api/v1/chat` use an enriched retrieval pipeline that go
 5. **Score-based filtering** — drops results below 25% of the top score to reduce noise
 
 You can control search depth with `search_limit`, filter by `memory_types` and `max_tier`, and restrict by date range.
+
+## Cross-Encoder Re-Ranking
+
+After initial retrieval, the top-10 candidates are re-scored by a cross-encoder model (bge-reranker-v2-m3 INT8) to improve precision. The re-ranker is enabled by default and can be configured via the `[reranker]` section in `config.toml`. When the initial retrieval already produces high-confidence results, re-ranking is skipped to avoid unnecessary latency.
+
+## Confidence-Aware Scoring
+
+Each memory carries a `confidence` value derived from its `source`. Confidence is factored into the final ranking score so that user-stated facts are weighted higher than inferred or observed memories, all else being equal.

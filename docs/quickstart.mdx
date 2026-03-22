@@ -42,6 +42,20 @@ Smoke mode is the fastest path from clone to working API. No Ollama, no API keys
   </Step>
 </Steps>
 
+You can also specify a semantic category and source when creating a memory:
+
+```bash
+curl -X POST "$BASE_URL/api/v1/memories" \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "content": "I prefer dark mode in all my editors.",
+    "tags": ["preference"],
+    "category": "preference",
+    "source": "user_stated"
+  }'
+```
+
 That is enough to validate the core loop: write memory, search memory, inspect results.
 
 ## Full Cognitive Mode

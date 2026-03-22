@@ -27,6 +27,14 @@ description: 'Store a new memory'
   Optional episode identifier to group related memories
 </ParamField>
 
+<ParamField body="category" type="string">
+  Semantic category: `identity`, `preference`, `environment`, `routine`, `task`, `inferred`, `general`, or any custom category defined in config. Default: `"general"`
+</ParamField>
+
+<ParamField body="source" type="string">
+  How this memory was created: `user_stated`, `agent_observed`, `inferred`, `promoted`. Default: `"user_stated"`. Controls default confidence.
+</ParamField>
+
 <ParamField body="metadata" type="object">
   Arbitrary key-value metadata to attach to the memory
 </ParamField>

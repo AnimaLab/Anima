@@ -14,3 +14,30 @@ Returns the server health status. This endpoint does not require the `X-Anima-Na
   "status": "ok"
 }
 ```
+
+## GET /health/ready
+
+Deep readiness check that verifies the database, embedder, and processor are operational. Use this for orchestration and load-balancer health probes.
+
+### Response
+
+Returns `200` when all components are healthy:
+
+```json
+{
+  "status": "ready"
+}
+```
+
+Returns `503` when one or more components are unhealthy:
+
+```json
+{
+  "status": "degraded",
+  "checks": {
+    "db": "ok",
+    "embedder": "ok",
+    "processor": "unavailable"
+  }
+}
+```
