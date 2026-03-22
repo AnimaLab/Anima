@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use anima_core::memory::{content_hash, Memory, MemoryCategory, MemoryStatus};
+use anima_core::memory::{content_hash, Memory, MemoryStatus};
 use anima_core::namespace::Namespace;
 use anima_core::search::{HybridScorer, ScoredResult, ScorerConfig, SearchMode};
 use rusqlite::{params, Connection};
@@ -1570,6 +1570,7 @@ fn insert_memory_sync(
             memory.episode_id,
             event_date,
             memory.category.as_str(),
+
         ],
     )?;
 
@@ -1633,6 +1634,7 @@ fn insert_many_memories_sync(
                 memory.episode_id,
                 event_date,
                 memory.category.as_str(),
+
             ],
         )?;
 
@@ -1947,7 +1949,7 @@ fn search_sync(
     let mut access_counts: HashMap<String, u64> = HashMap::new();
     let mut importances: HashMap<String, i32> = HashMap::new();
     let mut tiers: HashMap<String, i32> = HashMap::new();
-    let mut categories: HashMap<String, MemoryCategory> = HashMap::new();
+    let mut categories: HashMap<String, String> = HashMap::new();
     for id in &all_ids {
         if !timestamps.contains_key(*id) {
             if let Some((ts, ac, imp, tier, event_date, category)) = get_scoring_metadata(conn, id)? {
@@ -2019,11 +2021,11 @@ fn search_sync(
     // The initial fuse used a single global lambda. Here we adjust scores for
     // memories whose category implies a different decay rate.
     // Identity memories get a boost (they should barely decay), task memories get penalized.
-    if scorer_config.temporal_weight > 0.0 {
+    if scorer_config.temporal_weight > 0.0 && !scorer_config.category_lambdas.is_empty() {
         let global_lambda = scorer_config.lambda;
         for r in results.iter_mut() {
-            let cat = categories.get(&r.memory_id).copied().unwrap_or_default();
-            let cat_lambda = cat.default_lambda();
+            let cat_name = categories.get(&r.memory_id).cloned().unwrap_or_else(|| "general".to_string());
+            let cat_lambda = scorer_config.category_lambdas.get(&cat_name).copied().unwrap_or(global_lambda);
             if (cat_lambda - global_lambda).abs() > 1e-9 {
                 if let Some(ts) = timestamps.get(&r.memory_id) {
                     let age_hours = (now - *ts).num_seconds() as f64 / 3600.0;
@@ -5295,7 +5297,7 @@ fn get_content_length(conn: &Connection, id: &str) -> Option<usize> {
 fn get_scoring_metadata(
     conn: &Connection,
     id: &str,
-) -> Result<Option<(DateTime<Utc>, u64, i32, i32, Option<DateTime<Utc>>, MemoryCategory)>, DbError> {
+) -> Result<Option<(DateTime<Utc>, u64, i32, i32, Option<DateTime<Utc>>, String)>, DbError> {
     let mut stmt = conn.prepare_cached(
         "SELECT updated_at, access_count, importance,
                 COALESCE(CAST(json_extract(metadata, '$.tier') AS INTEGER), 1),
@@ -5330,8 +5332,7 @@ fn get_scoring_metadata(
                                 .map(|d| d.and_hms_opt(12, 0, 0).unwrap().and_utc())
                         })
                 });
-                let category = MemoryCategory::from_str(&cat_str).unwrap_or_default();
-                (dt.with_timezone(&Utc), ac, imp, tier, event_date, category)
+                (dt.with_timezone(&Utc), ac, imp, tier, event_date, cat_str)
             })
     }))
 }
@@ -5372,7 +5373,7 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Memory> {
         episode_id,
         event_date,
         hash: row.get(9)?,
-        category: MemoryCategory::from_str(&category_str).unwrap_or_default(),
+        category: category_str,
     })
 }
 
@@ -5457,7 +5458,7 @@ mod tests {
             hash: content_hash(content),
             episode_id: None,
             event_date: None,
-            category: MemoryCategory::General,
+            category: "general".to_string(),
         };
         insert_memory_sync(conn, &mem, embedding).unwrap();
         id

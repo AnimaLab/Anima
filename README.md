@@ -136,6 +136,8 @@ Every memory has a semantic `category` that controls how fast it decays and how
 it's ranked in search. Set it on ingestion or let the reflection pipeline
 classify automatically.
 
+**Built-in categories:**
+
 | Category      | Decay half-life | Use case                                           |
 | ------------- | --------------- | -------------------------------------------------- |
 | `identity`    | ~2,888 days     | Who the user is, names, relationships              |
@@ -146,21 +148,32 @@ classify automatically.
 | `general`     | ~29 days        | Default — uncategorized memories                   |
 | `task`        | ~6 days         | Current work, temporary context                    |
 
+**Custom categories:** define your own in `config.toml` with any name and decay rate:
+
+```toml
+[categories.health]
+lambda = 0.0002    # ~144 day half-life
+
+[categories.finance]
+lambda = 0.0005    # ~58 day half-life
+```
+
 ```bash
-# Set category on ingestion
+# Set category on ingestion (built-in or custom)
 curl -X POST "$BASE_URL/api/v1/memories" \
   -H "Content-Type: application/json" \
   -H "X-Anima-Namespace: default" \
-  -d '{"content": "Gateway runs on port 18789", "category": "environment"}'
+  -d '{"content": "Blood pressure 120/80", "category": "health"}'
 
 # Filter by category
-curl "$BASE_URL/api/v1/memories?category=identity" \
+curl "$BASE_URL/api/v1/memories?category=health" \
   -H "X-Anima-Namespace: default"
 ```
 
 When the reflection pipeline extracts facts from raw memories, it auto-classifies
 each fact into the appropriate category. The MCP `memory_add` tool also accepts
-`category` as an optional parameter.
+`category` as an optional parameter. Unknown categories default to the global
+decay rate.
 
 ## Interfaces
 

@@ -32,7 +32,7 @@ server.tool(
     content: z.string().describe("The memory content to store"),
     tags: z.array(z.string()).optional().describe("Tags for categorization (e.g. ['food', 'health'])"),
     consolidate: z.boolean().optional().describe("Auto-consolidate with similar memories (default: true)"),
-    category: z.enum(["identity", "preference", "environment", "routine", "task", "inferred", "general"]).optional().describe("Semantic category — controls decay rate and ranking. identity=near-permanent, task=fast-expiring, general=default"),
+    category: z.string().optional().describe("Semantic category — controls decay rate and ranking. Built-in: identity, preference, environment, routine, task, inferred, general. Custom categories can be defined in config.toml"),
   },
   async ({ content, tags, consolidate, category }) => {
     const result = await client.addMemory(content, tags, consolidate ?? true, category);

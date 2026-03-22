@@ -1008,10 +1008,7 @@ pub async fn add_memory(
         episode_id,
         category,
     } = req;
-    let parsed_category = category
-        .as_deref()
-        .and_then(anima_core::memory::MemoryCategory::from_str)
-        .unwrap_or_default();
+    let parsed_category = category.unwrap_or_else(|| "general".to_string());
     let (content, metadata, _) = redact_content_and_metadata(&content, metadata);
 
     if content.trim().is_empty() {
@@ -1095,7 +1092,7 @@ pub async fn add_memory(
                             tags,
                             None,
                         );
-                        memory.category = parsed_category;
+                        memory.category = parsed_category.clone();
                         // Resolve episode_id for supersede path
                         memory.episode_id = episode_id.clone().or_else(|| {
                             memory.metadata.as_ref()
@@ -2524,7 +2521,7 @@ pub async fn list_memories(
                 metadata,
                 tags: m.tags,
                 memory_type: m.memory_type,
-                category: m.category.as_str().to_string(),
+                category: m.category.clone(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),
@@ -2685,7 +2682,7 @@ pub async fn top_accessed(
                 metadata,
                 tags: m.tags,
                 memory_type: m.memory_type,
-                category: m.category.as_str().to_string(),
+                category: m.category.clone(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),

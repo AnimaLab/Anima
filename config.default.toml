@@ -72,6 +72,15 @@ base_url = "http://localhost:11434/v1"
 model = "qwen3.5:4b"
 api_key = ""
 
+# Memory categories with custom decay rates (lambda).
+# Built-in defaults: identity=0.00001, preference=0.0001, environment=0.0005,
+# routine=0.0003, task=0.005, inferred=0.001, general=0.001.
+# Override any built-in or add your own:
+# [categories.health]
+# lambda = 0.0002
+# [categories.finance]
+# lambda = 0.0005
+
 # Anonymous usage telemetry. Set enabled = false to opt out.
 # Sends only: model names, memory counts, OS info, feature flags.
 # Never sends: memory content, namespace names, API keys.

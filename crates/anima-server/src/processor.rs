@@ -1418,9 +1418,7 @@ async fn process_reflection(
                 Some("reflected".to_string()),
             );
             // Set category from LLM classification (fallback to general)
-            memory.category = fact.category.as_deref()
-                .and_then(anima_core::memory::MemoryCategory::from_str)
-                .unwrap_or_default();
+            memory.category = fact.category.clone().unwrap_or_else(|| "general".to_string());
             // Inherit episode_id from source chunk (most common)
             {
                 let mut ep_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -2573,7 +2571,7 @@ mod tests {
             episode_id: None,
             event_date: None,
             hash: "h1".into(),
-            category: anima_core::memory::MemoryCategory::General,
+            category: "general".to_string(),
         };
         let newer = Memory {
             id: "b".into(),
@@ -2591,7 +2589,7 @@ mod tests {
             episode_id: None,
             event_date: None,
             hash: "h2".into(),
-            category: anima_core::memory::MemoryCategory::General,
+            category: "general".to_string(),
         };
         assert!(should_supersede(&older, &newer));
     }

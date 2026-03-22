@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -13,6 +14,37 @@ pub struct AppConfig {
     pub processor: ProcessorLlmConfig,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    /// User-defined memory categories with custom decay rates.
+    /// Keys are category names, values configure the decay lambda.
+    /// Built-in defaults (identity, preference, environment, routine, task, inferred, general)
+    /// are always available — entries here override or extend them.
+    #[serde(default)]
+    pub categories: HashMap<String, CategoryConfig>,
+}
+
+/// Configuration for a memory category.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CategoryConfig {
+    /// Temporal decay rate (lambda). Lower = slower decay.
+    /// Examples: 0.00001 (~permanent), 0.001 (~29d half-life), 0.005 (~6d half-life).
+    pub lambda: f64,
+}
+
+impl AppConfig {
+    /// Look up the decay lambda for a category.
+    /// Priority: user config > built-in defaults > global search.temporal_lambda.
+    pub fn category_lambda(&self, category: &str) -> f64 {
+        // User-defined override
+        if let Some(cfg) = self.categories.get(category) {
+            return cfg.lambda;
+        }
+        // Built-in default
+        if let Some(lambda) = anima_core::memory::builtin_category_lambda(category) {
+            return lambda;
+        }
+        // Unknown category: use global lambda
+        self.search.temporal_lambda
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -294,6 +326,7 @@ impl Default for AppConfig {
             llm: LlmServerConfig::default(),
             processor: ProcessorLlmConfig::default(),
             telemetry: TelemetryConfig::default(),
+            categories: HashMap::new(),
         }
     }
 }

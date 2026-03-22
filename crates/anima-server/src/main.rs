@@ -190,6 +190,15 @@ async fn start_server(
     consolidator: Option<Arc<Consolidator>>,
     config: &AppConfig,
 ) -> anyhow::Result<()> {
+    // Build category lambda map: built-in defaults + user overrides from config.
+    let mut category_lambdas = std::collections::HashMap::new();
+    for name in &["identity", "preference", "environment", "routine", "task", "inferred", "general"] {
+        category_lambdas.insert(name.to_string(), config.category_lambda(name));
+    }
+    for (name, cat_cfg) in &config.categories {
+        category_lambdas.insert(name.clone(), cat_cfg.lambda);
+    }
+
     let scorer_config = ScorerConfig {
         rrf_k: config.search.rrf_k,
         weight_vector: config.search.weight_vector,
@@ -204,6 +213,7 @@ async fn start_server(
         max_tier: config.search.max_tier,
         date_start: None,
         date_end: None,
+        category_lambdas,
     };
 
     // Spawn background processor for reflection/deduction
