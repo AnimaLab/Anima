@@ -309,7 +309,7 @@ fn reranker_default_top_n() -> usize { 10 }
 impl Default for RerankerConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             model_dir: reranker_default_model_dir(),
             model_url: reranker_default_model_url(),
             tokenizer_url: reranker_default_tokenizer_url(),

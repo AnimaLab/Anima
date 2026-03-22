@@ -76,7 +76,7 @@ api_key = ""
 # Downloads bge-reranker-v2-m3 INT8 (571MB) on first use.
 # Disabled by default — enable for better natural language query results.
 [reranker]
-enabled = false
+enabled = true
 model_dir = "./models/bge-reranker-v2-m3"
 model_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/onnx/model_int8.onnx"
 tokenizer_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/tokenizer.json"

@@ -179,23 +179,16 @@ decay rate.
 
 ## Re-ranking
 
-Anima supports an optional cross-encoder re-ranker that dramatically improves
-retrieval quality for natural language queries. Disabled by default — enable it
-in `config.toml`:
-
-```toml
-[reranker]
-enabled = true
-```
-
-On first startup with re-ranking enabled, Anima downloads
+Anima includes a cross-encoder re-ranker that dramatically improves retrieval
+quality for natural language queries. Enabled by default. On first startup Anima
+downloads
 [bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) INT8
 (571 MB). The re-ranker scores the top candidates from the initial retrieval
 pass using a cross-encoder that sees query and document together, catching
 paraphrases and semantic matches that embedding similarity alone misses.
 
-**Performance:** high-confidence queries skip the re-ranker (~55ms). Ambiguous
-queries use it (~200ms). Average across mixed workloads: ~160ms.
+Performance: high-confidence queries skip the re-ranker (about 55ms). Ambiguous
+queries use it (about 200ms). Average across mixed workloads is around 160ms.
 
 Tune `top_n` (default 10) to trade latency for quality — fewer candidates =
 faster, more = better ordering.
