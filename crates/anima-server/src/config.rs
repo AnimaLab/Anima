@@ -28,9 +28,27 @@ pub struct AppConfig {
 /// Configuration for a memory category.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CategoryConfig {
-    /// Temporal decay rate (lambda). Lower = slower decay.
-    /// Examples: 0.00001 (~permanent), 0.001 (~29d half-life), 0.005 (~6d half-life).
-    pub lambda: f64,
+    /// Half-life in days. After this many days, a memory's temporal score drops to 50%.
+    /// Examples: 3000 (near-permanent), 29 (default), 6 (fast-expiring task).
+    /// Takes priority over `lambda` if both are set.
+    #[serde(default)]
+    pub half_life_days: Option<f64>,
+    /// Raw decay rate (advanced). Most users should use `half_life_days` instead.
+    #[serde(default)]
+    pub lambda: Option<f64>,
+}
+
+impl CategoryConfig {
+    /// Resolve to a lambda value. half_life_days takes priority.
+    pub fn resolve_lambda(&self) -> Option<f64> {
+        if let Some(days) = self.half_life_days {
+            if days > 0.0 {
+                // lambda = ln(2) / (days * 24 hours)
+                return Some(std::f64::consts::LN_2 / (days * 24.0));
+            }
+        }
+        self.lambda
+    }
 }
 
 impl AppConfig {
@@ -39,7 +57,9 @@ impl AppConfig {
     pub fn category_lambda(&self, category: &str) -> f64 {
         // User-defined override
         if let Some(cfg) = self.categories.get(category) {
-            return cfg.lambda;
+            if let Some(lambda) = cfg.resolve_lambda() {
+                return lambda;
+            }
         }
         // Built-in default
         if let Some(lambda) = anima_core::memory::builtin_category_lambda(category) {

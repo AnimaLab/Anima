@@ -83,14 +83,17 @@ tokenizer_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/r
 max_length = 512
 top_n = 10
 
-# Memory categories with custom decay rates (lambda).
-# Built-in defaults: identity=0.00001, preference=0.0001, environment=0.0005,
-# routine=0.0003, task=0.005, inferred=0.001, general=0.001.
+# Memory categories with custom decay rates.
+# Use half_life_days — after that many days, a memory's temporal score drops to 50%.
+# Built-in defaults: identity=2888d, preference=289d, environment=58d,
+# routine=96d, task=6d, inferred=29d, general=29d.
 # Override any built-in or add your own:
 # [categories.health]
-# lambda = 0.0002
+# half_life_days = 144
 # [categories.finance]
-# lambda = 0.0005
+# half_life_days = 58
+# [categories.task]
+# half_life_days = 3     # override built-in: expire tasks faster
 
 # Anonymous usage telemetry. Set enabled = false to opt out.
 # Sends only: model names, memory counts, OS info, feature flags.

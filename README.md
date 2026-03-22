@@ -150,14 +150,14 @@ classify automatically.
 | `general`     | ~29 days        | Default — uncategorized memories                   |
 | `task`        | ~6 days         | Current work, temporary context                    |
 
-**Custom categories:** define your own in `config.toml` with any name and decay rate:
+**Custom categories:** define your own in `config.toml` with a name and half-life:
 
 ```toml
 [categories.health]
-lambda = 0.0002    # ~144 day half-life
+half_life_days = 144   # temporal score drops to 50% after 144 days
 
 [categories.finance]
-lambda = 0.0005    # ~58 day half-life
+half_life_days = 58
 ```
 
 ```bash

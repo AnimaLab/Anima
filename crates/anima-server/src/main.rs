@@ -196,7 +196,9 @@ async fn start_server(
         category_lambdas.insert(name.to_string(), config.category_lambda(name));
     }
     for (name, cat_cfg) in &config.categories {
-        category_lambdas.insert(name.clone(), cat_cfg.lambda);
+        if let Some(lambda) = cat_cfg.resolve_lambda() {
+            category_lambdas.insert(name.clone(), lambda);
+        }
     }
 
     let scorer_config = ScorerConfig {
