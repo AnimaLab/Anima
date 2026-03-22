@@ -65,6 +65,14 @@ pub struct Memory {
     /// User-defined categories are allowed — decay rate looked up from config.
     #[serde(default = "default_category")]
     pub category: String,
+    /// Confidence score (0.0–1.0). Higher = more trustworthy.
+    /// Default depends on source: user_stated=1.0, agent_observed=0.7, inferred=0.5.
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    /// How this memory was created. Controls default confidence and update policy.
+    /// Values: "user_stated", "agent_observed", "inferred", "promoted", "reflected", "deduced", "induced".
+    #[serde(default = "default_source")]
+    pub source: String,
 }
 
 impl Memory {
@@ -96,12 +104,36 @@ impl Memory {
             event_date: None,
             hash,
             category: "general".to_string(),
+            confidence: 1.0,
+            source: "user_stated".to_string(),
         }
     }
 }
 
 fn default_category() -> String {
     "general".to_string()
+}
+
+fn default_confidence() -> f64 {
+    1.0
+}
+
+fn default_source() -> String {
+    "user_stated".to_string()
+}
+
+/// Default confidence for a given source type.
+pub fn default_confidence_for_source(source: &str) -> f64 {
+    match source {
+        "user_stated" => 1.0,
+        "promoted" => 0.8,
+        "agent_observed" => 0.7,
+        "reflected" => 0.6,   // calibrated by pipeline, this is a floor
+        "deduced" => 0.5,
+        "induced" => 0.5,
+        "inferred" => 0.5,
+        _ => 0.5,
+    }
 }
 
 /// SHA-256 hash of lowercase, trimmed content for dedup

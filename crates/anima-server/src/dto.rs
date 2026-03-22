@@ -16,6 +16,9 @@ pub struct AddMemoryRequest {
     /// Semantic category: identity, preference, environment, routine, task, inferred, general.
     #[serde(default)]
     pub category: Option<String>,
+    /// How this memory was created: user_stated, agent_observed, inferred, promoted.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,6 +97,8 @@ pub struct SearchResultDto {
     pub tags: Vec<String>,
     pub memory_type: String,
     pub category: String,
+    pub confidence: f64,
+    pub source: String,
     pub score: f64,
     pub vector_score: Option<f64>,
     pub keyword_score: Option<f64>,
@@ -113,6 +118,8 @@ pub struct MemoryResponse {
     pub tags: Vec<String>,
     pub memory_type: String,
     pub category: String,
+    pub confidence: f64,
+    pub source: String,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,

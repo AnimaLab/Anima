@@ -34,7 +34,7 @@ temporal_lambda = 0.001
 similarity_threshold = 0.85
 # Minimum cosine similarity for vector search results.
 # Tune this per embedding model and domain to filter noise.
-min_vector_similarity = 0.55
+min_vector_similarity = 0.40
 # Minimum spread between best and worst vector scores to accept results.
 # Set to 0 to disable.
 min_score_spread = 0.0
@@ -71,6 +71,17 @@ enabled = true
 base_url = "http://localhost:11434/v1"
 model = "qwen3.5:4b"
 api_key = ""
+
+# Cross-encoder re-ranker for improved retrieval quality.
+# Downloads bge-reranker-v2-m3 INT8 (571MB) on first use.
+# Disabled by default — enable for better natural language query results.
+[reranker]
+enabled = false
+model_dir = "./models/bge-reranker-v2-m3"
+model_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/onnx/model_int8.onnx"
+tokenizer_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/tokenizer.json"
+max_length = 512
+top_n = 10
 
 # Memory categories with custom decay rates (lambda).
 # Built-in defaults: identity=0.00001, preference=0.0001, environment=0.0005,

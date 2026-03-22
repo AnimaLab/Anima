@@ -1007,8 +1007,11 @@ pub async fn add_memory(
         tags,
         episode_id,
         category,
+        source,
     } = req;
     let parsed_category = category.unwrap_or_else(|| "general".to_string());
+    let parsed_source = source.filter(|s| !s.is_empty()).unwrap_or_else(|| "user_stated".to_string());
+    let source_confidence = anima_core::memory::default_confidence_for_source(&parsed_source);
     let (content, metadata, _) = redact_content_and_metadata(&content, metadata);
 
     if content.trim().is_empty() {
@@ -1093,6 +1096,8 @@ pub async fn add_memory(
                             None,
                         );
                         memory.category = parsed_category.clone();
+        memory.confidence = source_confidence;
+        memory.source = parsed_source.clone();
                         // Resolve episode_id for supersede path
                         memory.episode_id = episode_id.clone().or_else(|| {
                             memory.metadata.as_ref()
@@ -1158,6 +1163,8 @@ pub async fn add_memory(
     let mut memory = Memory::new(ns.as_str().to_string(), final_content, metadata, tags, None);
     memory.episode_id = resolved_episode;
     memory.category = parsed_category;
+    memory.confidence = source_confidence;
+    memory.source = parsed_source;
     let id = memory.id.clone();
     state.store.insert(&memory, &final_embedding).await?;
     state.record_ingestion(1);
@@ -1273,11 +1280,50 @@ pub async fn search_memories(
     scorer_config.date_start = req.date_start;
     scorer_config.date_end = req.date_end;
 
-    // Search
-    let scored = state
+    // Search — fetch more candidates if reranker is enabled so it has room to reorder
+    let reranker_top_n = state.config.reranker.top_n;
+    let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
+    let mut scored = state
         .store
-        .search(&embedding, &req.query, &ns, &mode, limit, &scorer_config)
+        .search(&embedding, &req.query, &ns, &mode, fetch_limit, &scorer_config)
         .await?;
+
+    // Re-rank with cross-encoder if enabled.
+    // Skip if the top result is already high-confidence (> 0.7 from initial retrieval)
+    // — the reranker won't meaningfully change the ordering.
+    let skip_rerank = scored.first().map_or(false, |r| r.score > 0.50);
+    if let Some(ref reranker) = state.reranker {
+        let top_n = reranker_top_n.min(scored.len());
+        if top_n > 0 && !skip_rerank {
+            // Fetch content for top-N candidates
+            let mut contents: Vec<String> = Vec::with_capacity(top_n);
+            for sr in scored.iter().take(top_n) {
+                let content = state.store.get(&sr.memory_id).await?
+                    .map(|m| m.content)
+                    .unwrap_or_default();
+                contents.push(content);
+            }
+            let doc_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
+            match reranker.score_pairs(&req.query, &doc_refs) {
+                Ok(rerank_scores) => {
+                    // Replace scores for re-ranked candidates, keep original order for the rest
+                    for (i, score) in rerank_scores.iter().enumerate() {
+                        if i < scored.len() {
+                            scored[i].score = *score;
+                        }
+                    }
+                    // Re-sort by new scores
+                    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                }
+                Err(e) => {
+                    tracing::warn!(domain = "reranker", "Reranker failed, using original scores: {e}");
+                }
+            }
+        }
+    }
+
+    // Trim to requested limit
+    scored.truncate(limit);
 
     // Fetch full memory data for results
     let mut results = Vec::with_capacity(scored.len());
@@ -1291,7 +1337,9 @@ pub async fn search_memories(
                 metadata,
                 tags: memory.tags,
                 memory_type: memory.memory_type,
-                category: memory.category.as_str().to_string(),
+                category: memory.category.clone(),
+                confidence: memory.confidence,
+                source: memory.source.clone(),
                 score: sr.score,
                 vector_score: sr.vector_score,
                 keyword_score: sr.keyword_score,
@@ -1335,7 +1383,9 @@ pub async fn get_memory(
         metadata,
         tags: memory.tags,
         memory_type: memory.memory_type,
-        category: memory.category.as_str().to_string(),
+        category: memory.category.clone(),
+        confidence: memory.confidence,
+        source: memory.source.clone(),
         status: memory.status.as_str().to_string(),
         created_at: memory.created_at.to_rfc3339(),
         updated_at: memory.updated_at.to_rfc3339(),
@@ -2522,6 +2572,8 @@ pub async fn list_memories(
                 tags: m.tags,
                 memory_type: m.memory_type,
                 category: m.category.clone(),
+                confidence: m.confidence,
+                source: m.source.clone(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),
@@ -2683,6 +2735,8 @@ pub async fn top_accessed(
                 tags: m.tags,
                 memory_type: m.memory_type,
                 category: m.category.clone(),
+                confidence: m.confidence,
+                source: m.source.clone(),
                 status: m.status.as_str().to_string(),
                 created_at: m.created_at.to_rfc3339(),
                 updated_at: m.updated_at.to_rfc3339(),

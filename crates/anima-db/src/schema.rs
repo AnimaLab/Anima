@@ -82,6 +82,16 @@ pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general';",
     )
     .ok();
+
+    // Add confidence + source columns for trust tracking (idempotent migration)
+    conn.execute_batch(
+        "ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0;",
+    )
+    .ok();
+    conn.execute_batch(
+        "ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'user_stated';",
+    )
+    .ok();
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(namespace, category);",
     )?;

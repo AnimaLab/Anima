@@ -1,6 +1,7 @@
 pub mod download;
 pub mod model;
 pub mod openai;
+pub mod reranker;
 
 /// Trait for embedding models. Implemented by both local ONNX models
 /// and remote API-based embedders (e.g. OpenAI text-embedding-3-small).

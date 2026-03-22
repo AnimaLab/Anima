@@ -30,6 +30,7 @@ pub struct AppState {
     pub consolidator: Option<Arc<Consolidator>>,
     pub processor: Option<BackgroundProcessor>,
     pub scorer_config: ScorerConfig,
+    pub reranker: Option<Arc<anima_embed::reranker::Reranker>>,
     pub config: AppConfig,
     /// Ingestion tracking
     pub ingested_count: AtomicU64,

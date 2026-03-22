@@ -216,6 +216,36 @@ async fn start_server(
         category_lambdas,
     };
 
+    // Load cross-encoder re-ranker (optional)
+    let reranker = if config.reranker.enabled {
+        let model_dir = std::path::Path::new(&config.reranker.model_dir);
+        let (model_path, tokenizer_path) = anima_embed::download::ensure_model_files(
+            model_dir,
+            &config.reranker.model_url,
+            &config.reranker.tokenizer_url,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(domain = "reranker", "Failed to download reranker model: {e}");
+            e
+        })?;
+        tracing::info!("Loading reranker model from {}", model_path.display());
+        let rr = anima_embed::reranker::Reranker::load(
+            &model_path,
+            &tokenizer_path,
+            config.reranker.max_length,
+        )
+        .map_err(|e| {
+            tracing::error!(domain = "reranker", "Failed to load reranker model: {e}");
+            anyhow::anyhow!("reranker load failed: {e}")
+        })?;
+        tracing::info!(domain = "reranker", "Reranker loaded (max_length={}, top_n={})", config.reranker.max_length, config.reranker.top_n);
+        Some(Arc::new(rr))
+    } else {
+        tracing::info!("Reranker disabled");
+        None
+    };
+
     // Spawn background processor for reflection/deduction
     let bg_processor = if config.processor.enabled {
         let api_key = config.processor.resolve_api_key();
@@ -275,6 +305,7 @@ async fn start_server(
         consolidator,
         processor: bg_processor,
         scorer_config,
+        reranker,
         telemetry_enabled: std::sync::atomic::AtomicBool::new(config.telemetry.enabled),
         telemetry_feature_flags: tokio::sync::RwLock::new(telemetry::FeatureFlags::default()),
         config: config.clone(),

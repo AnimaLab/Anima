@@ -14,6 +14,9 @@ pub struct AppConfig {
     pub processor: ProcessorLlmConfig,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    /// Cross-encoder re-ranker for improved retrieval quality.
+    #[serde(default)]
+    pub reranker: RerankerConfig,
     /// User-defined memory categories with custom decay rates.
     /// Keys are category names, values configure the decay lambda.
     /// Built-in defaults (identity, preference, environment, routine, task, inferred, general)
@@ -274,6 +277,48 @@ impl Default for TelemetryConfig {
     }
 }
 
+/// Cross-encoder re-ranker configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RerankerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "reranker_default_model_dir")]
+    pub model_dir: String,
+    #[serde(default = "reranker_default_model_url")]
+    pub model_url: String,
+    #[serde(default = "reranker_default_tokenizer_url")]
+    pub tokenizer_url: String,
+    /// Max tokens per (query + document) pair. Default 512.
+    #[serde(default = "reranker_default_max_length")]
+    pub max_length: usize,
+    /// Max candidate pairs to re-rank. Default 15.
+    #[serde(default = "reranker_default_top_n")]
+    pub top_n: usize,
+}
+
+fn reranker_default_model_dir() -> String { "./models/bge-reranker-v2-m3".into() }
+fn reranker_default_model_url() -> String {
+    "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/onnx/model_int8.onnx".into()
+}
+fn reranker_default_tokenizer_url() -> String {
+    "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/tokenizer.json".into()
+}
+fn reranker_default_max_length() -> usize { 512 }
+fn reranker_default_top_n() -> usize { 10 }
+
+impl Default for RerankerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model_dir: reranker_default_model_dir(),
+            model_url: reranker_default_model_url(),
+            tokenizer_url: reranker_default_tokenizer_url(),
+            max_length: reranker_default_max_length(),
+            top_n: reranker_default_top_n(),
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -326,6 +371,7 @@ impl Default for AppConfig {
             llm: LlmServerConfig::default(),
             processor: ProcessorLlmConfig::default(),
             telemetry: TelemetryConfig::default(),
+            reranker: RerankerConfig::default(),
             categories: HashMap::new(),
         }
     }

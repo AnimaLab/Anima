@@ -1210,6 +1210,21 @@ async fn process_reconsolidation(
                             Some("reconsolidation duplicate or near-duplicate"),
                         )
                         .await;
+                    // Log to contradiction ledger for auditability
+                    let _ = store
+                        .record_contradiction_resolution(
+                            &ns,
+                            &existing.id,
+                            &newer.id,
+                            "reconsolidation_supersede",
+                            Some(serde_json::json!({
+                                "old_content": existing.content,
+                                "new_content": newer.content,
+                                "old_confidence": existing.confidence,
+                                "new_confidence": newer.confidence,
+                            })),
+                        )
+                        .await;
                 }
             }
         }
@@ -1419,6 +1434,9 @@ async fn process_reflection(
             );
             // Set category from LLM classification (fallback to general)
             memory.category = fact.category.clone().unwrap_or_else(|| "general".to_string());
+            // Set confidence from calibrated value and source as "reflected"
+            memory.confidence = calibrated_conf;
+            memory.source = "reflected".to_string();
             // Inherit episode_id from source chunk (most common)
             {
                 let mut ep_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -2032,13 +2050,15 @@ async fn process_deduction(
                 "effect_ids": deduction.effect_ids,
             });
 
-            let memory = Memory::new(
+            let mut memory = Memory::new(
                 namespace.to_string(),
                 deduction.content.clone(),
                 Some(metadata),
                 vec!["deduced".to_string()],
                 Some("deduced".to_string()),
             );
+            memory.confidence = calibrated_conf;
+            memory.source = "deduced".to_string();
             pending_memories.push(memory);
         }
 
@@ -2452,13 +2472,15 @@ async fn process_induction(
             "facts_used_count": facts_used_count,
         });
 
-        let memory = Memory::new(
+        let mut memory = Memory::new(
             namespace.to_string(),
             pattern.content.clone(),
             Some(metadata),
             vec!["induced".to_string()],
             Some("induced".to_string()),
         );
+        memory.confidence = calibrated_conf;
+        memory.source = "induced".to_string();
         pending_memories.push(memory);
     }
 
@@ -2572,6 +2594,8 @@ mod tests {
             event_date: None,
             hash: "h1".into(),
             category: "general".to_string(),
+            confidence: 1.0,
+            source: "user_stated".to_string(),
         };
         let newer = Memory {
             id: "b".into(),
@@ -2590,6 +2614,8 @@ mod tests {
             event_date: None,
             hash: "h2".into(),
             category: "general".to_string(),
+            confidence: 1.0,
+            source: "user_stated".to_string(),
         };
         assert!(should_supersede(&older, &newer));
     }

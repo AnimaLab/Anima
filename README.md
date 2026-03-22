@@ -55,6 +55,8 @@ part of the repo.
 | ------------------------- | ------- | ---------------------------------------------------------- |
 | Persistent memory API     | Shipped | Add, search, list, update, merge, and delete memories      |
 | Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking                        |
+| Cross-encoder re-ranking  | Shipped | Optional bge-reranker-v2-m3 for better natural language    |
+| Confidence + source       | Shipped | Per-memory trust scoring and provenance tracking           |
 | Typed memory categories   | Shipped | Per-category decay rates and filtering                     |
 | Revisions and audit trail | Shipped | Revision history, rollback, and audit events               |
 | Namespace isolation       | Shipped | `X-Anima-Namespace` plus namespace ACL support             |
@@ -174,6 +176,55 @@ When the reflection pipeline extracts facts from raw memories, it auto-classifie
 each fact into the appropriate category. The MCP `memory_add` tool also accepts
 `category` as an optional parameter. Unknown categories default to the global
 decay rate.
+
+## Re-ranking
+
+Anima supports an optional cross-encoder re-ranker that dramatically improves
+retrieval quality for natural language queries. Disabled by default — enable it
+in `config.toml`:
+
+```toml
+[reranker]
+enabled = true
+```
+
+On first startup with re-ranking enabled, Anima downloads
+[bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) INT8
+(571 MB). The re-ranker scores the top candidates from the initial retrieval
+pass using a cross-encoder that sees query and document together, catching
+paraphrases and semantic matches that embedding similarity alone misses.
+
+**Performance:** high-confidence queries skip the re-ranker (~55ms). Ambiguous
+queries use it (~200ms). Average across mixed workloads: ~160ms.
+
+Tune `top_n` (default 10) to trade latency for quality — fewer candidates =
+faster, more = better ordering.
+
+## Confidence and Source Tracking
+
+Every memory has a `confidence` score (0.0–1.0) and a `source` field that
+tracks how it was created. Confidence affects search ranking — higher-confidence
+memories score higher for the same relevance.
+
+| Source | Default confidence | When used |
+| -------------- | ----------------- | ---------------------------------------- |
+| `user_stated` | 1.0 | User explicitly provided this fact |
+| `promoted` | 0.8 | Promoted from agent working memory |
+| `agent_observed`| 0.7 | Agent noticed this from behavior |
+| `reflected` | 0.6 (calibrated) | Extracted by the reflection pipeline |
+| `deduced` | 0.5 (calibrated) | Inferred by combining reflected facts |
+| `inferred` | 0.5 | General inference, not user-confirmed |
+
+```bash
+# Store with explicit source
+curl -X POST "$BASE_URL/api/v1/memories" \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"content": "User seems to prefer dark mode", "source": "agent_observed"}'
+```
+
+When one memory supersedes another (via correction or reconsolidation), the
+conflict is logged in the contradiction ledger for auditability.
 
 ## Interfaces
 
