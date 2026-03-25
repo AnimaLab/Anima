@@ -117,7 +117,10 @@ impl AppState {
 
 /// Build the Axum router.
 pub fn build_router(state: Arc<AppState>) -> Router {
-    let spa = ServeDir::new("web/dist").not_found_service(ServeFile::new("web/dist/index.html"));
+    // SPA fallback: serve index.html for all non-API routes (client-side routing).
+    // ServeDir.not_found_service preserves a 404 status which causes console errors,
+    // so we use fallback_service directly with ServeFile which returns 200.
+    let spa = ServeDir::new("web/dist").fallback(ServeFile::new("web/dist/index.html"));
 
     Router::new()
         .route("/health", get(handlers::health))
