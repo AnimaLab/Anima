@@ -1,6 +1,6 @@
 ---
 title: 'Search Memories'
-description: 'Search memories using hybrid, vector, or keyword modes'
+description: 'Search memories using hybrid, vector, keyword, or ask-retrieval modes'
 ---
 
 ## POST /api/v1/memories/search
@@ -16,19 +16,25 @@ description: 'Search memories using hybrid, vector, or keyword modes'
 </ParamField>
 
 <ParamField body="limit" type="integer" default="10">
-  Maximum number of results
+  Maximum number of results (1-100)
 </ParamField>
 
 <ParamField body="search_mode" type="string" default="hybrid">
-  Search strategy: `hybrid`, `vector`, or `keyword`
+  Search strategy: `hybrid`, `vector`, `keyword`, or `ask_retrieval`.
+
+  `ask_retrieval` runs the full `/ask` multi-stage pipeline (keyword expansion, entity resolution, temporal supplement, episode expansion, entity-linked retrieval) but returns ranked search results instead of an LLM-generated answer.
+</ParamField>
+
+<ParamField body="query_rewrite" type="boolean" default="false">
+  Enable query rewriting. Extracts keywords from the query and runs expanded searches, merging results with the original. Works with `hybrid`, `vector`, and `keyword` modes.
 </ParamField>
 
 <ParamField body="temporal_weight" type="number">
-  Weight for temporal (recency) ranking signal
+  Override the temporal (recency) ranking weight (0.0-1.0)
 </ParamField>
 
-<ParamField body="max_tier" type="string">
-  Maximum memory tier to include: `raw`, `reflected`, `deduced`, or `induced`
+<ParamField body="max_tier" type="integer">
+  Maximum memory tier to include (1=raw, 2=+reflected, 3=+deduced, 4=all)
 </ParamField>
 
 <ParamField body="date_start" type="string">
@@ -45,17 +51,30 @@ description: 'Search memories using hybrid, vector, or keyword modes'
 
 ## Response
 
-Returns an array of memory objects ranked by relevance, each with a `score` field. Result objects also include `category`, `confidence`, and `source`.
+Returns an object with `results` (array of memory objects ranked by relevance) and `query_time_ms`. Each result includes `score`, `vector_score`, `keyword_score`, `temporal_score`, `category`, `confidence`, and `source`.
 
-## Example
+## Examples
 
 ```bash
+# Standard hybrid search
 curl -X POST http://localhost:3000/api/v1/memories/search \
   -H "Content-Type: application/json" \
   -H "X-Anima-Namespace: default" \
-  -d '{
-    "query": "What does the user like to do on weekends?",
-    "search_mode": "hybrid",
-    "limit": 5
-  }'
+  -d '{"query": "weekend plans", "limit": 5}'
+```
+
+```bash
+# Ask-grade retrieval without LLM
+curl -X POST http://localhost:3000/api/v1/memories/search \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"query": "What does the user like to eat?", "search_mode": "ask_retrieval", "limit": 10}'
+```
+
+```bash
+# Keyword-expanded search
+curl -X POST http://localhost:3000/api/v1/memories/search \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"query": "hiking trip last summer", "query_rewrite": true, "limit": 10}'
 ```

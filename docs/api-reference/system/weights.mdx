@@ -1,0 +1,25 @@
+---
+title: 'Hybrid Weights'
+description: 'Get current hybrid search weights (auto-tuned from observations)'
+---
+
+## GET /api/v1/calibration/weights
+
+Returns the current hybrid search weights (`weight_vector` and `weight_keyword`). These may differ from the config values if the auto-tuner has adjusted them based on calibration observations.
+
+## Response
+
+```json
+{
+  "weight_vector": 0.62,
+  "weight_keyword": 0.38
+}
+```
+
+The auto-tuner runs every 5 minutes and adjusts weights based on which source (vector vs keyword) correlates more with positive retrieval outcomes. Changes are only applied if the shift exceeds 5%. Both weights have a floor of 0.1.
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/calibration/weights
+```

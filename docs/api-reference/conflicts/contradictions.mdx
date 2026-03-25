@@ -1,0 +1,39 @@
+---
+title: 'List Contradictions'
+description: 'List contradiction ledger entries for the namespace'
+---
+
+## GET /api/v1/contradictions
+
+Returns contradiction ledger entries — records of when one memory superseded another via correction or reconsolidation.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum entries to return (1-500)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Pagination offset
+</ParamField>
+
+## Response
+
+Array of contradiction entries, each with:
+
+- `id` — unique entry ID
+- `old_memory_id` — the superseded memory
+- `new_memory_id` — the superseding memory
+- `resolution` — how the conflict was resolved (`user_correction_supersede`, `reconsolidation_supersede`)
+- `old_content` — content of the old memory (if still in DB)
+- `new_content` — content of the new memory
+- `created_at` — when the resolution happened
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/contradictions?limit=10 \
+  -H "X-Anima-Namespace: default"
+```

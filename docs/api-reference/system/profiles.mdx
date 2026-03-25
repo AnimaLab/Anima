@@ -1,0 +1,43 @@
+---
+title: 'Profiles'
+description: 'Get resolved LLM provider profiles and operation routing'
+---
+
+## GET /api/v1/profiles
+
+Returns the server's resolved LLM provider profiles and which profile each operation uses. API keys are masked.
+
+## Response
+
+```json
+{
+  "profiles": {
+    "fast": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen3.5:4b",
+      "has_api_key": false
+    },
+    "strong": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen3:32b",
+      "has_api_key": false
+    }
+  },
+  "routing": {
+    "ask": "strong",
+    "chat": "fast",
+    "processor": "fast",
+    "consolidation": "fast"
+  }
+}
+```
+
+When no `[profiles]` section is configured, profiles are synthesized from the legacy `[llm]`, `[processor]`, and `[consolidation]` config sections.
+
+See [Provider Profiles](/concepts/profiles) for configuration details.
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/profiles
+```

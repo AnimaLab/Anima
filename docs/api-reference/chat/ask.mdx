@@ -15,41 +15,63 @@ description: 'Ask a question with enriched memory retrieval'
   The question to answer
 </ParamField>
 
-<ParamField body="llm" type="string">
-  Optional LLM override
-</ParamField>
-
-<ParamField body="search_limit" type="integer" default="30">
-  Maximum number of memories to search
+<ParamField body="llm" type="object">
+  Optional LLM override (`base_url`, `model`, `api_key`, `temperature`, `max_tokens`). Overrides the server profile for this request.
 </ParamField>
 
 <ParamField body="max_results" type="integer" default="30">
   Maximum number of results to return
 </ParamField>
 
-<ParamField body="skip_llm" type="boolean">
+<ParamField body="skip_llm" type="boolean" default="false">
   If true, return retrieved memories without LLM synthesis
 </ParamField>
 
 <ParamField body="memory_types" type="string[]">
-  Filter by memory types: `raw`, `reflected`, `deduced`, `induced`
+  Filter by memory types (e.g. `["fact", "event", "preference"]`)
 </ParamField>
 
-<ParamField body="max_tier" type="string">
-  Maximum memory tier to include
+<ParamField body="max_tier" type="integer">
+  Maximum memory tier to include (1=raw, 2=+reflected, 3=+deduced, 4=all)
 </ParamField>
 
 <ParamField body="date_start" type="string">
-  ISO 8601 date filter (after)
+  ISO 8601 date filter (inclusive start)
 </ParamField>
 
 <ParamField body="date_end" type="string">
-  ISO 8601 date filter (before)
+  ISO 8601 date filter (inclusive end)
 </ParamField>
 
 ## Response
 
-Returns an object with `answer` (the synthesized response) and `memories` (the retrieved memories used to generate it).
+<ResponseField name="answer" type="string">
+  The synthesized answer from retrieved memories. When the LLM is unavailable, contains a numbered list of top retrieval results.
+</ResponseField>
+
+<ResponseField name="memories_referenced" type="array">
+  Memories used to generate the answer, with `id`, `content`, `memory_type`, `score`, and `created_at`.
+</ResponseField>
+
+<ResponseField name="conflicts" type="array">
+  Detected conflicts among retrieved memories. Each entry shows old vs new content when a memory was superseded. Includes `memory_id`, `conflicting_memory_id`, `old_content`, `new_content`, `resolution`, and `resolved_at`.
+</ResponseField>
+
+<ResponseField name="needs_confirmation" type="array">
+  Deduced facts or ambiguous identities that need user confirmation.
+</ResponseField>
+
+<ResponseField name="degraded" type="boolean">
+  `true` when the LLM backend was unavailable and the response was built from retrieval results only.
+</ResponseField>
+
+<ResponseField name="total_search_results" type="integer">
+  Total number of memories found before truncation.
+</ResponseField>
+
+<ResponseField name="elapsed_ms" type="number">
+  Time taken in milliseconds.
+</ResponseField>
 
 ## Example
 
@@ -57,8 +79,9 @@ Returns an object with `answer` (the synthesized response) and `memories` (the r
 curl -X POST http://localhost:3000/api/v1/ask \
   -H "Content-Type: application/json" \
   -H "X-Anima-Namespace: default" \
-  -d '{
-    "question": "What are the user'\''s weekend preferences?",
-    "search_limit": 10
-  }'
+  -d '{"question": "What are the user'\''s weekend preferences?"}'
 ```
+
+## Graceful Degradation
+
+When the LLM backend is unavailable, `/ask` does not fail — it returns the retrieval results directly as a numbered list in the `answer` field, with `"degraded": true`. The `memories_referenced` and `conflicts` arrays are still populated normally.

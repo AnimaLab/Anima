@@ -25,6 +25,7 @@
             "pages": [
               "concepts/memory-types",
               "concepts/retrieval",
+              "concepts/profiles",
               "concepts/namespaces"
             ]
           },
@@ -75,6 +76,13 @@
             ]
           },
           {
+            "group": "Conflicts",
+            "pages": [
+              "api-reference/conflicts/contradictions",
+              "api-reference/conflicts/history"
+            ]
+          },
+          {
             "group": "Audit",
             "pages": [
               "api-reference/audit/events"
@@ -85,7 +93,9 @@
             "pages": [
               "api-reference/system/health",
               "api-reference/system/stats",
-              "api-reference/system/namespaces"
+              "api-reference/system/namespaces",
+              "api-reference/system/profiles",
+              "api-reference/system/weights"
             ]
           }
         ]

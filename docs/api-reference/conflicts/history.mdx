@@ -1,0 +1,37 @@
+---
+title: 'Memory History'
+description: 'Get the supersession chain for a memory'
+---
+
+## GET /api/v1/memories/\{id\}/history
+
+Returns the full supersession chain for a memory — walks backward to the earliest ancestor, then forward through all successors.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID to trace
+</ParamField>
+
+## Response
+
+Ordered array of supersession links from oldest to newest. Each entry:
+
+- `memory_id` — the memory's ID
+- `content` — its content
+- `status` — `active` or `superseded`
+- `superseded_by` — ID of the memory that replaced this one (null if current)
+- `confidence` — confidence score at time of creation
+- `source` — how it was created (`user_stated`, `reflected`, etc.)
+- `created_at` — timestamp
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/memories/01JXYZ.../history \
+  -H "X-Anima-Namespace: default"
+```
+
+The chain shows the evolution of a fact over time — useful for understanding why the current version says what it does.

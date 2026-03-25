@@ -1,0 +1,72 @@
+---
+title: 'Provider Profiles'
+description: 'Use different models for different operations'
+---
+
+Provider profiles let you define named LLM endpoints and route each operation to the right one. Use a fast local model for chat, a strong model for `/ask`, and a cloud API for background processing — all from one config file.
+
+## Configuration
+
+Define profiles in `config.toml` with any names you want:
+
+```toml
+[profiles.fast]
+base_url = "http://localhost:11434/v1"
+model = "qwen3.5:4b"
+
+[profiles.strong]
+base_url = "http://localhost:11434/v1"
+model = "qwen3:32b"
+
+[profiles.cloud]
+base_url = "https://api.groq.com/openai/v1"
+model = "qwen/qwen3-32b"
+api_key = ""
+```
+
+Then route operations:
+
+```toml
+[routing]
+ask = "strong"           # /ask answer generation
+chat = "fast"            # /chat replies
+processor = "cloud"      # reflection/deduction
+consolidation = "fast"   # memory consolidation
+```
+
+## Key Behaviors
+
+- **Arbitrary names** — profile names can be anything (`fast`, `my-ollama`, `gpt4o`)
+- **Same endpoint, different models** — multiple profiles can point to the same base_url with different models
+- **Client override wins** — per-request `llm` fields in `/chat` and `/ask` still override the routed profile
+- **Backward compatible** — when `[profiles]` is absent, legacy `[llm]`, `[processor]`, and `[consolidation]` sections work unchanged
+
+## API Key Resolution
+
+Each profile resolves its API key with this priority:
+
+1. `api_key` in the profile config
+2. `{PROFILE_NAME}_API_KEY` environment variable (e.g. `CLOUD_API_KEY` for `[profiles.cloud]`)
+3. `OPENAI_API_KEY` environment variable (global fallback)
+
+Local endpoints (localhost/127.0.0.1) don't need an API key.
+
+## Inspecting Profiles
+
+```bash
+curl http://localhost:3000/api/v1/profiles
+```
+
+Returns the resolved profiles and routing table. API keys are masked (`has_api_key: true/false`).
+
+The web UI Settings page also displays server profiles when multiple are configured.
+
+## Without Profiles
+
+If you don't define `[profiles]`, the existing sections work as before:
+
+- `[llm]` — used for `/ask` and `/chat`
+- `[processor]` — used for reflection/deduction
+- `[consolidation]` — used for memory consolidation
+
+These are internally synthesized into profiles named `default`, `processor`, and `consolidation`.
