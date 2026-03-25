@@ -22,8 +22,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   }
-  if (!path.startsWith('/api/v1/namespaces') && !path.startsWith('/health') && !path.startsWith('/api/v1/telemetry')) {
-    headers['X-Anima-Namespace'] = currentNamespace
+  if (!path.startsWith('/health') && !path.startsWith('/api/v1/telemetry')) {
+    // Allow per-request override (e.g. deleteNamespace, renameNamespace pass a specific namespace)
+    if (!headers['X-Anima-Namespace']) {
+      headers['X-Anima-Namespace'] = currentNamespace
+    }
   }
   const res = await fetch(path, { ...options, headers })
   if (!res.ok) {
