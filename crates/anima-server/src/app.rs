@@ -234,7 +234,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(handlers::get_telemetry_config).put(handlers::set_telemetry_config),
         )
         .route("/api/v1/backup", get(handlers::export_backup))
-        .route("/api/v1/restore", post(handlers::import_backup))
+        .route("/api/v1/restore", post(handlers::import_backup)
+            .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
+        .route("/api/v1/restore/sqlite", post(handlers::import_backup_sqlite)
+            .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)))
         .with_state(state)
         .fallback_service(spa)
 }

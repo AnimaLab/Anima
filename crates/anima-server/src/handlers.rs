@@ -5936,3 +5936,46 @@ pub async fn import_backup(
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     }))
 }
+
+pub async fn import_backup_sqlite(
+    State(state): State<Arc<AppState>>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let db_path = state.store.db_path();
+    if db_path == ":memory:" {
+        return Err(AppError::BadRequest("cannot restore in-memory database".into()));
+    }
+
+    let file_data = body.to_vec();
+    if file_data.is_empty() {
+        return Err(AppError::BadRequest("no file data received".into()));
+    }
+
+    // Validate it's a SQLite file (magic bytes: "SQLite format 3\0")
+    if file_data.len() < 16 || &file_data[0..16] != b"SQLite format 3\0" {
+        return Err(AppError::BadRequest("uploaded file is not a valid SQLite database".into()));
+    }
+
+    // Create a backup of the current database
+    let backup_path = format!("{db_path}.pre-restore-backup");
+    std::fs::copy(db_path, &backup_path)
+        .map_err(|e| AppError::Internal(format!("failed to create pre-restore backup: {e}")))?;
+
+    // Checkpoint WAL, then write the new database
+    {
+        let conn = state.store.writer_conn().await;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| AppError::Database(format!("WAL checkpoint failed: {e}")))?;
+    }
+
+    // Write the uploaded file to the database path
+    tokio::fs::write(db_path, &file_data)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to write database file: {e}")))?;
+
+    Ok(Json(serde_json::json!({
+        "restored": true,
+        "backup_path": backup_path,
+        "message": "Database restored. Restart the server to load the new database."
+    })))
+}

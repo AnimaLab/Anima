@@ -232,4 +232,20 @@ export const api = {
         body: JSON.stringify({ mode, backup }),
       }
     ),
+
+  importBackupSqlite: async (file: File): Promise<void> => {
+    const buffer = await file.arrayBuffer()
+    const res = await fetch('/api/v1/restore/sqlite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Anima-Namespace': currentNamespace,
+      },
+      body: buffer,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || res.statusText)
+    }
+  },
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database } from 'lucide-react'
+import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
@@ -127,6 +127,8 @@ export function SettingsPage() {
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; elapsed_ms: number } | null>(null)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [dbSize, setDbSize] = useState<number | null>(null)
+  const [importModal, setImportModal] = useState<{ file: File; format: 'json' | 'sqlite' } | null>(null)
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge')
 
   useEffect(() => {
     api.getStats().then(s => setDbSize(s.total)).catch(() => {})
@@ -153,29 +155,40 @@ export function SettingsPage() {
     }
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-
-    // Reset file input so the same file can be re-selected
     e.target.value = ''
 
-    if (!file.name.endsWith('.json')) {
-      setBackupError('Only JSON backup files can be imported from the UI. For SQLite restore, replace the database file on the server.')
+    const isJson = file.name.endsWith('.json')
+    const isSqlite = file.name.endsWith('.db') || file.name.endsWith('.sqlite')
+    if (!isJson && !isSqlite) {
+      setBackupError('Unsupported file type. Use a .json or .db backup file.')
       return
     }
+    setBackupError(null)
+    setImportResult(null)
+    setImportMode('merge')
+    setImportModal({ file, format: isJson ? 'json' : 'sqlite' })
+  }
 
-    const confirmMsg = `Import ${file.name}?\n\nThis will add memories from the backup to the current namespace. Duplicates will be skipped.\n\nThis may take a while for large backups (embedding generation).`
-    if (!confirm(confirmMsg)) return
-
+  const runImport = async () => {
+    if (!importModal) return
+    const { file, format } = importModal
+    setImportModal(null)
     setImportLoading(true)
     setImportResult(null)
     setBackupError(null)
     try {
-      const text = await file.text()
-      const backup = JSON.parse(text)
-      const result = await api.importBackup(backup, 'merge')
-      setImportResult(result)
+      if (format === 'sqlite') {
+        await api.importBackupSqlite(file)
+        setImportResult({ imported: -1, skipped: 0, elapsed_ms: 0 })
+      } else {
+        const text = await file.text()
+        const backup = JSON.parse(text)
+        const result = await api.importBackup(backup, importMode)
+        setImportResult(result)
+      }
     } catch (e: unknown) {
       setBackupError(e instanceof Error ? e.message : 'Import failed')
     } finally {
@@ -477,14 +490,20 @@ export function SettingsPage() {
                 <p className="text-xs text-ink-muted">Import</p>
                 <label className={`flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors cursor-pointer w-fit ${importLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                   {importLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                  Import JSON backup
-                  <input type="file" accept=".json" onChange={handleImport} className="hidden" disabled={importLoading} />
+                  Import backup
+                  <input type="file" accept=".json,.db,.sqlite" onChange={handleFileSelect} className="hidden" disabled={importLoading} />
                 </label>
+                <p className="text-[11px] text-ink-faint">Accepts .json or .db files</p>
               </div>
 
               {importResult && (
                 <div className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 rounded-lg px-3 py-2">
-                  Imported {importResult.imported} memories, skipped {importResult.skipped} duplicates ({(importResult.elapsed_ms / 1000).toFixed(1)}s)
+                  {importResult.imported === -1
+                    ? 'Database restored from SQLite backup. Reload the page to see changes.'
+                    : importResult.imported > 0
+                      ? `Imported ${importResult.imported} memories${importResult.skipped > 0 ? `, skipped ${importResult.skipped} duplicates` : ''} (${(importResult.elapsed_ms / 1000).toFixed(1)}s)`
+                      : `All ${importResult.skipped} memories already exist — nothing to import`
+                  }
                 </div>
               )}
 
@@ -494,6 +513,87 @@ export function SettingsPage() {
                 </div>
               )}
             </div>
+
+            {/* Import Confirmation Modal */}
+            {importModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setImportModal(null)}>
+                <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-ink-faint" />
+                      <h3 className="text-sm font-semibold text-ink">Import Backup</h3>
+                    </div>
+                    <button onClick={() => setImportModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="px-5 pb-4 space-y-4">
+                    <div className="bg-paper-deep rounded-lg px-3 py-2.5">
+                      <div className="text-xs text-ink-light font-medium">{importModal.file.name}</div>
+                      <div className="text-[11px] text-ink-faint mt-0.5">
+                        {(importModal.file.size / 1024).toFixed(1)} KB · {importModal.format.toUpperCase()} format
+                      </div>
+                    </div>
+
+                    {importModal.format === 'json' && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-ink-muted font-medium">Import mode</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setImportMode('merge')}
+                            className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${importMode === 'merge' ? 'border-accent bg-accent/10 text-accent' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
+                          >
+                            <div className="font-medium">Merge</div>
+                            <div className="text-[11px] mt-0.5 opacity-70">Skip duplicates</div>
+                          </button>
+                          <button
+                            onClick={() => setImportMode('replace')}
+                            className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${importMode === 'replace' ? 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
+                          >
+                            <div className="font-medium">Replace</div>
+                            <div className="text-[11px] mt-0.5 opacity-70">Delete existing first</div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {(importMode === 'replace' || importModal.format === 'sqlite') && (
+                      <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-2.5">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        <p className="text-[11px]">
+                          {importModal.format === 'sqlite'
+                            ? 'This will replace your entire database. A backup of the current database will be created automatically.'
+                            : 'This will delete all existing memories in the current namespace before importing.'}
+                        </p>
+                      </div>
+                    )}
+
+                    {importModal.format === 'json' && importMode === 'merge' && (
+                      <p className="text-[11px] text-ink-faint">
+                        Memories will be added to the current namespace. Duplicates are detected by content and skipped. Embeddings are re-generated on import.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
+                    <button onClick={() => setImportModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={runImport}
+                      className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        importMode === 'replace' || importModal.format === 'sqlite'
+                          ? 'bg-red-500 hover:bg-red-600 text-white'
+                          : 'bg-accent hover:bg-accent/90 text-white'
+                      }`}
+                    >
+                      {importModal.format === 'sqlite' ? 'Restore Database' : importMode === 'replace' ? 'Replace & Import' : 'Import'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>
