@@ -61,7 +61,7 @@ function useToast() {
 export function SettingsPage() {
   const { toast, show: showToast } = useToast()
   const { config, setConfig: setConfigRaw } = useChat()
-  const { namespace, setNamespace: setNamespaceRaw } = useNamespace()
+  const { namespace, setNamespace: setNamespaceRaw, refreshNamespaces: refreshSidebar } = useNamespace()
 
   const setConfig = (c: typeof config) => { setConfigRaw(c); showToast('Settings saved') }
   const setNamespace = (ns: string) => { setNamespaceRaw(ns); showToast(`Switched to ${ns}`) }
@@ -232,6 +232,7 @@ export function SettingsPage() {
       setNamespaces(prev => [...prev, { namespace: ns, total_count: 0, active_count: 0 }])
     }
     showToast(`Created namespace "${ns}"`)
+    refreshSidebar()
   }
 
   const confirmDeleteNamespace = async () => {
@@ -245,6 +246,7 @@ export function SettingsPage() {
         setNamespaceRaw(remaining[0]?.namespace || 'default')
       }
       showToast(`Deleted "${deleteNsModal.namespace}" (${result.deleted_memories} memories)`)
+      refreshSidebar()
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : 'Delete failed', true)
     } finally {
@@ -264,6 +266,7 @@ export function SettingsPage() {
       ))
       if (namespace === renameNsModal.namespace) setNamespaceRaw(renameNewName.trim())
       showToast(`Renamed to "${renameNewName.trim()}"`)
+      refreshSidebar()
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : 'Rename failed', true)
     } finally {

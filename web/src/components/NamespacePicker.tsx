@@ -4,12 +4,12 @@ import { api } from '../api/client'
 import type { NamespaceInfo } from '../api/types'
 
 export function NamespacePicker() {
-  const { namespace, setNamespace } = useNamespace()
+  const { namespace, setNamespace, nsVersion } = useNamespace()
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([])
 
   useEffect(() => {
     api.listNamespaces().then(setNamespaces).catch(() => {})
-  }, [])
+  }, [nsVersion])
 
   return (
     <div>

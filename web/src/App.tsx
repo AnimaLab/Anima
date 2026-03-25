@@ -446,6 +446,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const [nsVersion, setNsVersion] = useState(0)
   const nsContext = useMemo(() => ({
     namespace,
     setNamespace: (ns: string) => {
@@ -454,7 +455,9 @@ export default function App() {
       try { localStorage.setItem('anima-namespace', ns) } catch { /* ignore */ }
       queryClient.invalidateQueries()
     },
-  }), [namespace])
+    nsVersion,
+    refreshNamespaces: () => setNsVersion(v => v + 1),
+  }), [namespace, nsVersion])
 
   // Derive visible streaming/loading state for the current conversation
   const visibleLoading = loadingConvIds.has(conversationId || '__new__')
