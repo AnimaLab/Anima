@@ -497,7 +497,7 @@ export function SettingsPage() {
               </div>
 
               {importResult && (
-                <div className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 rounded-lg px-3 py-2">
+                <div className="text-xs text-green-800 dark:text-green-300 bg-green-500/10 rounded-lg px-3 py-2">
                   {importResult.imported === -1
                     ? 'Database restored from SQLite backup. Reload the page to see changes.'
                     : importResult.imported > 0
@@ -508,7 +508,7 @@ export function SettingsPage() {
               )}
 
               {backupError && (
-                <div className="text-xs text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg px-3 py-2">
+                <div className="text-xs text-red-700 dark:text-red-300 bg-red-500/10 rounded-lg px-3 py-2">
                   {backupError}
                 </div>
               )}
@@ -549,7 +549,7 @@ export function SettingsPage() {
                           </button>
                           <button
                             onClick={() => setImportMode('replace')}
-                            className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${importMode === 'replace' ? 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
+                            className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${importMode === 'replace' ? 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-300' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
                           >
                             <div className="font-medium">Replace</div>
                             <div className="text-[11px] mt-0.5 opacity-70">Delete existing first</div>
@@ -559,7 +559,7 @@ export function SettingsPage() {
                     )}
 
                     {(importMode === 'replace' || importModal.format === 'sqlite') && (
-                      <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-2.5">
+                      <div className="flex items-start gap-2 bg-amber-500/10 text-amber-800 dark:text-amber-300 rounded-lg px-3 py-2.5">
                         <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                         <p className="text-[11px]">
                           {importModal.format === 'sqlite'
