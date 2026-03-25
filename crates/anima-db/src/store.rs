@@ -844,6 +844,18 @@ impl MemoryStore {
         list_namespaces_sync(&conn)
     }
 
+    /// Delete an entire namespace and all its data across all tables.
+    pub async fn delete_namespace(&self, namespace: &Namespace) -> Result<u64, DbError> {
+        let conn = self.pool.writer().await;
+        delete_namespace_sync(&conn, namespace)
+    }
+
+    /// Rename a namespace: update all records from old_ns to new_ns across all tables.
+    pub async fn rename_namespace(&self, old_ns: &Namespace, new_ns: &Namespace) -> Result<u64, DbError> {
+        let conn = self.pool.writer().await;
+        rename_namespace_sync(&conn, old_ns, new_ns)
+    }
+
     // --- Working memory methods ---
 
     pub async fn add_working_memory(
@@ -2506,6 +2518,113 @@ fn list_namespaces_sync(conn: &Connection) -> Result<Vec<NamespaceInfo>, DbError
 
     let infos: Vec<NamespaceInfo> = rows.filter_map(|r| r.ok()).collect();
     Ok(infos)
+}
+
+fn rename_namespace_sync(conn: &Connection, old_ns: &Namespace, new_ns: &Namespace) -> Result<u64, DbError> {
+    let old = old_ns.as_str();
+    let new = new_ns.as_str();
+    let tx = conn.unchecked_transaction().map_err(DbError::Sqlite)?;
+
+    let count: u64 = tx
+        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1")?
+        .query_row(params![old], |r| r.get(0))?;
+
+    // Update vec_memories namespace metadata column
+    tx.execute(
+        "UPDATE vec_memories SET namespace = ?1 WHERE namespace = ?2",
+        params![new, old],
+    )?;
+
+    // Update all namespace-scoped tables
+    let tables = [
+        "memories",
+        "conversations",
+        "working_memories",
+        "claim_revisions",
+        "correction_events",
+        "contradiction_ledger",
+        "causal_edges",
+        "state_transitions",
+        "calibration_observations",
+        "calibration_models",
+        "calibration_bins",
+        "procedure_revisions",
+        "memory_audit_log",
+        "identity_entities",
+        "identity_aliases",
+        "plan_traces",
+        "plan_checkpoints",
+        "plan_recovery_branches",
+        "plan_procedure_bindings",
+    ];
+    for table in tables {
+        tx.execute(
+            &format!("UPDATE {table} SET namespace = ?1 WHERE namespace = ?2"),
+            params![new, old],
+        )?;
+    }
+
+    // Update FTS namespace
+    tx.execute(
+        "UPDATE fts_memories SET namespace = ?1 WHERE namespace = ?2",
+        params![new, old],
+    )?;
+
+    tx.commit().map_err(DbError::Sqlite)?;
+    Ok(count)
+}
+
+fn delete_namespace_sync(conn: &Connection, namespace: &Namespace) -> Result<u64, DbError> {
+    let ns = namespace.as_str();
+    let tx = conn.unchecked_transaction().map_err(DbError::Sqlite)?;
+
+    // Count memories to report
+    let count: u64 = tx
+        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1")?
+        .query_row(params![ns], |r| r.get(0))?;
+
+    // Delete from vec and fts indexes for all memories in the namespace
+    let ids: Vec<String> = {
+        let mut stmt = tx.prepare("SELECT id FROM memories WHERE namespace = ?1")?;
+        let rows = stmt.query_map(params![ns], |r| r.get(0))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for id in &ids {
+        let _ = crate::vector::delete_embedding(&tx, id);
+        let _ = crate::fts::delete_fts(&tx, id);
+    }
+
+    // Delete from all namespace-scoped tables
+    let tables = [
+        "memories",
+        "conversations",
+        "working_memories",
+        "claim_revisions",
+        "correction_events",
+        "contradiction_ledger",
+        "causal_edges",
+        "state_transitions",
+        "calibration_observations",
+        "calibration_models",
+        "calibration_bins",
+        "procedure_revisions",
+        "memory_audit_log",
+        "identity_entities",
+        "identity_aliases",
+        "plan_traces",
+        "plan_checkpoints",
+        "plan_recovery_branches",
+        "plan_procedure_bindings",
+    ];
+    for table in tables {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE namespace = ?1"),
+            params![ns],
+        )?;
+    }
+
+    tx.commit().map_err(DbError::Sqlite)?;
+    Ok(count)
 }
 
 fn graph_node_from_memory(memory: &Memory) -> GraphNode {

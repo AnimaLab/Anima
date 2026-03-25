@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle, Check } from 'lucide-react'
+import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle, Check, Pencil } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
@@ -48,12 +48,12 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 }
 
 function useToast() {
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(null)
-  const show = useCallback((msg: string) => {
+  const show = useCallback((msg: string, error = false) => {
     if (timer.current) clearTimeout(timer.current)
-    setToast(msg)
-    timer.current = setTimeout(() => setToast(null), 2000)
+    setToast({ msg, error })
+    timer.current = setTimeout(() => setToast(null), 2500)
   }, [])
   return { toast, show }
 }
@@ -68,6 +68,12 @@ export function SettingsPage() {
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([])
   const [newNs, setNewNs] = useState('')
   const [loadingNs, setLoadingNs] = useState(false)
+  const [deleteNsModal, setDeleteNsModal] = useState<NamespaceInfo | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deletingNs, setDeletingNs] = useState(false)
+  const [renameNsModal, setRenameNsModal] = useState<NamespaceInfo | null>(null)
+  const [renameNewName, setRenameNewName] = useState('')
+  const [renamingNs, setRenamingNs] = useState(false)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
@@ -228,6 +234,45 @@ export function SettingsPage() {
     showToast(`Created namespace "${ns}"`)
   }
 
+  const confirmDeleteNamespace = async () => {
+    if (!deleteNsModal) return
+    setDeletingNs(true)
+    try {
+      const result = await api.deleteNamespace(deleteNsModal.namespace)
+      setNamespaces(prev => prev.filter(n => n.namespace !== deleteNsModal.namespace))
+      if (namespace === deleteNsModal.namespace) {
+        const remaining = namespaces.filter(n => n.namespace !== deleteNsModal.namespace)
+        setNamespaceRaw(remaining[0]?.namespace || 'default')
+      }
+      showToast(`Deleted "${deleteNsModal.namespace}" (${result.deleted_memories} memories)`)
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Delete failed', true)
+    } finally {
+      setDeletingNs(false)
+      setDeleteNsModal(null)
+      setDeleteConfirmText('')
+    }
+  }
+
+  const confirmRenameNamespace = async () => {
+    if (!renameNsModal || !renameNewName.trim()) return
+    setRenamingNs(true)
+    try {
+      await api.renameNamespace(renameNsModal.namespace, renameNewName.trim())
+      setNamespaces(prev => prev.map(n =>
+        n.namespace === renameNsModal.namespace ? { ...n, namespace: renameNewName.trim() } : n
+      ))
+      if (namespace === renameNsModal.namespace) setNamespaceRaw(renameNewName.trim())
+      showToast(`Renamed to "${renameNewName.trim()}"`)
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Rename failed', true)
+    } finally {
+      setRenamingNs(false)
+      setRenameNsModal(null)
+      setRenameNewName('')
+    }
+  }
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <h2 className="text-lg font-semibold text-ink">Settings</h2>
@@ -254,14 +299,29 @@ export function SettingsPage() {
         <div className="relative">
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {namespaces.map(ns => (
-              <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)}
-                className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+              <div key={ns.namespace} className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
                   namespace === ns.namespace
                     ? 'bg-accent-light text-accent font-medium'
                     : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
                 }`}>
-                <span className="truncate">{ns.namespace}</span>
-                <span className="text-[11px] text-ink-faint shrink-0 ml-2 tabular-nums">{ns.active_count}/{ns.total_count}</span>
+                <span className="truncate" onClick={() => setNamespace(ns.namespace)}>{ns.namespace}</span>
+                <div className="flex items-center gap-2 shrink-0 ml-2">
+                  <span className="text-[11px] text-ink-faint tabular-nums">{ns.active_count}/{ns.total_count}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); setRenameNsModal(ns); setRenameNewName(ns.namespace) }}
+                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-accent transition-all p-0.5"
+                    title="Rename namespace"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); setDeleteNsModal(ns); setDeleteConfirmText('') }}
+                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-500 transition-all p-0.5"
+                    title="Delete namespace"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -631,12 +691,106 @@ export function SettingsPage() {
         )}
       </section>
 
+      {/* Rename Namespace Modal */}
+      {renameNsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setRenameNsModal(null)}>
+          <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-ink-faint" />
+                <h3 className="text-sm font-semibold text-ink">Rename Namespace</h3>
+              </div>
+              <button onClick={() => setRenameNsModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 pb-4 space-y-3">
+              <p className="text-xs text-ink-muted">
+                Renaming <strong className="text-ink">{renameNsModal.namespace}</strong> ({renameNsModal.total_count} memories)
+              </p>
+              <input
+                type="text"
+                value={renameNewName}
+                onChange={e => setRenameNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && renameNewName.trim() && renameNewName.trim() !== renameNsModal.namespace && confirmRenameNamespace()}
+                className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent/50"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
+              <button onClick={() => setRenameNsModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={confirmRenameNamespace}
+                disabled={!renameNewName.trim() || renameNewName.trim() === renameNsModal.namespace || renamingNs}
+                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {renamingNs && <Loader2 className="w-3 h-3 animate-spin" />}
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Namespace Modal */}
+      {deleteNsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDeleteNsModal(null)}>
+          <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                <h3 className="text-sm font-semibold text-ink">Delete Namespace</h3>
+              </div>
+              <button onClick={() => setDeleteNsModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 pb-4 space-y-4">
+              <p className="text-xs text-ink-muted">
+                This will permanently delete <strong className="text-ink">{deleteNsModal.namespace}</strong> and all <strong className="text-ink">{deleteNsModal.total_count}</strong> memories in it. This cannot be undone.
+              </p>
+
+              <div>
+                <label className="block text-[11px] text-ink-faint mb-1.5">
+                  Type <strong className="text-ink">{deleteNsModal.namespace}</strong> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={e => setDeleteConfirmText(e.target.value)}
+                  placeholder={deleteNsModal.namespace}
+                  className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-red-300"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
+              <button onClick={() => setDeleteNsModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteNamespace}
+                disabled={deleteConfirmText !== deleteNsModal.namespace || deletingNs}
+                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {deletingNs && <Loader2 className="w-3 h-3 animate-spin" />}
+                Delete Forever
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
-          <div className="flex items-center gap-2 bg-ink text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg">
-            <Check className="w-3.5 h-3.5 text-green-400" />
-            {toast}
+          <div className={`flex items-center gap-2 text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg ${toast.error ? 'bg-red-600' : 'bg-ink'}`}>
+            {toast.error ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 text-green-400" />}
+            {toast.msg}
           </div>
         </div>
       )}

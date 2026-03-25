@@ -74,6 +74,17 @@ export const api = {
 
   getStats: () => request<NamespaceStats>('/api/v1/stats'),
   listNamespaces: () => request<NamespaceInfo[]>('/api/v1/namespaces'),
+  deleteNamespace: (ns: string) =>
+    request<{ namespace: string; deleted_memories: number }>('/api/v1/namespaces', {
+      method: 'DELETE',
+      headers: { 'X-Anima-Namespace': ns } as Record<string, string>,
+    }),
+  renameNamespace: (oldNs: string, newName: string) =>
+    request<{ old_namespace: string; new_namespace: string; renamed_memories: number }>('/api/v1/namespaces/rename', {
+      method: 'POST',
+      headers: { 'X-Anima-Namespace': oldNs } as Record<string, string>,
+      body: JSON.stringify({ name: newName }),
+    }),
   getGraph: (threshold = 0.7, limit = 200) =>
     request<GraphData>(`/api/v1/graph?threshold=${threshold}&limit=${limit}`),
   getEmbeddings: (limit = 300) =>

@@ -2958,6 +2958,35 @@ pub async fn list_namespaces(
     Ok(Json(namespaces))
 }
 
+pub async fn delete_namespace(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let count = state.store.delete_namespace(&ns).await?;
+    Ok(Json(serde_json::json!({
+        "namespace": ns.as_str(),
+        "deleted_memories": count,
+    })))
+}
+
+pub async fn rename_namespace(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(old_ns): ExtractNamespace,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let new_name = body.get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("missing 'name' field".into()))?;
+    let new_ns = anima_core::namespace::Namespace::parse(new_name)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let count = state.store.rename_namespace(&old_ns, &new_ns).await?;
+    Ok(Json(serde_json::json!({
+        "old_namespace": old_ns.as_str(),
+        "new_namespace": new_ns.as_str(),
+        "renamed_memories": count,
+    })))
+}
+
 pub async fn get_graph(
     State(state): State<Arc<AppState>>,
     ExtractNamespace(ns): ExtractNamespace,
