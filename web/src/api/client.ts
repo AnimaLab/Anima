@@ -199,4 +199,37 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ enabled, feature_flags: featureFlags }),
     }),
+
+  // Backup & Restore
+  exportBackupJson: async (namespace?: string): Promise<Blob> => {
+    const ns = namespace || currentNamespace
+    const res = await fetch(`/api/v1/backup?format=json`, {
+      headers: { 'X-Anima-Namespace': ns },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || res.statusText)
+    }
+    return res.blob()
+  },
+
+  exportBackupSqlite: async (): Promise<Blob> => {
+    const res = await fetch(`/api/v1/backup?format=sqlite`, {
+      headers: { 'X-Anima-Namespace': currentNamespace },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error || res.statusText)
+    }
+    return res.blob()
+  },
+
+  importBackup: (backup: unknown, mode: 'merge' | 'replace' = 'merge') =>
+    request<{ imported: number; skipped: number; total: number; elapsed_ms: number }>(
+      '/api/v1/restore',
+      {
+        method: 'POST',
+        body: JSON.stringify({ mode, backup }),
+      }
+    ),
 }
