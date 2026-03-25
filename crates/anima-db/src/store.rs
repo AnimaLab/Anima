@@ -1598,6 +1598,49 @@ impl MemoryStore {
         tracing::info!("Backfilled episode_id for {updated} memories");
         Ok(updated as u64)
     }
+
+    /// Export all memories for backup. No pagination — returns everything.
+    /// Filters by namespace (use wildcard namespace for all).
+    pub async fn export_all(
+        &self,
+        namespace: &Namespace,
+    ) -> Result<Vec<Memory>, DbError> {
+        let conn = self.pool.writer().await;
+        let ns_pattern = namespace.like_pattern();
+        let mut stmt = conn.prepare(
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at, \
+             accessed_at, access_count, hash, tags, memory_type, importance, episode_id, \
+             event_date, category, confidence, source \
+             FROM memories WHERE namespace LIKE ?1 \
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![ns_pattern], row_to_memory)?;
+        let mut memories = Vec::new();
+        for row in rows {
+            memories.push(row?);
+        }
+        Ok(memories)
+    }
+
+    /// Return the database file size in bytes. Returns 0 for in-memory DBs.
+    pub fn db_size_bytes(&self) -> u64 {
+        if self.pool.db_path() == ":memory:" {
+            return 0;
+        }
+        std::fs::metadata(self.pool.db_path())
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// Return the database file path.
+    pub fn db_path(&self) -> &str {
+        self.pool.db_path()
+    }
+
+    /// Acquire the writer connection (for WAL checkpoint).
+    pub async fn writer_conn(&self) -> tokio::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.pool.writer().await
+    }
 }
 
 // --- Synchronous implementations (called within mutex guard) ---
