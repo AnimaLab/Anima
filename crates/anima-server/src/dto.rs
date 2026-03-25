@@ -869,3 +869,73 @@ pub struct EmbeddingPointDto {
 pub struct EmbeddingsResponse {
     pub points: Vec<EmbeddingPointDto>,
 }
+
+// ── Backup / Restore ──────────────────────────────────────────────
+
+/// JSON backup envelope.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupEnvelope {
+    pub version: String,
+    pub exported_at: String,
+    pub namespace: String,
+    pub memory_count: usize,
+    pub memories: Vec<BackupMemory>,
+}
+
+/// A single memory in the backup format (no embedding — re-embedded on import).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupMemory {
+    pub id: String,
+    pub namespace: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    pub tags: Vec<String>,
+    pub memory_type: String,
+    pub status: String,
+    pub category: String,
+    pub confidence: f64,
+    pub source: String,
+    pub importance: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_date: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Query parameters for GET /api/v1/backup.
+#[derive(Debug, Deserialize)]
+pub struct ExportQuery {
+    /// "sqlite" or "json" (default: "json")
+    #[serde(default = "default_json")]
+    pub format: String,
+}
+
+fn default_json() -> String {
+    "json".into()
+}
+
+/// Request body for POST /api/v1/restore.
+#[derive(Debug, Deserialize)]
+pub struct ImportRequest {
+    /// "merge" (skip duplicates by content hash) or "replace" (wipe namespace first).
+    #[serde(default = "default_merge")]
+    pub mode: String,
+    /// The backup envelope.
+    pub backup: BackupEnvelope,
+}
+
+fn default_merge() -> String {
+    "merge".into()
+}
+
+/// Response for POST /api/v1/restore.
+#[derive(Debug, Serialize)]
+pub struct ImportResponse {
+    pub imported: usize,
+    pub skipped: usize,
+    pub total: usize,
+    pub elapsed_ms: f64,
+}
