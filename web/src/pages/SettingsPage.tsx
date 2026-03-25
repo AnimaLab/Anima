@@ -219,20 +219,7 @@ export function SettingsPage() {
             <RefreshCw size={10} className={loadingNs ? 'animate-spin' : ''} />
           </button>
         </div>
-        <div className="space-y-1 max-h-40 overflow-y-auto">
-          {namespaces.map(ns => (
-            <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)}
-              className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
-                namespace === ns.namespace
-                  ? 'bg-accent-light text-accent font-medium'
-                  : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
-              }`}>
-              <span className="truncate">{ns.namespace}</span>
-              <span className="text-[11px] text-ink-faint shrink-0 ml-2 tabular-nums">{ns.active_count}/{ns.total_count}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex gap-2 pt-3 border-t border-warm-border">
+        <div className="flex gap-2 pb-3 border-b border-warm-border">
           <input type="text" value={newNs} onChange={e => setNewNs(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && createNamespace()}
             placeholder="new-namespace"
@@ -241,6 +228,24 @@ export function SettingsPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white text-sm rounded-lg transition-colors">
             <Plus size={14} /> Add
           </button>
+        </div>
+        <div className="relative">
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {namespaces.map(ns => (
+              <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+                  namespace === ns.namespace
+                    ? 'bg-accent-light text-accent font-medium'
+                    : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
+                }`}>
+                <span className="truncate">{ns.namespace}</span>
+                <span className="text-[11px] text-ink-faint shrink-0 ml-2 tabular-nums">{ns.active_count}/{ns.total_count}</span>
+              </div>
+            ))}
+          </div>
+          {namespaces.length > 4 && (
+            <div className="absolute bottom-0 left-0 right-0 h-6 bg-linear-to-t from-card to-transparent pointer-events-none rounded-b-lg" />
+          )}
         </div>
       </section>
 
