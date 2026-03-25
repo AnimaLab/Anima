@@ -9,6 +9,7 @@ use ndarray::{Array1, Array2, Axis};
 
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
@@ -5756,4 +5757,182 @@ pub async fn set_telemetry_config(
     }
 
     Json(serde_json::json!({"updated": true}))
+}
+
+// ── Backup / Restore ──────────────────────────────────────────────
+
+pub async fn export_backup(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+    Query(params): Query<ExportQuery>,
+) -> Result<Response, AppError> {
+    match params.format.as_str() {
+        "sqlite" => export_sqlite(&state).await,
+        _ => export_json(&state, &ns).await,
+    }
+}
+
+async fn export_sqlite(state: &AppState) -> Result<Response, AppError> {
+    let db_path = state.store.db_path();
+    if db_path == ":memory:" {
+        return Err(AppError::BadRequest("cannot export in-memory database".into()));
+    }
+
+    // Checkpoint WAL to ensure the main DB file is up-to-date
+    {
+        let conn = state.store.writer_conn().await;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| AppError::Database(format!("WAL checkpoint failed: {e}")))?;
+    }
+
+    let bytes = tokio::fs::read(db_path)
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to read database file: {e}")))?;
+
+    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let filename = format!("anima-backup-{now}.db");
+
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+async fn export_json(state: &AppState, ns: &anima_core::namespace::Namespace) -> Result<Response, AppError> {
+    let memories = state.store.export_all(ns).await?;
+
+    let backup_memories: Vec<BackupMemory> = memories
+        .iter()
+        .map(|m| BackupMemory {
+            id: m.id.clone(),
+            namespace: m.namespace.clone(),
+            content: m.content.clone(),
+            metadata: m.metadata.clone(),
+            tags: m.tags.clone(),
+            memory_type: m.memory_type.clone(),
+            status: m.status.as_str().to_string(),
+            category: m.category.clone(),
+            confidence: m.confidence,
+            source: m.source.clone(),
+            importance: m.importance,
+            episode_id: m.episode_id.clone(),
+            event_date: m.event_date.clone(),
+            created_at: m.created_at.to_rfc3339(),
+            updated_at: m.updated_at.to_rfc3339(),
+        })
+        .collect();
+
+    let envelope = BackupEnvelope {
+        version: "1.0".into(),
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        namespace: ns.as_str().to_string(),
+        memory_count: backup_memories.len(),
+        memories: backup_memories,
+    };
+
+    let json = serde_json::to_vec_pretty(&envelope)
+        .map_err(|e| AppError::Internal(format!("JSON serialization failed: {e}")))?;
+
+    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let filename = format!("anima-backup-{now}.json");
+
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "application/json".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        json,
+    )
+        .into_response())
+}
+
+pub async fn import_backup(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+    Json(req): Json<ImportRequest>,
+) -> Result<Json<ImportResponse>, AppError> {
+    let start = std::time::Instant::now();
+    let backup = req.backup;
+
+    if backup.version != "1.0" {
+        return Err(AppError::BadRequest(format!(
+            "unsupported backup version: {}",
+            backup.version
+        )));
+    }
+
+    // In replace mode, soft-delete all existing memories in the target namespace first
+    if req.mode == "replace" {
+        let (existing, _) = state.store.list(&ns, Some("active"), None, None, 0, 100_000).await?;
+        for m in &existing {
+            state.store.soft_delete(&m.id).await?;
+        }
+    }
+
+    let total = backup.memories.len();
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+
+    // Process in batches of 50 to avoid holding the writer lock too long
+    for chunk in backup.memories.chunks(50) {
+        let mut entries: Vec<(Memory, Vec<f32>)> = Vec::with_capacity(chunk.len());
+
+        for bm in chunk {
+            // In merge mode, skip if content hash already exists
+            if req.mode == "merge" {
+                let hash = content_hash(&bm.content);
+                if state.store.find_by_hash(&ns, &hash).await?.is_some() {
+                    skipped += 1;
+                    continue;
+                }
+            }
+
+            let embedding = state
+                .embedder
+                .embed(&bm.content)
+                .map_err(|e| AppError::Embedding(e.to_string()))?;
+
+            let target_ns = ns.as_str().to_string();
+
+            let mut memory = Memory::new(
+                target_ns,
+                bm.content.clone(),
+                bm.metadata.clone(),
+                bm.tags.clone(),
+                Some(bm.memory_type.clone()),
+            );
+            memory.category = bm.category.clone();
+            memory.confidence = bm.confidence;
+            memory.source = bm.source.clone();
+            memory.importance = bm.importance;
+            memory.episode_id = bm.episode_id.clone();
+            memory.event_date = bm.event_date.clone();
+
+            entries.push((memory, embedding));
+        }
+
+        if !entries.is_empty() {
+            imported += entries.len();
+            state.store.insert_many(&entries).await?;
+        }
+    }
+
+    state.record_ingestion(imported as u64);
+
+    Ok(Json(ImportResponse {
+        imported,
+        skipped,
+        total,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+    }))
 }

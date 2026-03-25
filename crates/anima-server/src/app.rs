@@ -233,6 +233,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/telemetry/config",
             get(handlers::get_telemetry_config).put(handlers::set_telemetry_config),
         )
+        .route("/api/v1/backup", get(handlers::export_backup))
+        .route("/api/v1/restore", post(handlers::import_backup))
         .with_state(state)
         .fallback_service(spa)
 }
