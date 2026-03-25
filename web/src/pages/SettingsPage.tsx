@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, RefreshCw, ChevronDown, Loader2, Brain } from 'lucide-react'
+import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
 import type { NamespaceInfo, ProfilesResponse } from '../api/types'
 
 export interface CognitiveConfig {
-  max_tier: number  // 1-4: which tiers to include in search
+  max_tier: number
   reflection_enabled: boolean
   deduction_enabled: boolean
   induction_enabled: boolean
@@ -37,6 +37,16 @@ interface ModelInfo {
   owned_by?: string
 }
 
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <div className="relative shrink-0">
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} disabled={disabled} className="sr-only peer" />
+      <div className={`w-8 h-[18px] rounded-full transition-colors ${disabled ? 'bg-accent opacity-60' : 'bg-paper-deep peer-checked:bg-accent'}`} />
+      <div className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full transition-all ${disabled ? 'translate-x-[14px] bg-white opacity-60' : 'bg-ink-faint peer-checked:translate-x-[14px] peer-checked:bg-white'}`} />
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { config, setConfig } = useChat()
   const { namespace, setNamespace } = useNamespace()
@@ -48,10 +58,19 @@ export function SettingsPage() {
   const [modelError, setModelError] = useState<string | null>(null)
   const [cognitive, setCognitiveState] = useState<CognitiveConfig>(loadCognitiveConfig)
   const [telemetryEnabled, setTelemetryEnabled] = useState(true)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [profiles, setProfiles] = useState<ProfilesResponse | null>(null)
   const setCognitive = (cfg: CognitiveConfig) => {
     setCognitiveState(cfg)
     saveCognitiveConfig(cfg)
+  }
+
+  const [userName, setUserName] = useState(() => localStorage.getItem('anima-user-name') || '')
+  const [agentName, setAgentName] = useState(() => localStorage.getItem('anima-agent-name') || 'Anima')
+  const [agentPersona, setAgentPersona] = useState(() => localStorage.getItem('anima-agent-persona') || '')
+
+  const saveIdentity = (key: string, value: string) => {
+    localStorage.setItem(key, value)
   }
 
   const fetchModels = useCallback(async () => {
@@ -79,31 +98,17 @@ export function SettingsPage() {
     }
   }, [config.base_url, config.api_key])
 
-  useEffect(() => {
-    fetchModels()
-  }, [fetchModels])
+  useEffect(() => { fetchModels() }, [fetchModels])
 
   const refreshNamespaces = () => {
     setLoadingNs(true)
-    api.listNamespaces()
-      .then(setNamespaces)
-      .catch(() => {})
-      .finally(() => setLoadingNs(false))
+    api.listNamespaces().then(setNamespaces).catch(() => {}).finally(() => setLoadingNs(false))
   }
 
-  useEffect(() => {
-    refreshNamespaces()
-  }, [])
+  useEffect(() => { refreshNamespaces() }, [])
 
-  // Fetch profiles and telemetry config on mount
-  useEffect(() => {
-    api.getProfiles().then(setProfiles).catch(() => {})
-  }, [])
-  useEffect(() => {
-    api.getTelemetryConfig()
-      .then(res => setTelemetryEnabled(res.enabled))
-      .catch(() => {})
-  }, [])
+  useEffect(() => { api.getProfiles().then(setProfiles).catch(() => {}) }, [])
+  useEffect(() => { api.getTelemetryConfig().then(res => setTelemetryEnabled(res.enabled)).catch(() => {}) }, [])
 
   const toggleTelemetry = (enabled: boolean) => {
     setTelemetryEnabled(enabled)
@@ -117,6 +122,67 @@ export function SettingsPage() {
     }).catch(() => {})
   }
 
+  const [backupLoading, setBackupLoading] = useState<'json' | 'sqlite' | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; elapsed_ms: number } | null>(null)
+  const [backupError, setBackupError] = useState<string | null>(null)
+  const [dbSize, setDbSize] = useState<number | null>(null)
+
+  useEffect(() => {
+    api.getStats().then(s => setDbSize(s.total)).catch(() => {})
+  }, [])
+
+  const downloadBackup = async (format: 'json' | 'sqlite') => {
+    setBackupLoading(format)
+    setBackupError(null)
+    try {
+      const blob = format === 'sqlite'
+        ? await api.exportBackupSqlite()
+        : await api.exportBackupJson()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const date = new Date().toISOString().slice(0, 10)
+      a.download = `anima-backup-${date}.${format === 'sqlite' ? 'db' : 'json'}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) {
+      setBackupError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setBackupLoading(null)
+    }
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Reset file input so the same file can be re-selected
+    e.target.value = ''
+
+    if (!file.name.endsWith('.json')) {
+      setBackupError('Only JSON backup files can be imported from the UI. For SQLite restore, replace the database file on the server.')
+      return
+    }
+
+    const confirmMsg = `Import ${file.name}?\n\nThis will add memories from the backup to the current namespace. Duplicates will be skipped.\n\nThis may take a while for large backups (embedding generation).`
+    if (!confirm(confirmMsg)) return
+
+    setImportLoading(true)
+    setImportResult(null)
+    setBackupError(null)
+    try {
+      const text = await file.text()
+      const backup = JSON.parse(text)
+      const result = await api.importBackup(backup, 'merge')
+      setImportResult(result)
+    } catch (e: unknown) {
+      setBackupError(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
   const createNamespace = () => {
     const ns = newNs.trim()
     if (!ns) return
@@ -128,176 +194,166 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <h2 className="text-lg font-semibold text-ink">Settings</h2>
-        <p className="text-sm text-ink-muted mt-1">Configure model, namespaces, and system prompt</p>
-      </div>
+    <div className="max-w-2xl mx-auto space-y-6">
+      <h2 className="text-lg font-semibold text-ink">Settings</h2>
 
-      {/* Server Profiles (read-only info from config.toml) */}
-      {profiles && Object.keys(profiles.profiles).length > 1 && (
-        <section className="space-y-3">
-          <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Server Profiles</h3>
-          <div className="bg-card border border-warm-border rounded-xl p-4 space-y-3">
-            <p className="text-xs text-ink-muted">
-              Configured in <code className="bg-paper-deep px-1 rounded">config.toml</code> &mdash; controls which model the server uses per operation.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(profiles.profiles).map(([name, p]) => (
-                <div key={name} className="bg-paper-deep rounded-lg px-3 py-2">
-                  <div className="text-xs font-medium text-ink">{name}</div>
-                  <div className="text-[11px] text-ink-muted truncate">{p.model}</div>
-                  <div className="text-[10px] text-ink-faint truncate">{p.base_url}</div>
-                </div>
-              ))}
+      {/* ── Namespaces (most commonly accessed) ── */}
+      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-ink-light">Namespaces</h3>
+          <button onClick={refreshNamespaces} disabled={loadingNs}
+            className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors">
+            <RefreshCw size={10} className={loadingNs ? 'animate-spin' : ''} />
+          </button>
+        </div>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {namespaces.map(ns => (
+            <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)}
+              className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+                namespace === ns.namespace
+                  ? 'bg-accent-light text-accent font-medium'
+                  : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
+              }`}>
+              <span className="truncate">{ns.namespace}</span>
+              <span className="text-[11px] text-ink-faint shrink-0 ml-2 tabular-nums">{ns.active_count}/{ns.total_count}</span>
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted pt-1 border-t border-warm-border">
-              {profiles.routing.ask && <span><strong>ask</strong> &rarr; {profiles.routing.ask}</span>}
-              {profiles.routing.chat && <span><strong>chat</strong> &rarr; {profiles.routing.chat}</span>}
-              {profiles.routing.processor && <span><strong>processor</strong> &rarr; {profiles.routing.processor}</span>}
-              {profiles.routing.consolidation && <span><strong>consolidation</strong> &rarr; {profiles.routing.consolidation}</span>}
-            </div>
-          </div>
-        </section>
-      )}
+          ))}
+        </div>
+        <div className="flex gap-2 pt-3 border-t border-warm-border">
+          <input type="text" value={newNs} onChange={e => setNewNs(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && createNamespace()}
+            placeholder="new-namespace"
+            className="flex-1 bg-input border border-warm-border rounded-lg px-3 py-1.5 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
+          <button onClick={createNamespace} disabled={!newNs.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white text-sm rounded-lg transition-colors">
+            <Plus size={14} /> Add
+          </button>
+        </div>
+      </section>
 
-      {/* Model Configuration */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Model Configuration</h3>
-        <div className="bg-card border border-warm-border rounded-xl p-5 space-y-5">
-          {/* API Base URL */}
+      {/* ── Identity ── */}
+      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
+        <h3 className="text-sm font-medium text-ink-light">Identity</h3>
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-ink-muted mb-1.5">API Base URL</label>
-            <input
-              type="text"
-              value={config.base_url}
-              onChange={e => setConfig({ ...config, base_url: e.target.value })}
+            <label className="block text-xs text-ink-muted mb-1">Your name</label>
+            <input type="text" value={userName}
+              onChange={e => { setUserName(e.target.value); saveIdentity('anima-user-name', e.target.value) }}
+              placeholder="e.g. Zhen"
+              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
+          </div>
+          <div>
+            <label className="block text-xs text-ink-muted mb-1">Agent name</label>
+            <input type="text" value={agentName}
+              onChange={e => { setAgentName(e.target.value); saveIdentity('anima-agent-name', e.target.value) }}
+              placeholder="e.g. Anima"
+              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs text-ink-muted mb-1">Instructions</label>
+          <textarea value={agentPersona}
+            onChange={e => { setAgentPersona(e.target.value); saveIdentity('anima-agent-persona', e.target.value) }}
+            placeholder="e.g. You are a warm, thoughtful personal assistant who helps me reflect on my life and remember what matters."
+            rows={3}
+            className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y min-h-16" />
+          <p className="text-[11px] text-ink-faint mt-1">Persona, tone, and behavior. Sent as the system prompt with every message.</p>
+        </div>
+      </section>
+
+      {/* ── Chat Model ── */}
+      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
+        <h3 className="text-sm font-medium text-ink-light">Chat Model</h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-ink-muted mb-1">API Base URL</label>
+            <input type="text" value={config.base_url} onChange={e => setConfig({ ...config, base_url: e.target.value })}
               placeholder="http://localhost:11434/v1"
-              className="w-full bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all"
-            />
-            <p className="text-[11px] text-ink-faint mt-1">OpenAI-compatible API endpoint</p>
+              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
           </div>
-
-          {/* Model Selector */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-ink-muted">Model</label>
-              <button
-                onClick={fetchModels}
-                disabled={loadingModels}
-                className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
-              >
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-ink-muted">Model</label>
+              <button onClick={fetchModels} disabled={loadingModels}
+                className="text-[11px] text-ink-faint hover:text-ink transition-colors">
                 {loadingModels ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-                Refresh
               </button>
             </div>
             {models.length > 0 ? (
               <div className="relative">
-                <select
-                  value={config.model}
-                  onChange={e => setConfig({ ...config, model: e.target.value })}
-                  className="w-full bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-2 text-sm text-ink appearance-none focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all cursor-pointer"
-                >
-                  {!models.find(m => m.id === config.model) && (
-                    <option value={config.model}>{config.model}</option>
-                  )}
-                  {models.map(m => (
-                    <option key={m.id} value={m.id}>{m.id}</option>
-                  ))}
+                <select value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+                  className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink appearance-none focus:outline-none focus:ring-1 focus:ring-accent/50 cursor-pointer">
+                  {!models.find(m => m.id === config.model) && <option value={config.model}>{config.model}</option>}
+                  {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
                 </select>
                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none" />
               </div>
             ) : (
-              <input
-                type="text"
-                value={config.model}
-                onChange={e => setConfig({ ...config, model: e.target.value })}
+              <input type="text" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
                 placeholder="model name"
-                className="w-full bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all"
-              />
+                className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
             )}
-            {modelError && (
-              <p className="text-[11px] text-amber-600 mt-1">Could not fetch models ({modelError}) — enter manually</p>
-            )}
+            {modelError && <p className="text-[11px] text-amber-600 mt-1">Could not fetch models — enter manually</p>}
           </div>
+        </div>
 
-          {/* API Key */}
+        <div>
+          <label className="block text-xs text-ink-muted mb-1">API Key</label>
+          <input type="password" value={config.api_key || ''} onChange={e => setConfig({ ...config, api_key: e.target.value || undefined })}
+            placeholder="Optional — leave empty for local models"
+            className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
+        </div>
+
+        {/* Temperature + Max Tokens */}
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-ink-muted mb-1.5">API Key</label>
-            <input
-              type="password"
-              value={config.api_key || ''}
-              onChange={e => setConfig({ ...config, api_key: e.target.value || undefined })}
-              placeholder="Optional — leave empty for local models"
-              className="w-full bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all"
-            />
-          </div>
-
-          {/* Temperature + Max Tokens */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label className="flex items-center justify-between text-xs font-medium text-ink-muted mb-2">
-                <span>Temperature</span>
-                <span className="text-accent font-mono tabular-nums">{(config.temperature ?? 0.7).toFixed(2)}</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.05"
-                value={config.temperature ?? 0.7}
-                onChange={e => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
-                className="w-full accent-[#C47B3B] h-1.5"
-              />
-              <div className="flex justify-between text-[10px] text-ink-faint mt-1">
-                <span>Precise</span>
-                <span>Balanced</span>
-                <span>Creative</span>
-              </div>
-            </div>
-            <div>
-              <label className="flex items-center justify-between text-xs font-medium text-ink-muted mb-2">
-                <span>Max Tokens</span>
-                <span className="text-accent font-mono tabular-nums">{config.max_tokens ?? 4096}</span>
-              </label>
-              <input
-                type="range"
-                min="256"
-                max="16384"
-                step="256"
-                value={config.max_tokens ?? 4096}
-                onChange={e => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
-                className="w-full accent-[#C47B3B] h-1.5"
-              />
-              <div className="flex justify-between text-[10px] text-ink-faint mt-1">
-                <span>256</span>
-                <span>4096</span>
-                <span>16384</span>
-              </div>
-              <p className="text-[11px] text-ink-faint mt-1">Maximum length of the model's response</p>
+            <label className="flex items-center justify-between text-xs text-ink-muted mb-1.5">
+              <span>Temperature</span>
+              <span className="text-accent font-mono tabular-nums text-[11px]">{(config.temperature ?? 0.7).toFixed(2)}</span>
+            </label>
+            <input type="range" min="0" max="2" step="0.05" value={config.temperature ?? 0.7}
+              onChange={e => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+              className="w-full accent-accent h-1.5" />
+            <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
+              <span>Precise</span><span>Creative</span>
             </div>
           </div>
-
-          {/* Model Capabilities */}
           <div>
-            <label className="block text-xs font-medium text-ink-muted mb-2">Capabilities</label>
-            <div className="space-y-3">
+            <label className="flex items-center justify-between text-xs text-ink-muted mb-1.5">
+              <span>Max Tokens</span>
+              <span className="text-accent font-mono tabular-nums text-[11px]">{config.max_tokens ?? 4096}</span>
+            </label>
+            <input type="range" min="256" max="16384" step="256" value={config.max_tokens ?? 4096}
+              onChange={e => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
+              className="w-full accent-accent h-1.5" />
+            <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
+              <span>256</span><span>16384</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Advanced ── */}
+      <section>
+        <button onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink transition-colors mb-3">
+          {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          Advanced
+        </button>
+
+        {showAdvanced && (
+          <div className="space-y-4">
+            {/* Capabilities */}
+            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-medium text-ink-light">Capabilities</h3>
               {([
-                { key: 'vision' as const, label: 'Vision', desc: 'Send images to the model using multimodal format. Disable for text-only models.', defaultVal: false },
-                { key: 'tool_use' as const, label: 'Tool Use', desc: 'Allow the model to call functions (memory search/add). Disable if unsupported.', defaultVal: true },
-                { key: 'streaming' as const, label: 'Streaming', desc: 'Stream responses token-by-token. Disable if the endpoint does not support SSE.', defaultVal: true },
+                { key: 'vision' as const, label: 'Vision', desc: 'Send images to the model', defaultVal: false },
+                { key: 'tool_use' as const, label: 'Tool Use', desc: 'Allow function calling (memory search/add)', defaultVal: true },
+                { key: 'streaming' as const, label: 'Streaming', desc: 'Stream responses token-by-token', defaultVal: true },
               ]).map(cap => (
                 <label key={cap.key} className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={config[cap.key] ?? cap.defaultVal}
-                      onChange={e => setConfig({ ...config, [cap.key]: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-8 h-[18px] bg-paper-deep rounded-full peer-checked:bg-accent transition-colors" />
-                    <div className="absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-ink-faint rounded-full peer-checked:translate-x-[14px] peer-checked:bg-white transition-all" />
-                  </div>
+                  <Toggle checked={config[cap.key] ?? cap.defaultVal} onChange={v => setConfig({ ...config, [cap.key]: v })} />
                   <div>
                     <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{cap.label}</span>
                     <p className="text-[11px] text-ink-faint">{cap.desc}</p>
@@ -305,98 +361,44 @@ export function SettingsPage() {
                 </label>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* System Prompt */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">System Prompt</h3>
-        <div className="bg-card border border-warm-border rounded-xl p-5">
-          <textarea
-            value={config.system_prompt || ''}
-            onChange={e => setConfig({ ...config, system_prompt: e.target.value || undefined })}
-            placeholder="You are a helpful assistant."
-            rows={4}
-            className="w-full bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all resize-y min-h-[5rem]"
-          />
-          <p className="text-[11px] text-ink-faint mt-2">
-            Prepended to every chat message. Memory context is appended automatically.
-          </p>
-        </div>
-      </section>
-
-      {/* Cognitive Functions */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Cognitive Functions</h3>
-        <div className="bg-card border border-warm-border rounded-xl p-5 space-y-5">
-          {/* Search Tier Filter */}
-          <div>
-            <label className="flex items-center gap-2 text-xs font-medium text-ink-muted mb-3">
-              <Brain size={14} />
-              Search Tiers
-            </label>
-            <p className="text-[11px] text-ink-faint mb-3">
-              Which memory tiers to include in search and ask results. Higher tiers are more processed but may add noise.
-            </p>
-            <div className="space-y-2">
+            {/* Search Tiers */}
+            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-medium text-ink-light">Search Tiers</h3>
+              <p className="text-[11px] text-ink-faint">Which memory tiers to include in search results.</p>
               {([
-                { tier: 1, label: 'Raw', desc: 'Original user input — highest fidelity' },
-                { tier: 2, label: 'Reflected', desc: 'Extracted atomic facts from raw memories' },
-                { tier: 3, label: 'Deduced', desc: 'Cross-memory inferences (may be speculative)' },
-                { tier: 4, label: 'Induced', desc: 'Synthesized patterns and personality traits' },
+                { tier: 1, label: 'Raw', desc: 'Original input' },
+                { tier: 2, label: 'Reflected', desc: 'Extracted facts' },
+                { tier: 3, label: 'Deduced', desc: 'Cross-memory inferences' },
+                { tier: 4, label: 'Induced', desc: 'Synthesized patterns' },
               ] as const).map(({ tier, label, desc }) => (
                 <label key={tier} className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={cognitive.max_tier >= tier}
-                      onChange={() => {
-                        // Toggle: if this tier was included, set max_tier to tier-1
-                        // If excluded, set max_tier to this tier
-                        const newMaxTier = cognitive.max_tier >= tier ? tier - 1 : tier
-                        setCognitive({ ...cognitive, max_tier: Math.max(1, newMaxTier) })
-                      }}
-                      disabled={tier === 1}
-                      className="sr-only peer"
-                    />
-                    <div className={`w-8 h-[18px] rounded-full transition-colors ${tier === 1 ? 'bg-accent opacity-60' : 'bg-paper-deep peer-checked:bg-accent'}`} />
-                    <div className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full transition-all ${tier === 1 ? 'translate-x-[14px] bg-white opacity-60' : 'bg-ink-faint peer-checked:translate-x-[14px] peer-checked:bg-white'}`} />
-                  </div>
+                  <Toggle
+                    checked={cognitive.max_tier >= tier}
+                    onChange={() => {
+                      const newMaxTier = cognitive.max_tier >= tier ? tier - 1 : tier
+                      setCognitive({ ...cognitive, max_tier: Math.max(1, newMaxTier) })
+                    }}
+                    disabled={tier === 1}
+                  />
                   <div>
-                    <span className="text-sm text-ink-light group-hover:text-ink transition-colors">
-                      Tier {tier}: {label}
-                    </span>
-                    <p className="text-[11px] text-ink-faint">{desc}</p>
+                    <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{label}</span>
+                    <span className="text-[11px] text-ink-faint ml-1.5">{desc}</span>
                   </div>
                 </label>
               ))}
             </div>
-          </div>
 
-          {/* Background Processing Toggles */}
-          <div className="pt-4 border-t border-warm-border">
-            <label className="block text-xs font-medium text-ink-muted mb-3">Background Processing</label>
-            <p className="text-[11px] text-ink-faint mb-3">
-              Controls which cognitive processes run automatically when memories are added. These are client-side flags — the server processes them if enabled.
-            </p>
-            <div className="space-y-3">
+            {/* Background Processing */}
+            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-medium text-ink-light">Background Processing</h3>
               {([
-                { key: 'reflection_enabled' as const, label: 'Reflection', desc: 'Extract atomic facts from raw memories (Tier 1 → Tier 2)' },
-                { key: 'deduction_enabled' as const, label: 'Deduction', desc: 'Infer new facts by combining 2+ reflected facts (Tier 2 → Tier 3)' },
-                { key: 'induction_enabled' as const, label: 'Induction', desc: 'Synthesize stable patterns from 3+ facts (→ Tier 4)' },
+                { key: 'reflection_enabled' as const, label: 'Reflection', desc: 'Extract facts from raw memories' },
+                { key: 'deduction_enabled' as const, label: 'Deduction', desc: 'Infer new facts by combining reflected facts' },
+                { key: 'induction_enabled' as const, label: 'Induction', desc: 'Synthesize patterns from 3+ facts' },
               ]).map(({ key, label, desc }) => (
                 <label key={key} className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={cognitive[key]}
-                      onChange={e => setCognitive({ ...cognitive, [key]: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-8 h-[18px] bg-paper-deep rounded-full peer-checked:bg-accent transition-colors" />
-                    <div className="absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-ink-faint rounded-full peer-checked:translate-x-[14px] peer-checked:bg-white transition-all" />
-                  </div>
+                  <Toggle checked={cognitive[key]} onChange={v => setCognitive({ ...cognitive, [key]: v })} />
                   <div>
                     <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{label}</span>
                     <p className="text-[11px] text-ink-faint">{desc}</p>
@@ -404,102 +406,96 @@ export function SettingsPage() {
                 </label>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* Telemetry */}
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Telemetry</h3>
-        <div className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-          <label className="flex items-center gap-3 cursor-pointer group">
-            <div className="relative shrink-0">
-              <input
-                type="checkbox"
-                checked={telemetryEnabled}
-                onChange={e => toggleTelemetry(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-8 h-[18px] bg-paper-deep rounded-full peer-checked:bg-accent transition-colors" />
-              <div className="absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-ink-faint rounded-full peer-checked:translate-x-[14px] peer-checked:bg-white transition-all" />
-            </div>
-            <div>
-              <span className="text-sm text-ink-light group-hover:text-ink transition-colors">Usage Analytics</span>
-              <p className="text-[11px] text-ink-faint">Help improve Anima by sharing anonymous usage data</p>
-            </div>
-          </label>
-          <p className="text-[11px] text-ink-faint leading-relaxed">
-            Anima collects anonymous usage metrics — model names (not keys), memory counts (not content),
-            OS info, and feature settings. No personal data, namespace names, or memory content is ever sent.
-            You can disable this at any time.
-          </p>
-        </div>
-      </section>
-
-      {/* Namespace Management */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Namespaces</h3>
-          <button
-            onClick={refreshNamespaces}
-            disabled={loadingNs}
-            className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw size={10} className={loadingNs ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-        </div>
-        <div className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-          {/* Active namespace */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-ink-muted">Active:</span>
-            <span className="text-sm text-accent font-medium bg-accent-light px-2 py-0.5 rounded">{namespace}</span>
-          </div>
-
-          {/* Namespace list */}
-          <div className="space-y-1 max-h-48 overflow-y-auto">
-            {namespaces.map(ns => (
-              <div
-                key={ns.namespace}
-                onClick={() => setNamespace(ns.namespace)}
-                className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
-                  namespace === ns.namespace
-                    ? 'bg-accent-light text-accent border border-accent/20'
-                    : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
-                }`}
-              >
-                <span className="truncate">{ns.namespace}</span>
-                <span className="text-[11px] text-ink-faint shrink-0 ml-2">
-                  {ns.active_count} / {ns.total_count}
-                </span>
+            {/* Server Profiles (read-only) */}
+            {profiles && Object.keys(profiles.profiles).length > 1 && (
+              <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
+                <h3 className="text-sm font-medium text-ink-light">Server Profiles</h3>
+                <p className="text-[11px] text-ink-faint">Configured in <code className="bg-paper-deep px-1 rounded">config.toml</code></p>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(profiles.profiles).map(([name, p]) => (
+                    <div key={name} className="bg-paper-deep rounded-lg px-3 py-2">
+                      <div className="text-xs font-medium text-ink">{name}</div>
+                      <div className="text-[11px] text-ink-muted truncate">{p.model}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+                  {profiles.routing.ask && <span><strong>ask</strong> → {profiles.routing.ask}</span>}
+                  {profiles.routing.chat && <span><strong>chat</strong> → {profiles.routing.chat}</span>}
+                  {profiles.routing.processor && <span><strong>processor</strong> → {profiles.routing.processor}</span>}
+                  {profiles.routing.consolidation && <span><strong>consolidation</strong> → {profiles.routing.consolidation}</span>}
+                </div>
               </div>
-            ))}
-            {namespaces.length === 0 && (
-              <p className="text-xs text-ink-faint py-3 text-center">No namespaces found</p>
             )}
-          </div>
 
-          {/* Create new */}
-          <div className="flex gap-2 pt-3 border-t border-warm-border">
-            <input
-              type="text"
-              value={newNs}
-              onChange={e => setNewNs(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && createNamespace()}
-              placeholder="org/project/user"
-              className="flex-1 bg-paper-deep border border-warm-border-strong rounded-lg px-3 py-1.5 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 transition-all"
-            />
-            <button
-              onClick={createNamespace}
-              disabled={!newNs.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white text-sm rounded-lg transition-colors"
-            >
-              <Plus size={14} />
-              Add
-            </button>
+            {/* Telemetry — compact */}
+            <div className="bg-card border border-warm-border rounded-xl px-5 py-4">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <Toggle checked={telemetryEnabled} onChange={toggleTelemetry} />
+                <div>
+                  <span className="text-sm text-ink-light group-hover:text-ink transition-colors">Anonymous Telemetry</span>
+                  <p className="text-[11px] text-ink-faint">Model names, memory counts, OS info. No personal data.</p>
+                </div>
+              </label>
+            </div>
+
+            {/* Backup & Restore */}
+            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-ink-faint" />
+                <h3 className="text-sm font-medium text-ink-light">Backup & Restore</h3>
+              </div>
+
+              {dbSize !== null && (
+                <p className="text-[11px] text-ink-faint">{dbSize.toLocaleString()} memories in database</p>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs text-ink-muted">Export</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => downloadBackup('json')}
+                    disabled={backupLoading !== null}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {backupLoading === 'json' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                    JSON
+                  </button>
+                  <button
+                    onClick={() => downloadBackup('sqlite')}
+                    disabled={backupLoading !== null}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {backupLoading === 'sqlite' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                    SQLite
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-ink-muted">Import</p>
+                <label className={`flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors cursor-pointer w-fit ${importLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {importLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                  Import JSON backup
+                  <input type="file" accept=".json" onChange={handleImport} className="hidden" disabled={importLoading} />
+                </label>
+              </div>
+
+              {importResult && (
+                <div className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 rounded-lg px-3 py-2">
+                  Imported {importResult.imported} memories, skipped {importResult.skipped} duplicates ({(importResult.elapsed_ms / 1000).toFixed(1)}s)
+                </div>
+              )}
+
+              {backupError && (
+                <div className="text-xs text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg px-3 py-2">
+                  {backupError}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </section>
     </div>
   )
