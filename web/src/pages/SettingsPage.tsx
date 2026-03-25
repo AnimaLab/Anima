@@ -85,8 +85,10 @@ export function SettingsPage() {
   const [agentName, setAgentName] = useState(() => localStorage.getItem('anima-agent-name') || 'Anima')
   const [agentPersona, setAgentPersona] = useState(() => localStorage.getItem('anima-agent-persona') || '')
 
-  const saveIdentity = (key: string, value: string) => {
-    localStorage.setItem(key, value)
+  const saveIdentity = () => {
+    localStorage.setItem('anima-user-name', userName)
+    localStorage.setItem('anima-agent-name', agentName)
+    localStorage.setItem('anima-agent-persona', agentPersona)
     showToast('Identity saved')
   }
 
@@ -276,14 +278,14 @@ export function SettingsPage() {
           <div>
             <label className="block text-xs text-ink-muted mb-1">Your name</label>
             <input type="text" value={userName}
-              onChange={e => { setUserName(e.target.value); saveIdentity('anima-user-name', e.target.value) }}
+              onChange={e => setUserName(e.target.value)}
               placeholder="e.g. Zhen"
               className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
           </div>
           <div>
             <label className="block text-xs text-ink-muted mb-1">Agent name</label>
             <input type="text" value={agentName}
-              onChange={e => { setAgentName(e.target.value); saveIdentity('anima-agent-name', e.target.value) }}
+              onChange={e => setAgentName(e.target.value)}
               placeholder="e.g. Anima"
               className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
           </div>
@@ -291,11 +293,17 @@ export function SettingsPage() {
         <div>
           <label className="block text-xs text-ink-muted mb-1">Instructions</label>
           <textarea value={agentPersona}
-            onChange={e => { setAgentPersona(e.target.value); saveIdentity('anima-agent-persona', e.target.value) }}
+            onChange={e => setAgentPersona(e.target.value)}
             placeholder="e.g. You are a warm, thoughtful personal assistant who helps me reflect on my life and remember what matters."
             rows={3}
             className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y min-h-16" />
           <p className="text-[11px] text-ink-faint mt-1">Persona, tone, and behavior. Sent as the system prompt with every message.</p>
+        </div>
+        <div className="flex justify-end">
+          <button onClick={saveIdentity}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent-hover text-white text-sm rounded-lg transition-colors">
+            <Check size={14} /> Save
+          </button>
         </div>
       </section>
 
