@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle, Check } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
@@ -47,9 +47,24 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
   )
 }
 
+function useToast() {
+  const [toast, setToast] = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout>>(null)
+  const show = useCallback((msg: string) => {
+    if (timer.current) clearTimeout(timer.current)
+    setToast(msg)
+    timer.current = setTimeout(() => setToast(null), 2000)
+  }, [])
+  return { toast, show }
+}
+
 export function SettingsPage() {
-  const { config, setConfig } = useChat()
-  const { namespace, setNamespace } = useNamespace()
+  const { toast, show: showToast } = useToast()
+  const { config, setConfig: setConfigRaw } = useChat()
+  const { namespace, setNamespace: setNamespaceRaw } = useNamespace()
+
+  const setConfig = (c: typeof config) => { setConfigRaw(c); showToast('Settings saved') }
+  const setNamespace = (ns: string) => { setNamespaceRaw(ns); showToast(`Switched to ${ns}`) }
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([])
   const [newNs, setNewNs] = useState('')
   const [loadingNs, setLoadingNs] = useState(false)
@@ -63,6 +78,7 @@ export function SettingsPage() {
   const setCognitive = (cfg: CognitiveConfig) => {
     setCognitiveState(cfg)
     saveCognitiveConfig(cfg)
+    showToast('Settings saved')
   }
 
   const [userName, setUserName] = useState(() => localStorage.getItem('anima-user-name') || '')
@@ -71,6 +87,7 @@ export function SettingsPage() {
 
   const saveIdentity = (key: string, value: string) => {
     localStorage.setItem(key, value)
+    showToast('Identity saved')
   }
 
   const fetchModels = useCallback(async () => {
@@ -120,6 +137,7 @@ export function SettingsPage() {
       deduction_enabled: cognitive.deduction_enabled,
       induction_enabled: cognitive.induction_enabled,
     }).catch(() => {})
+    showToast(enabled ? 'Telemetry enabled' : 'Telemetry disabled')
   }
 
   const [backupLoading, setBackupLoading] = useState<'json' | 'sqlite' | null>(null)
@@ -148,6 +166,7 @@ export function SettingsPage() {
       a.download = `anima-backup-${date}.${format === 'sqlite' ? 'db' : 'json'}`
       a.click()
       URL.revokeObjectURL(url)
+      showToast(`${format.toUpperCase()} backup exported`)
     } catch (e: unknown) {
       setBackupError(e instanceof Error ? e.message : 'Export failed')
     } finally {
@@ -199,11 +218,12 @@ export function SettingsPage() {
   const createNamespace = () => {
     const ns = newNs.trim()
     if (!ns) return
-    setNamespace(ns)
+    setNamespaceRaw(ns)
     setNewNs('')
     if (!namespaces.find(n => n.namespace === ns)) {
       setNamespaces(prev => [...prev, { namespace: ns, total_count: 0, active_count: 0 }])
     }
+    showToast(`Created namespace "${ns}"`)
   }
 
   return (
@@ -602,6 +622,16 @@ export function SettingsPage() {
           </div>
         )}
       </section>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-2 bg-ink text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg">
+            <Check className="w-3.5 h-3.5 text-green-400" />
+            {toast}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
