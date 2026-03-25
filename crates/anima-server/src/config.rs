@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -23,6 +23,64 @@ pub struct AppConfig {
     /// are always available — entries here override or extend them.
     #[serde(default)]
     pub categories: HashMap<String, CategoryConfig>,
+    /// Named LLM provider profiles. Each profile is an OpenAI-compatible endpoint.
+    /// When defined, `[routing]` controls which profile each operation uses.
+    /// Multiple profiles can share the same base_url with different models.
+    #[serde(default)]
+    pub profiles: HashMap<String, ProfileConfig>,
+    /// Routes operations to named profiles.
+    #[serde(default)]
+    pub routing: RoutingConfig,
+}
+
+/// A named LLM provider profile (OpenAI-compatible endpoint).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProfileConfig {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+impl ProfileConfig {
+    /// Resolve the API key: config value > {PROFILE_NAME}_API_KEY env > OPENAI_API_KEY env.
+    pub fn resolve_api_key(&self, profile_name: &str) -> Option<String> {
+        if !self.api_key.is_empty() {
+            return Some(self.api_key.clone());
+        }
+        let env_key = format!("{}_API_KEY", profile_name.to_uppercase().replace('-', "_"));
+        if let Ok(key) = std::env::var(&env_key) {
+            if !key.is_empty() { return Some(key); }
+        }
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            if !key.is_empty() { return Some(key); }
+        }
+        None
+    }
+}
+
+/// Routes operations to named profiles.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct RoutingConfig {
+    /// Profile for /ask answer generation.
+    #[serde(default)]
+    pub ask: Option<String>,
+    /// Profile for /chat replies.
+    #[serde(default)]
+    pub chat: Option<String>,
+    /// Profile for background reflection/deduction.
+    #[serde(default)]
+    pub processor: Option<String>,
+    /// Profile for memory consolidation.
+    #[serde(default)]
+    pub consolidation: Option<String>,
+}
+
+/// Resolved profiles + routing, computed once at startup.
+#[derive(Debug, Clone)]
+pub struct ResolvedProfiles {
+    pub profiles: HashMap<String, ProfileConfig>,
+    pub routing: RoutingConfig,
 }
 
 /// Configuration for a memory category.
@@ -83,7 +141,10 @@ pub struct DatabaseConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EmbeddingConfig {
-    /// Embedding backend: "local" (default, ONNX) or "openai" (API-based).
+    /// Embedding backend: "local" (default, ONNX), "openai", or "openai_compat"
+    /// (any OpenAI-compatible embedding API — Cohere, Voyage, Together, vLLM, etc.).
+    /// "openai" and "openai_compat" are equivalent — both use the OpenAI embedding
+    /// API protocol and support custom base URLs.
     #[serde(default = "default_embedding_backend")]
     pub backend: String,
     // --- Local ONNX settings ---
@@ -101,14 +162,15 @@ pub struct EmbeddingConfig {
     /// Set to empty string or omit to disable.
     #[serde(default)]
     pub query_instruction: Option<String>,
-    // --- OpenAI API settings (used when backend = "openai") ---
-    /// API base URL (e.g. "https://api.openai.com/v1").
+    // --- OpenAI / OpenAI-compatible API settings (used when backend = "openai" or "openai_compat") ---
+    /// API base URL (e.g. "https://api.openai.com/v1", "https://api.cohere.com/compatibility/v1",
+    /// "https://api.voyageai.com/v1").
     #[serde(default)]
     pub api_base_url: Option<String>,
-    /// Model name (e.g. "text-embedding-3-small").
+    /// Model name (e.g. "text-embedding-3-small", "embed-v4.0", "voyage-3-large").
     #[serde(default)]
     pub api_model: Option<String>,
-    /// API key. Falls back to OPENAI_API_KEY env var.
+    /// API key. Falls back to EMBEDDING_API_KEY env var, then OPENAI_API_KEY env var.
     #[serde(default)]
     pub api_key: Option<String>,
 }
@@ -393,11 +455,98 @@ impl Default for AppConfig {
             telemetry: TelemetryConfig::default(),
             reranker: RerankerConfig::default(),
             categories: HashMap::new(),
+            profiles: HashMap::new(),
+            routing: RoutingConfig::default(),
         }
     }
 }
 
 impl AppConfig {
+    /// Resolve named profiles from config. If `[profiles]` is defined, use them.
+    /// Otherwise, synthesize profiles from legacy `[llm]`, `[processor]`, `[consolidation]` sections.
+    pub fn resolve_profiles(&self) -> ResolvedProfiles {
+        if !self.profiles.is_empty() {
+            // Explicit profiles — use as-is, apply routing defaults
+            let mut routing = self.routing.clone();
+            let first_name = self.profiles.keys().next().cloned();
+            if routing.ask.is_none() { routing.ask = first_name.clone(); }
+            if routing.chat.is_none() { routing.chat = first_name.clone(); }
+            if routing.processor.is_none() { routing.processor = first_name.clone(); }
+            if routing.consolidation.is_none() { routing.consolidation = first_name; }
+
+            // Warn about routing references to non-existent profiles
+            for (op, name) in [
+                ("ask", &routing.ask), ("chat", &routing.chat),
+                ("processor", &routing.processor), ("consolidation", &routing.consolidation),
+            ] {
+                if let Some(n) = name {
+                    if !self.profiles.contains_key(n) {
+                        tracing::warn!("Routing '{op}' references unknown profile '{n}'");
+                    }
+                }
+            }
+
+            return ResolvedProfiles { profiles: self.profiles.clone(), routing };
+        }
+
+        // Legacy mode: synthesize profiles from [llm], [processor], [consolidation]
+        let mut profiles = HashMap::new();
+        let mut routing = RoutingConfig::default();
+
+        // "default" from [llm]
+        profiles.insert("default".into(), ProfileConfig {
+            base_url: self.llm.base_url.clone(),
+            model: self.llm.model.clone(),
+            api_key: self.llm.api_key.clone(),
+        });
+        routing.ask = Some("default".into());
+        routing.chat = Some("default".into());
+
+        // "processor" from [processor] if it differs from [llm]
+        if self.processor.enabled
+            && (self.processor.base_url != self.llm.base_url || self.processor.model != self.llm.model)
+        {
+            profiles.insert("processor".into(), ProfileConfig {
+                base_url: self.processor.base_url.clone(),
+                model: self.processor.model.clone(),
+                api_key: self.processor.api_key.clone(),
+            });
+            routing.processor = Some("processor".into());
+        } else {
+            routing.processor = Some("default".into());
+        }
+
+        // "consolidation" from [consolidation]
+        if self.consolidation.enabled {
+            match self.consolidation.backend.as_str() {
+                "ollama" => {
+                    // Ollama's OpenAI-compat endpoint is at /v1
+                    let base = self.consolidation.ollama.base_url.trim_end_matches('/');
+                    profiles.insert("consolidation".into(), ProfileConfig {
+                        base_url: format!("{base}/v1"),
+                        model: self.consolidation.ollama.model.clone(),
+                        api_key: String::new(),
+                    });
+                }
+                "openai_compat" => {
+                    profiles.insert("consolidation".into(), ProfileConfig {
+                        base_url: self.consolidation.openai_compat.base_url.clone(),
+                        model: self.consolidation.openai_compat.model.clone(),
+                        api_key: self.consolidation.openai_compat.api_key.clone(),
+                    });
+                }
+                _ => {}
+            }
+            routing.consolidation = Some(
+                if profiles.contains_key("consolidation") { "consolidation" } else { "default" }.into()
+            );
+        } else {
+            routing.consolidation = Some("default".into());
+        }
+
+        ResolvedProfiles { profiles, routing }
+    }
+
     /// Load config from file, falling back to defaults.
     pub fn load(path: Option<&str>) -> Self {
         if let Some(p) = path {

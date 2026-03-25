@@ -200,6 +200,42 @@ pub async fn calibration_metrics(
     Ok(Json(metrics))
 }
 
+/// GET /api/v1/calibration/weights — return current hybrid search weights
+/// (possibly auto-tuned from calibration observations).
+pub async fn get_hybrid_weights(
+    State(state): State<Arc<AppState>>,
+) -> Json<serde_json::Value> {
+    let cfg = state.scorer_config.read().await;
+    Json(serde_json::json!({
+        "weight_vector": cfg.weight_vector,
+        "weight_keyword": cfg.weight_keyword,
+    }))
+}
+
+/// GET /api/v1/profiles — return resolved LLM provider profiles and routing (masks API keys).
+pub async fn get_profiles(
+    State(state): State<Arc<AppState>>,
+) -> Json<serde_json::Value> {
+    let profiles: serde_json::Map<String, serde_json::Value> = state.resolved_profiles.profiles.iter()
+        .map(|(name, p)| {
+            (name.clone(), serde_json::json!({
+                "base_url": p.base_url,
+                "model": p.model,
+                "has_api_key": !p.api_key.is_empty() || p.resolve_api_key(name).is_some(),
+            }))
+        })
+        .collect();
+    Json(serde_json::json!({
+        "profiles": profiles,
+        "routing": {
+            "ask": state.resolved_profiles.routing.ask,
+            "chat": state.resolved_profiles.routing.chat,
+            "processor": state.resolved_profiles.routing.processor,
+            "consolidation": state.resolved_profiles.routing.consolidation,
+        }
+    }))
+}
+
 fn to_working_memory_dto(entry: anima_db::store::WorkingMemoryEntry) -> WorkingMemoryEntryDto {
     WorkingMemoryEntryDto {
         id: entry.id,
@@ -946,6 +982,7 @@ fn make_chat_response(
     mut memories_used: Vec<MemoryContext>,
     mut memories_added: Vec<AddedMemory>,
     mode: String,
+    degraded: bool,
 ) -> ChatResponse {
     let (reply, mut redaction_applied) = redact_sensitive_text(&reply);
     for mem in &mut memories_used {
@@ -965,6 +1002,7 @@ fn make_chat_response(
         memories_added,
         mode,
         provenance,
+        degraded,
     }
 }
 
@@ -976,6 +1014,8 @@ fn make_ask_response(
     total_search_results: usize,
     elapsed_ms: f64,
     needs_confirmation: Vec<ConfirmationQuestion>,
+    degraded: bool,
+    conflicts: Vec<ConflictNote>,
 ) -> AskResponse {
     let (answer, mut redaction_applied) = redact_sensitive_text(&answer);
     for mem in &mut memories_referenced {
@@ -992,6 +1032,8 @@ fn make_ask_response(
         elapsed_ms,
         provenance,
         needs_confirmation,
+        degraded,
+        conflicts,
     }
 }
 
@@ -1241,6 +1283,251 @@ pub async fn add_memories_batch(
     }))
 }
 
+/// Run the multi-stage /ask retrieval pipeline (keyword expansion, entity resolution,
+/// temporal supplement, episode expansion, entity-linked retrieval) and return ranked
+/// (Memory, score) pairs. Reusable by both /ask and search_mode=ask_retrieval.
+async fn run_ask_retrieval_pipeline(
+    state: &AppState,
+    ns: &anima_core::namespace::Namespace,
+    query: &str,
+    limit: usize,
+    scorer_config: &anima_core::search::ScorerConfig,
+) -> Result<Vec<(anima_core::memory::Memory, f64)>, AppError> {
+    let embedding = embed_query_cached(state, query)?;
+
+    // 1. Initial hybrid search
+    let results = state.store.search(&embedding, query, ns, &SearchMode::Hybrid, limit, scorer_config)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    record_retrieval_observations(state, ns, &results, 0.15, "ask_retrieval_hybrid").await;
+
+    // 2. Keyword expansion
+    let keyword_queries = extract_keyword_queries(query);
+    let mut expanded_results = Vec::new();
+    for kq in &keyword_queries {
+        let kq_embedding = embed_query_cached(state, kq)?;
+        if let Ok(kw_results) = state
+            .store
+            .search(&kq_embedding, kq, ns, &SearchMode::Hybrid, limit, scorer_config)
+            .await
+        {
+            expanded_results.extend(kw_results);
+        }
+    }
+
+    // 3. Identity-aware query expansion
+    let entities = extract_candidate_entities(query);
+    let mut resolved_entity_queries: Vec<String> = Vec::new();
+    for entity in &entities {
+        match state.store.resolve_identity(ns, entity, 3).await {
+            Ok(resolution) => {
+                if resolution.candidates.is_empty() {
+                    resolved_entity_queries.push(entity.clone());
+                    continue;
+                }
+                if resolution.best_confidence >= 0.62 {
+                    let mut added_bases = HashSet::new();
+                    for c in &resolution.candidates {
+                        let base = c.canonical_name
+                            .split_whitespace().next().unwrap_or(&c.canonical_name)
+                            .trim_end_matches("'s").trim_end_matches("\u{2019}s")
+                            .to_string();
+                        if added_bases.insert(base.to_ascii_lowercase()) {
+                            resolved_entity_queries.push(base);
+                        }
+                    }
+                } else {
+                    resolved_entity_queries.push(entity.clone());
+                }
+            }
+            Err(e) => {
+                warn!("identity resolution failed for '{entity}': {e}");
+                resolved_entity_queries.push(entity.clone());
+            }
+        }
+    }
+    if resolved_entity_queries.is_empty() {
+        resolved_entity_queries = entities.clone();
+    }
+    let mut dedup = HashSet::new();
+    resolved_entity_queries.retain(|q| dedup.insert(q.to_ascii_lowercase()));
+
+    // 4. Entity keyword searches
+    let mut entity_results = Vec::new();
+    let topic_words: Vec<&str> = {
+        let stop: HashSet<&str> = ["a","an","the","is","are","was","were","be","been","being",
+            "have","has","had","do","does","did","will","would","could","should","may","might",
+            "shall","can","to","of","in","for","on","with","at","by","from","as","into","about",
+            "and","or","but","if","that","which","who","this","what","when","where","how","why",
+            "not","no","so","long","much","many","her","his","their","my","your","they","she",
+            "he","it","we","you","i","me","him","them","us"].into_iter().collect();
+        let entity_lower: HashSet<String> = resolved_entity_queries.iter()
+            .flat_map(|e| e.split_whitespace().map(|w| w.to_ascii_lowercase()))
+            .collect();
+        query.split(|c: char| !c.is_alphanumeric() && c != '\'')
+            .filter(|w| !w.is_empty() && w.len() > 2)
+            .filter(|w| !stop.contains(w.to_ascii_lowercase().as_str()))
+            .filter(|w| !entity_lower.contains(&w.to_ascii_lowercase()))
+            .collect()
+    };
+    for entity in &resolved_entity_queries {
+        if let Ok(kw_results) = state
+            .store
+            .search(&embedding, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
+            .await
+        {
+            record_retrieval_observations(state, ns, &kw_results, 0.15, "ask_retrieval_entity_kw").await;
+            entity_results.extend(kw_results);
+        }
+        for &topic in &topic_words {
+            let combined = format!("{entity} {topic}");
+            if let Ok(kw_results) = state
+                .store
+                .search(&embedding, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
+                .await
+            {
+                entity_results.extend(kw_results);
+            }
+        }
+    }
+
+    // 5. Merge all sources: best score per memory_id
+    let mut best_scores: HashMap<String, f64> = HashMap::new();
+    for sr in results.iter().chain(expanded_results.iter()).chain(entity_results.iter()) {
+        let entry = best_scores.entry(sr.memory_id.clone()).or_insert(0.0);
+        if sr.score > *entry { *entry = sr.score; }
+    }
+    let mut scored_ids: Vec<(String, f64)> = best_scores.into_iter().collect();
+    scored_ids.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut all_results: Vec<(anima_core::memory::Memory, f64)> = Vec::new();
+    let mut seen_contents: HashSet<String> = HashSet::new();
+    for (memory_id, score) in scored_ids {
+        if let Ok(Some(memory)) = state.store.get(&memory_id).await {
+            if seen_contents.insert(memory.content.clone()) {
+                all_results.push((memory, score));
+            }
+        }
+    }
+
+    // Drop results scoring below 25% of top hit
+    if let Some((_, top_score)) = all_results.first() {
+        let cutoff = top_score * 0.25;
+        all_results.retain(|(_, s)| *s >= cutoff);
+    }
+    all_results.truncate(limit);
+
+    // 6. Temporal date-range supplement
+    if let Some((date_start, date_end)) = detect_temporal_dates(query) {
+        let start = date_start.as_deref().unwrap_or("0000-01-01");
+        let end = date_end.as_deref().unwrap_or("9999-12-31");
+        if let Ok(date_mems) = state.store.find_by_date_range(ns, start, end, 20).await {
+            for mem in date_mems {
+                if seen_contents.insert(mem.content.clone()) {
+                    all_results.push((mem, 0.25));
+                }
+            }
+        }
+    }
+
+    // 7. Episode expansion
+    {
+        let mut episode_ids_seen: HashSet<String> = HashSet::new();
+        for (mem, score) in &all_results {
+            if *score < 0.3 { continue; }
+            if let Some(ep_id) = &mem.episode_id {
+                if !ep_id.is_empty() { episode_ids_seen.insert(ep_id.clone()); }
+            } else if let Some(meta) = &mem.metadata {
+                if let Some(session) = meta.get("session").and_then(|v| v.as_str()) {
+                    episode_ids_seen.insert(session.to_string());
+                }
+            }
+        }
+        let mut episodes_expanded = 0;
+        for ep_id in &episode_ids_seen {
+            if episodes_expanded >= 3 { break; }
+            if let Ok(co_mems) = state.store.find_by_episode(ns, ep_id, 10).await {
+                for mem in co_mems {
+                    if seen_contents.insert(mem.content.clone()) {
+                        all_results.push((mem, 0.3));
+                    }
+                }
+            }
+            episodes_expanded += 1;
+        }
+    }
+
+    // 8. Entity-linked retrieval
+    {
+        let mut entity_ids: Vec<String> = Vec::new();
+        for entity in &resolved_entity_queries {
+            if let Ok(resolution) = state.store.resolve_identity(ns, entity, 3).await {
+                for c in &resolution.candidates {
+                    if c.score >= 0.3 { entity_ids.push(c.entity_id.clone()); }
+                }
+            }
+        }
+        entity_ids.sort();
+        entity_ids.dedup();
+        if !entity_ids.is_empty() {
+            if let Ok(linked_ids) = state.store.find_memories_by_entity_ids(ns, &entity_ids, 30).await {
+                for mid in linked_ids {
+                    if let Ok(Some(mem)) = state.store.get(&mid).await {
+                        if seen_contents.insert(mem.content.clone()) {
+                            all_results.push((mem, 0.28));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(all_results)
+}
+
+/// Run query rewriting: extract keywords from a natural-language query and run expanded
+/// searches, merging results with the original. Returns merged ScoredResults.
+async fn run_query_rewrite(
+    state: &AppState,
+    ns: &anima_core::namespace::Namespace,
+    query: &str,
+    _embedding: &[f32],
+    mode: &SearchMode,
+    limit: usize,
+    scorer_config: &anima_core::search::ScorerConfig,
+    original_results: &[anima_core::search::ScoredResult],
+) -> Result<Vec<anima_core::search::ScoredResult>, AppError> {
+    let keyword_queries = extract_keyword_queries(query);
+    if keyword_queries.is_empty() {
+        return Ok(original_results.to_vec());
+    }
+
+    let mut best_scores: HashMap<String, anima_core::search::ScoredResult> = HashMap::new();
+    for sr in original_results {
+        best_scores.insert(sr.memory_id.clone(), sr.clone());
+    }
+
+    for kq in &keyword_queries {
+        let kq_embedding = embed_query_cached(state, kq)?;
+        if let Ok(kw_results) = state
+            .store
+            .search(&kq_embedding, kq, ns, mode, limit, scorer_config)
+            .await
+        {
+            for sr in kw_results {
+                let entry = best_scores.entry(sr.memory_id.clone()).or_insert_with(|| sr.clone());
+                if sr.score > entry.score {
+                    *entry = sr;
+                }
+            }
+        }
+    }
+
+    let mut merged: Vec<anima_core::search::ScoredResult> = best_scores.into_values().collect();
+    merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(merged)
+}
+
 pub async fn search_memories(
     State(state): State<Arc<AppState>>,
     ExtractNamespace(ns): ExtractNamespace,
@@ -1263,14 +1550,12 @@ pub async fn search_memories(
     let mode = match req.search_mode.as_deref() {
         Some("vector") => SearchMode::Vector,
         Some("keyword") => SearchMode::Keyword,
+        Some("ask_retrieval") => SearchMode::AskRetrieval,
         _ => SearchMode::Hybrid,
     };
 
-    // Embed query
-    let embedding = embed_query_cached(&state, &req.query)?;
-
     // Override scorer config from request
-    let mut scorer_config = state.scorer_config.clone();
+    let mut scorer_config = state.scorer_config.read().await.clone();
     if let Some(tw) = req.temporal_weight {
         scorer_config.temporal_weight = tw.clamp(0.0, 1.0);
     }
@@ -1280,6 +1565,39 @@ pub async fn search_memories(
     scorer_config.date_start = req.date_start;
     scorer_config.date_end = req.date_end;
 
+    // ── ask_retrieval mode: full multi-stage pipeline, return as search results ──
+    if matches!(mode, SearchMode::AskRetrieval) {
+        let all_results = run_ask_retrieval_pipeline(&state, &ns, &req.query, limit, &scorer_config).await?;
+        let mut results = Vec::with_capacity(all_results.len().min(limit));
+        for (memory, score) in all_results.into_iter().take(limit) {
+            let (content, metadata, _) = redact_content_and_metadata(&memory.content, memory.metadata);
+            results.push(SearchResultDto {
+                id: memory.id,
+                content,
+                metadata,
+                tags: memory.tags,
+                memory_type: memory.memory_type,
+                category: memory.category.clone(),
+                confidence: memory.confidence,
+                source: memory.source.clone(),
+                score,
+                vector_score: None,
+                keyword_score: None,
+                temporal_score: None,
+                created_at: memory.created_at.to_rfc3339(),
+                updated_at: memory.updated_at.to_rfc3339(),
+            });
+        }
+        return Ok(Json(SearchResponse {
+            results,
+            query_time_ms: start.elapsed().as_secs_f64() * 1000.0,
+        }));
+    }
+
+    // ── Standard search modes (hybrid/vector/keyword) ──
+    // Embed query
+    let embedding = embed_query_cached(&state, &req.query)?;
+
     // Search — fetch more candidates if reranker is enabled so it has room to reorder
     let reranker_top_n = state.config.reranker.top_n;
     let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
@@ -1288,9 +1606,13 @@ pub async fn search_memories(
         .search(&embedding, &req.query, &ns, &mode, fetch_limit, &scorer_config)
         .await?;
 
+    // Feature 2: Query rewriting — expand with keyword extraction if enabled
+    if req.query_rewrite {
+        scored = run_query_rewrite(&state, &ns, &req.query, &embedding, &mode, fetch_limit, &scorer_config, &scored).await?;
+    }
+
     // Re-rank with cross-encoder if enabled.
-    // Skip if the top result is already high-confidence (> 0.7 from initial retrieval)
-    // — the reranker won't meaningfully change the ordering.
+    // Skip if the top result is already high-confidence (> 0.50 from initial retrieval)
     let skip_rerank = scored.first().map_or(false, |r| r.score > 0.50);
     if let Some(ref reranker) = state.reranker {
         let top_n = reranker_top_n.min(scored.len());
@@ -1306,13 +1628,19 @@ pub async fn search_memories(
             let doc_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
             match reranker.score_pairs(&req.query, &doc_refs) {
                 Ok(rerank_scores) => {
-                    // Replace scores for re-ranked candidates, keep original order for the rest
                     for (i, score) in rerank_scores.iter().enumerate() {
                         if i < scored.len() {
-                            scored[i].score = *score;
+                            // Blend reranker score with a small keyword-match bonus
+                            // so results that actually contain query terms aren't buried
+                            // by cross-encoder noise on short documents.
+                            let kw_bonus = if scored[i].keyword_score.unwrap_or(0.0) > 0.0 {
+                                0.03
+                            } else {
+                                0.0
+                            };
+                            scored[i].score = (*score + kw_bonus).min(1.0);
                         }
                     }
-                    // Re-sort by new scores
                     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
                 }
                 Err(e) => {
@@ -1719,6 +2047,28 @@ pub async fn list_audit_events(
         )
         .await?;
     Ok(Json(events))
+}
+
+/// GET /api/v1/contradictions — list contradiction ledger entries for the namespace.
+pub async fn list_contradictions(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+    Query(params): Query<ContradictionListParams>,
+) -> Result<Json<Vec<anima_db::store::ContradictionEntry>>, AppError> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 500);
+    let offset = params.offset.unwrap_or(0);
+    let entries = state.store.list_contradictions(&ns, limit, offset).await?;
+    Ok(Json(entries))
+}
+
+/// GET /api/v1/memories/{id}/history — get supersession chain for a memory.
+pub async fn get_memory_history(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<anima_db::store::SupersessionLink>>, AppError> {
+    let chain = state.store.get_supersession_chain(&ns, &id).await?;
+    Ok(Json(chain))
 }
 
 pub async fn upsert_procedure_revision(
@@ -2159,6 +2509,7 @@ pub async fn simulate_counterfactual(
     } else {
         let query = req.query.clone().unwrap_or_else(|| intervention.to_string());
         let embedding = embed_query_cached(&state, &query)?;
+        let cf_scorer_config = state.scorer_config.read().await.clone();
         let scored = state
             .store
             .search(
@@ -2167,7 +2518,7 @@ pub async fn simulate_counterfactual(
                 &ns,
                 &SearchMode::Hybrid,
                 8,
-                &state.scorer_config,
+                &cf_scorer_config,
             )
             .await?;
         for sr in scored {
@@ -2749,45 +3100,66 @@ pub async fn top_accessed(
     Ok(Json(responses))
 }
 
-/// Resolve an optional client-provided LLM config, falling back to server-side [llm] config.
-fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState) -> LlmConfig {
+/// Resolve an optional client-provided LLM config, falling back to the
+/// operation's profile (from `[profiles]` + `[routing]`) or server-side `[llm]` config.
+fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState, operation: &str) -> LlmConfig {
+    let profile = state.profile_for(operation);
+    let profile_name = match operation {
+        "ask" => state.resolved_profiles.routing.ask.as_deref(),
+        "chat" => state.resolved_profiles.routing.chat.as_deref(),
+        _ => None,
+    }.unwrap_or("default");
+
     match llm {
         Some(mut client_llm) => {
-            // If the client sends a localhost URL that the server can't reach
-            // (e.g. inside Docker), substitute the server's configured base_url.
-            let server_url = &state.config.llm.base_url;
+            let server_url = profile.map(|p| &p.base_url).unwrap_or(&state.config.llm.base_url);
             if client_llm.base_url.contains("localhost") || client_llm.base_url.contains("127.0.0.1") {
                 if !server_url.contains("localhost") && !server_url.contains("127.0.0.1") {
                     client_llm.base_url = server_url.clone();
                 }
             }
-            // Fall back to server api_key if client didn't provide one
             if client_llm.api_key.as_ref().map_or(true, |k| k.is_empty()) {
-                client_llm.api_key = Some(state.config.llm.api_key.clone())
-                    .filter(|k| !k.is_empty())
+                client_llm.api_key = profile
+                    .and_then(|p| p.resolve_api_key(profile_name))
+                    .or_else(|| Some(state.config.llm.api_key.clone()).filter(|k| !k.is_empty()))
                     .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
             }
-            // Fall back to server model if client didn't provide one
             if client_llm.model.is_empty() {
-                client_llm.model = state.config.llm.model.clone();
+                client_llm.model = profile
+                    .map(|p| p.model.clone())
+                    .unwrap_or_else(|| state.config.llm.model.clone());
             }
             client_llm
         }
         None => {
-            let cfg = &state.config.llm;
-            let api_key = Some(cfg.api_key.clone())
-                .filter(|k| !k.is_empty())
-                .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
-            LlmConfig {
-                base_url: cfg.base_url.clone(),
-                model: cfg.model.clone(),
-                api_key,
-                temperature: None,
-                max_tokens: None,
-                system_prompt: None,
-                vision: false,
-                tool_use: false,
-                streaming: false,
+            if let Some(p) = profile {
+                LlmConfig {
+                    base_url: p.base_url.clone(),
+                    model: p.model.clone(),
+                    api_key: p.resolve_api_key(profile_name),
+                    temperature: None,
+                    max_tokens: None,
+                    system_prompt: None,
+                    vision: false,
+                    tool_use: false,
+                    streaming: false,
+                }
+            } else {
+                let cfg = &state.config.llm;
+                let api_key = Some(cfg.api_key.clone())
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()));
+                LlmConfig {
+                    base_url: cfg.base_url.clone(),
+                    model: cfg.model.clone(),
+                    api_key,
+                    temperature: None,
+                    max_tokens: None,
+                    system_prompt: None,
+                    vision: false,
+                    tool_use: false,
+                    streaming: false,
+                }
             }
         }
     }
@@ -2808,10 +3180,11 @@ pub async fn chat(
             vec![],
             vec![],
             req.mode.clone(),
+            false,
         )));
     }
 
-    let resolved_llm = resolve_llm_config(req.llm.take(), &state);
+    let resolved_llm = resolve_llm_config(req.llm.take(), &state, "chat");
     req.llm = Some(resolved_llm);
 
     let client = reqwest::Client::new();
@@ -2912,6 +3285,8 @@ async fn record_retrieval_observations(
                     "source": source,
                     "rank": rank + 1,
                     "threshold": threshold,
+                    "vector_score": sr.vector_score,
+                    "keyword_score": sr.keyword_score,
                 })),
             )
             .await;
@@ -3046,10 +3421,11 @@ async fn enriched_retrieval(
     label: &str,
 ) -> Result<(String, Vec<MemoryContext>), AppError> {
     let embedding = embed_query_cached(state, query)?;
+    let scorer_cfg = state.scorer_config.read().await.clone();
 
     // 1. Primary hybrid search
     let results = state.store
-        .search(&embedding, query, ns, &SearchMode::Hybrid, search_limit, &state.scorer_config)
+        .search(&embedding, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, label).await;
@@ -3060,7 +3436,7 @@ async fn enriched_retrieval(
     for kq in &keyword_queries {
         let kq_embedding = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state.store
-            .search(&kq_embedding, kq, ns, &SearchMode::Hybrid, search_limit, &state.scorer_config)
+            .search(&kq_embedding, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
             .await
         {
             expanded_results.extend(kw_results);
@@ -3103,7 +3479,7 @@ async fn enriched_retrieval(
     let mut entity_results = Vec::new();
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state.store
-            .search(&embedding, entity, ns, &SearchMode::Keyword, search_limit / 2, &state.scorer_config)
+            .search(&embedding, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
             .await
         {
             entity_results.extend(kw_results);
@@ -3250,15 +3626,22 @@ async fn chat_rag_mode(
     messages.push(build_user_message(&req.message, &req.attachments, llm.vision));
 
     // 3. Call LLM
-    let reply = match call_llm(client, llm, &messages, None).await {
-        Ok(r) => r,
-        Err(e) => safe_fallback_chat_reply(&req.message, &memories_used, &e.to_string()),
+    let (reply, chat_degraded) = match call_llm(client, llm, &messages, None).await {
+        Ok(r) => (r, false),
+        Err(e) => {
+            tracing::warn!("LLM unavailable during /chat (rag mode), degrading to retrieval-only: {e}");
+            (safe_fallback_chat_reply(&req.message, &memories_used, &e.to_string()), true)
+        }
     };
 
-    // 4. Extract memorable facts from the exchange and store them
-    let memories_added = extract_and_store_facts(
-        state, client, llm, ns, &req.message, &reply, &req.history,
-    ).await;
+    // 4. Extract memorable facts from the exchange and store them (skip if degraded)
+    let memories_added = if chat_degraded {
+        vec![]
+    } else {
+        extract_and_store_facts(
+            state, client, llm, ns, &req.message, &reply, &req.history,
+        ).await
+    };
 
     Ok(Json(make_chat_response(
         ns,
@@ -3266,6 +3649,7 @@ async fn chat_rag_mode(
         memories_used,
         memories_added,
         "rag".into(),
+        chat_degraded,
     )))
 }
 
@@ -3377,6 +3761,7 @@ async fn chat_tool_mode(
         let resp = match send_llm_request(client, llm, &body).await {
             Ok(r) => r,
             Err(e) => {
+                tracing::warn!("LLM unavailable during /chat (tool mode), degrading: {e}");
                 let reply = safe_fallback_chat_reply(&req.message, &memories_used, &e.to_string());
                 return Ok(Json(make_chat_response(
                     ns,
@@ -3384,6 +3769,7 @@ async fn chat_tool_mode(
                     memories_used,
                     memories_added,
                     "tool".into(),
+                    true,
                 )));
             }
         };
@@ -3403,6 +3789,7 @@ async fn chat_tool_mode(
                 memories_used,
                 memories_added,
                 "tool".into(),
+                false,
             )));
         }
 
@@ -3484,9 +3871,12 @@ async fn chat_tool_mode(
     }
 
     // If we exhausted rounds, get a final reply without tools
-    let reply = match call_llm(client, llm, &messages, None).await {
-        Ok(r) => r,
-        Err(e) => safe_fallback_chat_reply(&req.message, &memories_used, &e.to_string()),
+    let (reply, tool_degraded) = match call_llm(client, llm, &messages, None).await {
+        Ok(r) => (r, false),
+        Err(e) => {
+            tracing::warn!("LLM unavailable during /chat (tool mode final), degrading: {e}");
+            (safe_fallback_chat_reply(&req.message, &memories_used, &e.to_string()), true)
+        }
     };
     Ok(Json(make_chat_response(
         ns,
@@ -3494,6 +3884,7 @@ async fn chat_tool_mode(
         memories_used,
         memories_added,
         "tool".into(),
+        tool_degraded,
     )))
 }
 
@@ -3507,6 +3898,7 @@ async fn handle_tool_search(
         .embed_query(query)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
+    let tool_scorer = state.scorer_config.read().await.clone();
     let scored = state
         .store
         .search(
@@ -3515,7 +3907,7 @@ async fn handle_tool_search(
             ns,
             &SearchMode::Hybrid,
             5,
-            &state.scorer_config,
+            &tool_scorer,
         )
         .await?;
     record_retrieval_observations(state, ns, &scored, 0.15, "tool_memory_search").await;
@@ -3789,6 +4181,8 @@ pub async fn ask(
                 source_memory_id: "uncertainty".to_string(),
                 confidence: 0.0,
             }],
+            false,
+            vec![],
         )));
     }
 
@@ -3796,41 +4190,25 @@ pub async fn ask(
     let client = reqwest::Client::new();
 
     // Build LlmConfig from server config or client override
-    let base_llm = resolve_llm_config(req.llm, &state);
+    let base_llm = resolve_llm_config(req.llm, &state, "ask");
 
-    // --- Step 1: Hybrid search + keyword expansion (no LLM) ---
-    let embedding = embed_query_cached(&state, &req.question)?;
-
-    // Apply max_tier and date overrides if specified
-    let mut ask_scorer_config = state.scorer_config.clone();
+    // --- Step 1: Multi-stage retrieval pipeline (no LLM) ---
+    let mut ask_scorer_config = state.scorer_config.read().await.clone();
     if let Some(mt) = req.max_tier {
         ask_scorer_config.max_tier = mt.clamp(1, 4);
     }
     ask_scorer_config.date_start = req.date_start;
     ask_scorer_config.date_end = req.date_end;
 
-    let results = state.store.search(&embedding, &req.question, &ns, &SearchMode::Hybrid, req.search_limit, &ask_scorer_config)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
-    record_retrieval_observations(&state, &ns, &results, 0.15, "ask_hybrid").await;
+    let mut all_results = run_ask_retrieval_pipeline(&state, &ns, &req.question, req.max_results, &ask_scorer_config).await?;
 
-    // Run additional keyword searches for content-word subsets of the question.
-    // This compensates for removing the LLM-based query expansion while staying
-    // zero-latency (pure DB queries, no LLM call).
-    let keyword_queries = extract_keyword_queries(&req.question);
-    let mut expanded_results = Vec::new();
-    for kq in &keyword_queries {
-        let kq_embedding = embed_query_cached(&state, kq)?;
-        if let Ok(kw_results) = state
-            .store
-            .search(&kq_embedding, kq, &ns, &SearchMode::Hybrid, req.search_limit, &ask_scorer_config)
-            .await
-        {
-            expanded_results.extend(kw_results);
-        }
+    // Apply memory_types filter if specified
+    let type_filter = &req.memory_types;
+    if !type_filter.is_empty() {
+        all_results.retain(|(mem, _)| type_filter.contains(&mem.memory_type));
     }
 
-    // 1c. Identity-aware query expansion (alias + multilingual normalization + ambiguity handling)
+    // Identity confirmation questions (ask-specific — low-confidence entity disambiguation)
     let entities = extract_candidate_entities(&req.question);
     let mut identity_needs_confirmation: Vec<ConfirmationQuestion> = Vec::new();
     let mut resolved_entity_queries: Vec<String> = Vec::new();
@@ -3842,11 +4220,8 @@ pub async fn ask(
                     continue;
                 }
                 if resolution.best_confidence >= 0.62 {
-                    // Use all unique base names from candidates
-                    // "Melanie They're", "Melanie", "Melanie's" all reduce to "Melanie"
                     let mut added_bases = HashSet::new();
                     for c in &resolution.candidates {
-                        // Strip possessives and trailing junk to get base name
                         let base = c.canonical_name
                             .split_whitespace().next().unwrap_or(&c.canonical_name)
                             .trim_end_matches("'s").trim_end_matches("\u{2019}s")
@@ -3878,8 +4253,7 @@ pub async fn ask(
                     resolved_entity_queries.push(entity.clone());
                 }
             }
-            Err(e) => {
-                warn!("identity resolution failed for '{entity}': {e}");
+            Err(_) => {
                 resolved_entity_queries.push(entity.clone());
             }
         }
@@ -3890,171 +4264,10 @@ pub async fn ask(
     let mut dedup = HashSet::new();
     resolved_entity_queries.retain(|q| dedup.insert(q.to_ascii_lowercase()));
 
-    // 1d. Run extra keyword searches for each entity (cheap, ~5-10ms each)
-    let mut entity_results = Vec::new();
-    // Collect topic words from question (non-entity content words) for combined searches
-    let topic_words: Vec<&str> = {
-        let stop: HashSet<&str> = ["a","an","the","is","are","was","were","be","been","being",
-            "have","has","had","do","does","did","will","would","could","should","may","might",
-            "shall","can","to","of","in","for","on","with","at","by","from","as","into","about",
-            "and","or","but","if","that","which","who","this","what","when","where","how","why",
-            "not","no","so","long","much","many","her","his","their","my","your","they","she",
-            "he","it","we","you","i","me","him","them","us"].into_iter().collect();
-        let entity_lower: HashSet<String> = resolved_entity_queries.iter()
-            .flat_map(|e| e.split_whitespace().map(|w| w.to_ascii_lowercase()))
-            .collect();
-        req.question.split(|c: char| !c.is_alphanumeric() && c != '\'')
-            .filter(|w| !w.is_empty() && w.len() > 2)
-            .filter(|w| !stop.contains(w.to_ascii_lowercase().as_str()))
-            .filter(|w| !entity_lower.contains(&w.to_ascii_lowercase()))
-            .collect()
-    };
-    for entity in &resolved_entity_queries {
-        if let Ok(kw_results) = state
-            .store
-            .search(&embedding, entity, &ns, &SearchMode::Keyword, req.search_limit / 2, &ask_scorer_config)
-            .await
-        {
-            record_retrieval_observations(&state, &ns, &kw_results, 0.15, "ask_entity_keyword").await;
-            entity_results.extend(kw_results);
-        }
-        // Combined entity + topic word searches for targeted recall
-        for &topic in &topic_words {
-            let combined = format!("{entity} {topic}");
-            if let Ok(kw_results) = state
-                .store
-                .search(&embedding, &combined, &ns, &SearchMode::Keyword, req.search_limit / 3, &ask_scorer_config)
-                .await
-            {
-                entity_results.extend(kw_results);
-            }
-        }
-    }
-
-    // Merge all sources: keep best score per memory_id
-    let mut best_scores: HashMap<String, f64> = HashMap::new();
-    for sr in results.iter().chain(expanded_results.iter()).chain(entity_results.iter()) {
-        let entry = best_scores.entry(sr.memory_id.clone()).or_insert(0.0);
-        if sr.score > *entry {
-            *entry = sr.score;
-        }
-    }
-
-    let mut scored_ids: Vec<(String, f64)> = best_scores.into_iter().collect();
-    scored_ids.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let mut all_results: Vec<(anima_core::memory::Memory, f64)> = Vec::new();
-    let mut seen_contents: HashSet<String> = HashSet::new();
-
-    let type_filter = &req.memory_types;
-    for (memory_id, score) in scored_ids {
-        if let Ok(Some(memory)) = state.store.get(&memory_id).await {
-            if !type_filter.is_empty() && !type_filter.contains(&memory.memory_type) {
-                continue;
-            }
-            if seen_contents.insert(memory.content.clone()) {
-                all_results.push((memory, score));
-            }
-        }
-    }
-
-    // Drop results scoring below 25% of the top hit to reduce noise
-    if let Some((_, top_score)) = all_results.first() {
-        let cutoff = top_score * 0.25;
-        all_results.retain(|(_, s)| *s >= cutoff);
-    }
-    all_results.truncate(req.max_results);
-
-    // --- Temporal date-range supplement: detect dates in question and pull matching memories ---
-    if let Some((date_start, date_end)) = detect_temporal_dates(&req.question) {
-        let start = date_start.as_deref().unwrap_or("0000-01-01");
-        let end = date_end.as_deref().unwrap_or("9999-12-31");
-        if let Ok(date_mems) = state.store.find_by_date_range(&ns, start, end, 20).await {
-            let mut added = 0usize;
-            for mem in date_mems {
-                if seen_contents.insert(mem.content.clone()) {
-                    all_results.push((mem, 0.25));
-                    added += 1;
-                }
-            }
-            if added > 0 {
-                tracing::info!("Temporal supplement: added {added} date-filtered memories for range {start}..{end}");
-            }
-        }
-    }
-
-    // --- Episode expansion: pull co-episode memories for multi-hop context ---
-    {
-        let mut episode_ids_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        // Collect episode_ids from top-scoring results
-        for (mem, score) in &all_results {
-            if *score < 0.3 { continue; }
-            if let Some(ep_id) = &mem.episode_id {
-                if !ep_id.is_empty() {
-                    episode_ids_seen.insert(ep_id.clone());
-                }
-            } else if let Some(meta) = &mem.metadata {
-                if let Some(session) = meta.get("session").and_then(|v| v.as_str()) {
-                    episode_ids_seen.insert(session.to_string());
-                }
-            }
-        }
-        // Fetch co-episode memories (bounded)
-        let max_episodes = 3;
-        let max_per_episode = 10;
-        let mut episodes_expanded = 0;
-        for ep_id in &episode_ids_seen {
-            if episodes_expanded >= max_episodes { break; }
-            if let Ok(co_mems) = state.store.find_by_episode(&ns, ep_id, max_per_episode).await {
-                for mem in co_mems {
-                    if seen_contents.insert(mem.content.clone()) {
-                        all_results.push((mem, 0.3));
-                    }
-                }
-            }
-            episodes_expanded += 1;
-        }
-        if episodes_expanded > 0 {
-            tracing::info!("Episode expansion: expanded {episodes_expanded} episodes, total results now {}", all_results.len());
-        }
-    }
-
-    // --- Entity-linked retrieval: fetch memories connected to question entities via graph edges ---
-    {
-        // Resolve entity IDs from the question entities we already extracted
-        let mut entity_ids: Vec<String> = Vec::new();
-        for entity in &resolved_entity_queries {
-            if let Ok(resolution) = state.store.resolve_identity(&ns, entity, 3).await {
-                for c in &resolution.candidates {
-                    if c.score >= 0.3 {
-                        entity_ids.push(c.entity_id.clone());
-                    }
-                }
-            }
-        }
-        entity_ids.sort();
-        entity_ids.dedup();
-        if !entity_ids.is_empty() {
-            if let Ok(linked_ids) = state.store.find_memories_by_entity_ids(&ns, &entity_ids, 30).await {
-                let mut added = 0usize;
-                for mid in linked_ids {
-                    if let Ok(Some(mem)) = state.store.get(&mid).await {
-                        if seen_contents.insert(mem.content.clone()) {
-                            all_results.push((mem, 0.28));
-                            added += 1;
-                        }
-                    }
-                }
-                if added > 0 {
-                    tracing::info!("Entity-linked retrieval: added {added} memories for {} entities", entity_ids.len());
-                }
-            }
-        }
-    }
-
     let total_search_results = all_results.len();
 
     // --- Step 2: Answer ---
+    let mut degraded = false;
     let answer = if req.skip_llm {
         // No LLM — just return top memory content (for benchmarking search speed)
         all_results.first().map(|(m, _)| m.content.clone()).unwrap_or_else(|| "No relevant memories found.".into())
@@ -4108,17 +4321,10 @@ pub async fn ask(
         let answer_raw = match call_llm(&client, &answer_config, &answer_messages, None).await {
             Ok(r) => r,
             Err(e) => {
-                let fallback = all_results
-                    .first()
-                    .map(|(m, _)| m.content.clone())
-                    .unwrap_or_else(|| "No relevant memories found.".to_string());
-                {
-                    tracing::warn!("LLM call failed during /ask: {e}");
-                    format!(
-                        "Safe fallback mode is active because the LLM backend is unavailable. Best retrieved memory: {}",
-                        fallback
-                    )
-                }
+                // Graceful degradation: return retrieval results without LLM synthesis
+                tracing::warn!("LLM unavailable during /ask, degrading to retrieval-only: {e}");
+                degraded = true;
+                build_retrieval_only_answer(&all_results)
             }
         };
         let mut answer_cleaned = strip_think_blocks(&answer_raw);
@@ -4126,39 +4332,40 @@ pub async fn ask(
             tracing::warn!("LLM answer stripped to empty! Raw len={}, first 200 chars: {:?}", answer_raw.len(), &answer_raw[..answer_raw.len().min(200)]);
         }
         // Retry once if LLM says "I don't know" but top memories scored well
-        let idk = answer_cleaned.to_ascii_lowercase();
-        let has_idk = idk.contains("i don't know") || idk.contains("i don\u{2019}t know")
-            || idk.contains("do not specify") || idk.contains("not specified") || idk.contains("not explicitly")
-            || idk.contains("do not mention") || idk.contains("not mentioned")
-            || idk.contains("no information") || idk.contains("no relevant")
-            || idk.contains("no specific mention") || idk.contains("does not state")
-            || idk.contains("do not state") || idk.contains("no mention");
-        if has_idk && !all_results.is_empty() && all_results[0].1 > 0.4 {
-            tracing::info!("Retrying answer because LLM said IDK with high-scoring memories (top={:.3})", all_results[0].1);
-            // Build a more forceful retry with different system prompt
-            let retry_system = "You are a memory assistant. The user previously asked a question and I said I don't know, but the answer IS somewhere in the memories. Your job: find ANY detail in the memories that could answer the question, even partially. Look for indirect mentions, related context, and implied information. NEVER say \"I don't know\" — always give your best answer from the available memories.";
-            let mut retry_messages = vec![
-                serde_json::json!({"role": "system", "content": retry_system}),
-            ];
-            // Copy user message from original
-            for msg in &answer_messages {
-                if msg.get("role").and_then(|v| v.as_str()) == Some("user") {
-                    retry_messages.push(msg.clone());
+        // (skip retry if already degraded — LLM is down)
+        if !degraded {
+            let idk = answer_cleaned.to_ascii_lowercase();
+            let has_idk = idk.contains("i don't know") || idk.contains("i don\u{2019}t know")
+                || idk.contains("do not specify") || idk.contains("not specified") || idk.contains("not explicitly")
+                || idk.contains("do not mention") || idk.contains("not mentioned")
+                || idk.contains("no information") || idk.contains("no relevant")
+                || idk.contains("no specific mention") || idk.contains("does not state")
+                || idk.contains("do not state") || idk.contains("no mention");
+            if has_idk && !all_results.is_empty() && all_results[0].1 > 0.4 {
+                tracing::info!("Retrying answer because LLM said IDK with high-scoring memories (top={:.3})", all_results[0].1);
+                let retry_system = "You are a memory assistant. The user previously asked a question and I said I don't know, but the answer IS somewhere in the memories. Your job: find ANY detail in the memories that could answer the question, even partially. Look for indirect mentions, related context, and implied information. NEVER say \"I don't know\" — always give your best answer from the available memories.";
+                let mut retry_messages = vec![
+                    serde_json::json!({"role": "system", "content": retry_system}),
+                ];
+                for msg in &answer_messages {
+                    if msg.get("role").and_then(|v| v.as_str()) == Some("user") {
+                        retry_messages.push(msg.clone());
+                    }
                 }
-            }
-            let retry_config = LlmConfig {
-                temperature: Some(0.3),
-                ..answer_config.clone()
-            };
-            if let Ok(retry_raw) = call_llm(&client, &retry_config, &retry_messages, None).await {
-                let retry_cleaned = strip_think_blocks(&retry_raw);
-                let retry_lower = retry_cleaned.to_ascii_lowercase();
-                let still_idk = retry_lower.contains("i don't know")
-                    || retry_lower.contains("not specified") || retry_lower.contains("not explicitly")
-                    || retry_lower.contains("no information") || retry_lower.contains("do not state")
-                    || retry_lower.contains("no mention") || retry_lower.contains("not mentioned");
-                if !retry_cleaned.is_empty() && !still_idk {
-                    answer_cleaned = retry_cleaned;
+                let retry_config = LlmConfig {
+                    temperature: Some(0.3),
+                    ..answer_config.clone()
+                };
+                if let Ok(retry_raw) = call_llm(&client, &retry_config, &retry_messages, None).await {
+                    let retry_cleaned = strip_think_blocks(&retry_raw);
+                    let retry_lower = retry_cleaned.to_ascii_lowercase();
+                    let still_idk = retry_lower.contains("i don't know")
+                        || retry_lower.contains("not specified") || retry_lower.contains("not explicitly")
+                        || retry_lower.contains("no information") || retry_lower.contains("do not state")
+                        || retry_lower.contains("no mention") || retry_lower.contains("not mentioned");
+                    if !retry_cleaned.is_empty() && !still_idk {
+                        answer_cleaned = retry_cleaned;
+                    }
                 }
             }
         }
@@ -4204,6 +4411,37 @@ pub async fn ask(
         });
     }
 
+    // --- Conflict detection: find supersession history for retrieved memories ---
+    let retrieved_ids: Vec<String> = all_results.iter().map(|(m, _)| m.id.clone()).collect();
+    let conflicts = match state.store.find_contradictions_for_memories(&ns, &retrieved_ids).await {
+        Ok(entries) => {
+            entries.into_iter().filter_map(|e| {
+                let old_content = e.old_content.as_deref().unwrap_or("[deleted]");
+                let new_content = e.new_content.as_deref().unwrap_or("[deleted]");
+                // Only surface if old and new content are meaningfully different
+                if old_content == new_content { return None; }
+                // Determine which side is the retrieved memory
+                let (memory_id, conflicting_id) = if retrieved_ids.contains(&e.new_memory_id) {
+                    (e.new_memory_id.clone(), e.old_memory_id.clone())
+                } else {
+                    (e.old_memory_id.clone(), e.new_memory_id.clone())
+                };
+                Some(ConflictNote {
+                    memory_id,
+                    conflicting_memory_id: conflicting_id,
+                    old_content: old_content.to_string(),
+                    new_content: new_content.to_string(),
+                    resolution: e.resolution,
+                    resolved_at: e.created_at,
+                })
+            }).collect()
+        }
+        Err(e) => {
+            tracing::warn!("Failed to detect conflicts for /ask response: {e}");
+            vec![]
+        }
+    };
+
     Ok(Json(make_ask_response(
         &ns,
         answer,
@@ -4214,7 +4452,26 @@ pub async fn ask(
         total_search_results,
         start.elapsed().as_secs_f64() * 1000.0,
         needs_confirmation,
+        degraded,
+        conflicts,
     )))
+}
+
+/// Build a human-readable answer from retrieval results when the LLM is unavailable.
+fn build_retrieval_only_answer(results: &[(anima_core::memory::Memory, f64)]) -> String {
+    if results.is_empty() {
+        return "No relevant memories found.".to_string();
+    }
+    let mut answer = String::from("Based on retrieved memories:\n\n");
+    for (i, (mem, _score)) in results.iter().take(5).enumerate() {
+        let date = mem.created_at.format("%d %B %Y");
+        let (content, _) = redact_sensitive_text(&mem.content);
+        answer.push_str(&format!("{}. [{}] {}\n", i + 1, date, content));
+    }
+    if results.len() > 5 {
+        answer.push_str(&format!("\n({} more results available)", results.len() - 5));
+    }
+    answer
 }
 
 /// A structured fact extracted by the LLM.
@@ -4841,6 +5098,7 @@ mod tests {
             }],
             vec![],
             "rag".to_string(),
+            false,
         );
 
         assert_eq!(resp.provenance.namespace, "default");
@@ -4913,15 +5171,15 @@ pub async fn chat_stream(
         ));
     }
 
-    let resolved_llm = resolve_llm_config(req.llm.take(), &state);
+    let resolved_llm = resolve_llm_config(req.llm.take(), &state, "chat");
     req.llm = Some(resolved_llm);
 
     // Search anima for relevant memories
     let embedding = embed_query_cached(&state, &req.message)?;
-
+    let chat_scorer = state.scorer_config.read().await.clone();
     let scored = state
         .store
-        .search(&embedding, &req.message, &ns, &SearchMode::Hybrid, 5, &state.scorer_config)
+        .search(&embedding, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
         .await?;
 
     // Gate: only include memories with meaningful relevance scores

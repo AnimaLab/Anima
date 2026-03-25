@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box, GitCompareArrows } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
@@ -12,8 +12,8 @@ const navItems = [
   { path: '/memories', label: 'Memories', icon: Database },
   { path: '/search', label: 'Search', icon: Search },
   { path: '/graph', label: 'Graph', icon: Share2 },
-  { path: '/graph3d', label: 'Graph 3D', icon: Network },
-  { path: '/embeddings', label: 'Vector Space', icon: Box },
+  { path: '/graph3d', label: 'Embeddings', icon: Network },
+  { path: '/conflicts', label: 'Conflicts', icon: GitCompareArrows },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -82,20 +82,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const sidebarContent = (
     <>
       {/* Header */}
-      <div className={`flex items-center ${showLabels ? 'justify-between p-3' : 'justify-center p-2'} border-b border-gray-800`}>
+      <div className={`flex items-center ${showLabels ? 'justify-between p-3' : 'justify-center p-2'} border-b border-warm-border`}>
         {showLabels ? (
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-white tracking-tight">Anima</h1>
+            <h1 className="text-xl font-bold text-ink tracking-tight">Anima</h1>
           </div>
         ) : (
-          <span className="text-sm font-bold text-white">A</span>
+          <span className="text-sm font-bold text-ink">A</span>
         )}
         <button
           onClick={() => {
             if (mobileOpen) setMobileOpen(false)
             else setCollapsed(!collapsed)
           }}
-          className={`text-gray-500 hover:text-gray-300 transition-colors ${showLabels ? 'p-1' : 'w-8 h-8 flex items-center justify-center'}`}
+          className={`text-ink-muted hover:text-ink transition-colors ${showLabels ? 'p-1' : 'w-8 h-8 flex items-center justify-center'}`}
         >
           {mobileOpen ? <X size={18} /> : collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
@@ -114,8 +114,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
               } ${
                 active
-                  ? 'bg-blue-600/20 text-blue-400'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                  ? 'bg-accent-light text-accent'
+                  : 'text-ink-light hover:bg-paper-deep hover:text-ink'
               }`}
             >
               <Icon size={18} className="shrink-0" />
@@ -136,8 +136,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
               showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
             } ${
               isOnChat
-                ? 'bg-blue-600/20 text-blue-400'
-                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                ? 'bg-accent-light text-accent'
+                : 'text-ink-light hover:bg-paper-deep hover:text-ink'
             }`}
           >
             <MessageSquare size={18} className="shrink-0" />
@@ -145,7 +145,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <span className="flex-1 text-left">Chat</span>
               <span
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setChatOpen(!chatOpen) }}
-                className="p-0.5 text-gray-500 hover:text-gray-300 transition-colors"
+                className="p-0.5 text-ink-muted hover:text-ink transition-colors"
               >
                 {chatOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </span>
@@ -154,21 +154,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
           {/* Chat history list */}
           {showLabels && chatOpen && (
-            <div className="ml-3 mt-1 space-y-0.5 border-l border-gray-800 pl-2">
+            <div className="ml-3 mt-1 space-y-0.5 border-l border-warm-border pl-2">
               {conversations.map(conv => (
                 <div
                   key={conv.id}
                   className={`group flex items-center gap-1.5 px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
                     conversationId === conv.id
-                      ? 'bg-gray-800 text-white'
-                      : 'text-gray-500 hover:bg-gray-800/50 hover:text-gray-300'
+                      ? 'bg-paper-deep text-ink'
+                      : 'text-ink-muted hover:bg-paper-deep/50 hover:text-ink-light'
                   }`}
                   onClick={() => { loadConversation(conv.id) }}
                 >
                   <span className="truncate flex-1">{conv.title}</span>
                   <button
                     onClick={e => deleteConv(conv.id, e)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all shrink-0"
+                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-600 transition-all shrink-0"
                   >
                     <Trash2 size={10} />
                   </button>
@@ -181,12 +181,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Namespace selector */}
       {showLabels ? (
-        <div className="px-3 py-2 border-t border-gray-800">
-          <label className="text-xs text-gray-500 block mb-1">Namespace</label>
+        <div className="px-3 py-2 border-t border-warm-border">
+          <label className="text-xs text-ink-muted block mb-1">Namespace</label>
           <select
             value={namespace}
             onChange={(e) => setNamespace(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full bg-input border border-warm-border rounded-md px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {namespaces.length === 0 && (
               <option value={namespace}>{namespace}</option>
@@ -199,15 +199,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </select>
         </div>
       ) : (
-        <div className="border-t border-gray-800 py-2 flex justify-center">
-          <div title={`Namespace: ${namespace}`} className="w-9 flex items-center justify-center text-gray-500">
+        <div className="border-t border-warm-border py-2 flex justify-center">
+          <div title={`Namespace: ${namespace}`} className="w-9 flex items-center justify-center text-ink-muted">
             <Layers size={16} />
           </div>
         </div>
       )}
 
       {/* Settings */}
-      <div className="p-1.5 border-t border-gray-800">
+      <div className="p-1.5 border-t border-warm-border">
         <Link
           to="/settings"
           title={!showLabels ? 'Settings' : undefined}
@@ -215,8 +215,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
           } ${
             location.pathname === '/settings'
-              ? 'bg-blue-600/20 text-blue-400'
-              : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              ? 'bg-accent-light text-accent'
+              : 'text-ink-light hover:bg-paper-deep hover:text-ink'
           }`}
         >
           <Settings size={18} className="shrink-0" />
@@ -231,35 +231,35 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          className="fixed inset-0 bg-ink/30 z-40 md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar — desktop */}
-      <aside className={`${collapsed ? 'w-12' : 'w-56'} bg-gray-900 border-r border-gray-800 flex-col shrink-0 transition-all duration-200 hidden md:flex`}>
+      <aside className={`${collapsed ? 'w-12' : 'w-56'} bg-paper-warm border-r border-warm-border flex-col shrink-0 transition-all duration-200 hidden md:flex`}>
         {sidebarContent}
       </aside>
 
       {/* Sidebar — mobile drawer */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex flex-col transition-transform duration-200 md:hidden ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-paper-warm border-r border-warm-border flex flex-col transition-transform duration-200 md:hidden ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {sidebarContent}
       </aside>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-800 md:hidden shrink-0">
+        <div className="flex items-center gap-3 px-4 py-2 bg-paper-warm border-b border-warm-border md:hidden shrink-0">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-1 text-gray-400 hover:text-white transition-colors"
+            className="p-1 text-ink-muted hover:text-ink transition-colors"
           >
             <Menu size={20} />
           </button>
-          <h1 className="text-sm font-bold text-white">Anima</h1>
+          <h1 className="text-sm font-bold text-ink">Anima</h1>
         </div>
 
-        <main className="flex-1 overflow-auto bg-gray-950 p-4 sm:p-6">
+        <main className="flex-1 overflow-auto bg-paper p-4 sm:p-6">
           {children}
         </main>
       </div>

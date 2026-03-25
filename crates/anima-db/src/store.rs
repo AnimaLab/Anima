@@ -265,6 +265,34 @@ pub struct AuditEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ContradictionEntry {
+    pub id: String,
+    pub namespace: String,
+    pub old_memory_id: String,
+    pub new_memory_id: String,
+    pub resolution: String,
+    pub provenance: Option<serde_json::Value>,
+    pub created_at: String,
+    /// Content of the old (superseded) memory, if still in DB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_content: Option<String>,
+    /// Content of the new (superseding) memory, if still in DB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SupersessionLink {
+    pub memory_id: String,
+    pub content: String,
+    pub status: String,
+    pub superseded_by: Option<String>,
+    pub confidence: f64,
+    pub source: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct IdentityEntity {
     pub id: String,
     pub namespace: String,
@@ -573,6 +601,17 @@ impl MemoryStore {
         calibration_metrics_sync(&conn, namespace)
     }
 
+    /// Compute optimal hybrid weights (weight_vector, weight_keyword) from calibration
+    /// observations. Analyzes retrieval observations with component scores (vector_score,
+    /// keyword_score) and computes the correlation between each component and positive
+    /// outcomes. Returns None if insufficient data (<50 observations with component scores).
+    pub async fn compute_optimal_hybrid_weights(
+        &self,
+    ) -> Result<Option<(f64, f64)>, DbError> {
+        let conn = self.pool.writer().await;
+        compute_optimal_hybrid_weights_sync(&conn)
+    }
+
     pub async fn record_correction_event(
         &self,
         namespace: &Namespace,
@@ -609,6 +648,42 @@ impl MemoryStore {
             resolution,
             provenance,
         )
+    }
+
+    /// List contradiction ledger entries for a namespace, ordered by most recent first.
+    pub async fn list_contradictions(
+        &self,
+        namespace: &Namespace,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ContradictionEntry>, DbError> {
+        let conn = self.pool.writer().await;
+        list_contradictions_sync(&conn, namespace, limit, offset)
+    }
+
+    /// Find contradictions involving any of the given memory IDs
+    /// (as either old or new side). Returns entries where the retrieved
+    /// memory was superseded OR superseded something else.
+    pub async fn find_contradictions_for_memories(
+        &self,
+        namespace: &Namespace,
+        memory_ids: &[String],
+    ) -> Result<Vec<ContradictionEntry>, DbError> {
+        if memory_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let conn = self.pool.writer().await;
+        find_contradictions_for_memories_sync(&conn, namespace, memory_ids)
+    }
+
+    /// Get the supersession chain for a memory: all predecessors and successors.
+    pub async fn get_supersession_chain(
+        &self,
+        namespace: &Namespace,
+        memory_id: &str,
+    ) -> Result<Vec<SupersessionLink>, DbError> {
+        let conn = self.pool.writer().await;
+        get_supersession_chain_sync(&conn, namespace, memory_id)
     }
 
     pub async fn upsert_causal_edge(
@@ -1880,7 +1955,7 @@ fn search_sync(
     // Configurable via search.min_vector_similarity (default 0.35).
     let min_sim = scorer_config.min_vector_similarity;
     match mode {
-        SearchMode::Hybrid | SearchMode::Vector => {
+        SearchMode::Hybrid | SearchMode::Vector | SearchMode::AskRetrieval => {
             let raw = vector::search_vectors(conn, query_embedding, candidate_limit)?;
 
             // Score spread check on RAW results (before namespace filter).
@@ -1936,7 +2011,7 @@ fn search_sync(
 
     // Keyword search
     match mode {
-        SearchMode::Hybrid | SearchMode::Keyword => {
+        SearchMode::Hybrid | SearchMode::Keyword | SearchMode::AskRetrieval => {
             let raw = fts::search_fts(conn, query_text, &ns_pattern, candidate_limit)?;
             keyword_scored = raw;
         }
@@ -2899,6 +2974,100 @@ fn calibration_metrics_sync(
     })
 }
 
+/// Compute optimal hybrid search weights from calibration observations.
+///
+/// Analyzes retrieval observations that have both vector_score and keyword_score
+/// in their metadata, correlating each component score with positive outcomes
+/// (score >= threshold). Returns `(weight_vector, weight_keyword)` normalized
+/// to sum to 1.0, or None if insufficient data.
+fn compute_optimal_hybrid_weights_sync(
+    conn: &Connection,
+) -> Result<Option<(f64, f64)>, DbError> {
+    // Fetch recent retrieval observations that have component scores in metadata
+    let mut stmt = conn
+        .prepare(
+            "SELECT metadata, outcome
+             FROM calibration_observations
+             WHERE prediction_kind = 'retrieval_relevance'
+               AND outcome IS NOT NULL
+               AND metadata IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT 5000",
+        )
+        .map_err(DbError::Sqlite)?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, f64>(1)?,
+            ))
+        })
+        .map_err(DbError::Sqlite)?;
+
+    let mut vec_score_sum = 0.0_f64;
+    let mut kw_score_sum = 0.0_f64;
+    let mut vec_outcome_sum = 0.0_f64;
+    let mut kw_outcome_sum = 0.0_f64;
+    let mut count = 0_usize;
+
+    for row in rows {
+        let (meta_str, outcome) = row.map_err(DbError::Sqlite)?;
+        let Some(meta_str) = meta_str else { continue };
+        let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_str) else { continue };
+
+        let vec_score = meta.get("vector_score").and_then(|v| v.as_f64());
+        let kw_score = meta.get("keyword_score").and_then(|v| v.as_f64());
+
+        // Only use observations that have at least one component score
+        if vec_score.is_none() && kw_score.is_none() {
+            continue;
+        }
+
+        let vs = vec_score.unwrap_or(0.0);
+        let ks = kw_score.unwrap_or(0.0);
+
+        vec_score_sum += vs;
+        kw_score_sum += ks;
+        // Weight each component's contribution by whether the outcome was positive
+        vec_outcome_sum += vs * outcome;
+        kw_outcome_sum += ks * outcome;
+        count += 1;
+    }
+
+    // Need at least 50 observations with component scores
+    if count < 50 {
+        return Ok(None);
+    }
+
+    // Compute the "contribution efficiency" of each source:
+    // What fraction of each source's total score went to positive outcomes?
+    let vec_efficiency = if vec_score_sum > 0.0 {
+        vec_outcome_sum / vec_score_sum
+    } else {
+        0.0
+    };
+    let kw_efficiency = if kw_score_sum > 0.0 {
+        kw_outcome_sum / kw_score_sum
+    } else {
+        0.0
+    };
+
+    let total = vec_efficiency + kw_efficiency;
+    if total <= 0.0 {
+        return Ok(None);
+    }
+
+    // Normalize to sum to 1.0, with floor of 0.1 to prevent zeroing out either source
+    let raw_wv = vec_efficiency / total;
+    let raw_wk = kw_efficiency / total;
+    let wv = raw_wv.max(0.1);
+    let wk = raw_wk.max(0.1);
+    let norm = wv + wk;
+
+    Ok(Some((wv / norm, wk / norm)))
+}
+
 fn insert_correction_event_sync(
     conn: &Connection,
     namespace: &Namespace,
@@ -2971,6 +3140,175 @@ fn insert_contradiction_ledger_sync(
     .map_err(DbError::Sqlite)?;
 
     Ok(())
+}
+
+fn list_contradictions_sync(
+    conn: &Connection,
+    namespace: &Namespace,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ContradictionEntry>, DbError> {
+    let ns_pattern = namespace.like_pattern();
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.namespace, c.old_memory_id, c.new_memory_id,
+                c.resolution, c.provenance, c.created_at,
+                m_old.content, m_new.content
+         FROM contradiction_ledger c
+         LEFT JOIN memories m_old ON m_old.id = c.old_memory_id
+         LEFT JOIN memories m_new ON m_new.id = c.new_memory_id
+         WHERE c.namespace LIKE ?1
+         ORDER BY c.created_at DESC
+         LIMIT ?2 OFFSET ?3",
+    ).map_err(DbError::Sqlite)?;
+
+    let rows = stmt.query_map(params![ns_pattern, limit as i64, offset as i64], |row| {
+        let provenance_str: Option<String> = row.get(5)?;
+        let provenance = provenance_str
+            .and_then(|s| serde_json::from_str(&s).ok());
+        Ok(ContradictionEntry {
+            id: row.get(0)?,
+            namespace: row.get(1)?,
+            old_memory_id: row.get(2)?,
+            new_memory_id: row.get(3)?,
+            resolution: row.get(4)?,
+            provenance,
+            created_at: row.get(6)?,
+            old_content: row.get(7)?,
+            new_content: row.get(8)?,
+        })
+    }).map_err(DbError::Sqlite)?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
+fn find_contradictions_for_memories_sync(
+    conn: &Connection,
+    namespace: &Namespace,
+    memory_ids: &[String],
+) -> Result<Vec<ContradictionEntry>, DbError> {
+    let ns_pattern = namespace.like_pattern();
+    // Build IN clause with placeholders
+    let placeholders: Vec<String> = (0..memory_ids.len()).map(|i| format!("?{}", i + 2)).collect();
+    let in_clause = placeholders.join(",");
+    let sql = format!(
+        "SELECT c.id, c.namespace, c.old_memory_id, c.new_memory_id,
+                c.resolution, c.provenance, c.created_at,
+                m_old.content, m_new.content
+         FROM contradiction_ledger c
+         LEFT JOIN memories m_old ON m_old.id = c.old_memory_id
+         LEFT JOIN memories m_new ON m_new.id = c.new_memory_id
+         WHERE c.namespace LIKE ?1
+           AND (c.old_memory_id IN ({in_clause}) OR c.new_memory_id IN ({in_clause}))
+         ORDER BY c.created_at DESC"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(DbError::Sqlite)?;
+
+    // Build params: namespace pattern + memory_ids twice (for both IN clauses)
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params_vec.push(Box::new(ns_pattern));
+    for id in memory_ids {
+        params_vec.push(Box::new(id.clone()));
+    }
+    for id in memory_ids {
+        params_vec.push(Box::new(id.clone()));
+    }
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        let provenance_str: Option<String> = row.get(5)?;
+        let provenance = provenance_str
+            .and_then(|s| serde_json::from_str(&s).ok());
+        Ok(ContradictionEntry {
+            id: row.get(0)?,
+            namespace: row.get(1)?,
+            old_memory_id: row.get(2)?,
+            new_memory_id: row.get(3)?,
+            resolution: row.get(4)?,
+            provenance,
+            created_at: row.get(6)?,
+            old_content: row.get(7)?,
+            new_content: row.get(8)?,
+        })
+    }).map_err(DbError::Sqlite)?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
+fn get_supersession_chain_sync(
+    conn: &Connection,
+    namespace: &Namespace,
+    memory_id: &str,
+) -> Result<Vec<SupersessionLink>, DbError> {
+    let ns_pattern = namespace.like_pattern();
+    let mut chain = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // Walk backwards: find predecessors (memories that this one superseded)
+    let mut current_id = memory_id.to_string();
+    loop {
+        if !seen.insert(current_id.clone()) { break; }
+        let predecessor: Option<String> = conn.prepare(
+            "SELECT old_memory_id FROM contradiction_ledger
+             WHERE namespace LIKE ?1 AND new_memory_id = ?2
+             ORDER BY created_at DESC LIMIT 1",
+        ).map_err(DbError::Sqlite)?
+        .query_row(params![ns_pattern, current_id], |row| row.get(0))
+        .optional()
+        .map_err(DbError::Sqlite)?;
+
+        match predecessor {
+            Some(pred_id) => { current_id = pred_id; }
+            None => break,
+        }
+    }
+
+    // Now walk forward from the earliest ancestor
+    let start_id = current_id;
+    let mut walk_id = start_id;
+    seen.clear();
+
+    loop {
+        if !seen.insert(walk_id.clone()) { break; }
+        // Fetch memory data
+        let mem_data: Option<(String, String, Option<String>, f64, String, String)> = conn.prepare(
+            "SELECT content, status, superseded_by, confidence, source, created_at
+             FROM memories WHERE id = ?1 AND namespace LIKE ?2",
+        ).map_err(DbError::Sqlite)?
+        .query_row(params![walk_id, ns_pattern], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get::<_, f64>(3).unwrap_or(0.5),
+                row.get::<_, String>(4).unwrap_or_else(|_| "unknown".into()),
+                row.get(5)?,
+            ))
+        })
+        .optional()
+        .map_err(DbError::Sqlite)?;
+
+        match mem_data {
+            Some((content, status, superseded_by, confidence, source, created_at)) => {
+                let next = superseded_by.clone();
+                chain.push(SupersessionLink {
+                    memory_id: walk_id.clone(),
+                    content,
+                    status,
+                    superseded_by: superseded_by.clone(),
+                    confidence,
+                    source,
+                    created_at,
+                });
+                match next {
+                    Some(next_id) if !next_id.is_empty() => { walk_id = next_id; }
+                    _ => break,
+                }
+            }
+            None => break,
+        }
+    }
+
+    Ok(chain)
 }
 
 #[derive(Debug, Clone)]

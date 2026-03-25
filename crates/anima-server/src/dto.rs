@@ -64,6 +64,8 @@ pub struct SearchRequest {
     #[allow(dead_code)]
     #[serde(default)]
     pub metadata_filter: Option<serde_json::Value>,
+    /// Search mode: "vector", "keyword", "hybrid" (default), or "ask_retrieval"
+    /// (multi-stage /ask pipeline without LLM answer generation).
     #[serde(default)]
     pub search_mode: Option<String>,
     #[serde(default)]
@@ -81,6 +83,10 @@ pub struct SearchRequest {
     /// Filter by semantic category (e.g. "identity", "preference", "environment").
     #[serde(default)]
     pub category: Option<String>,
+    /// Enable query rewriting: extract keywords and expand the query before searching.
+    /// Uses the same zero-LLM keyword extraction as /ask. Default: false.
+    #[serde(default)]
+    pub query_rewrite: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -220,6 +226,14 @@ pub struct AuditListParams {
     pub entity_id: Option<String>,
     #[serde(default)]
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContradictionListParams {
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -610,6 +624,10 @@ pub struct ChatResponse {
     pub memories_added: Vec<AddedMemory>,
     pub mode: String,
     pub provenance: ResponseProvenance,
+    /// True when the LLM backend was unavailable and the response was built
+    /// from retrieval results only (no answer synthesis).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub degraded: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -711,6 +729,7 @@ pub struct AskRequest {
     /// Optional LLM override. If omitted, uses server-side [llm] config.
     #[serde(default)]
     pub llm: Option<LlmConfig>,
+    #[allow(dead_code)]
     #[serde(default = "default_ask_search_limit")]
     pub search_limit: usize,
     #[serde(default = "default_ask_max_results")]
@@ -743,6 +762,31 @@ pub struct AskResponse {
     pub provenance: ResponseProvenance,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs_confirmation: Vec<ConfirmationQuestion>,
+    /// True when the LLM backend was unavailable and the response was built
+    /// from retrieval results only (no answer synthesis).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub degraded: bool,
+    /// Detected conflicts: cases where a retrieved memory superseded or was
+    /// superseded by another memory. Helps the user/agent understand when
+    /// information may have changed over time.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<ConflictNote>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConflictNote {
+    /// The retrieved memory that is part of a conflict.
+    pub memory_id: String,
+    /// ID of the conflicting memory (the other side of the supersession).
+    pub conflicting_memory_id: String,
+    /// What the old version said.
+    pub old_content: String,
+    /// What the new (current) version says.
+    pub new_content: String,
+    /// How the conflict was resolved.
+    pub resolution: String,
+    /// When the conflict was resolved.
+    pub resolved_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

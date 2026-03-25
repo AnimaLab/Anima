@@ -239,6 +239,48 @@ export interface AskResponse {
   elapsed_ms: number
 }
 
+// --- Conflicts & Contradictions ---
+
+export interface ContradictionEntry {
+  id: string
+  namespace: string
+  old_memory_id: string
+  new_memory_id: string
+  resolution: string
+  provenance: Record<string, unknown> | null
+  created_at: string
+  old_content?: string
+  new_content?: string
+}
+
+export interface SupersessionLink {
+  memory_id: string
+  content: string
+  status: string
+  superseded_by: string | null
+  confidence: number
+  source: string
+  created_at: string
+}
+
+// --- Profiles ---
+
+export interface ProfileInfo {
+  base_url: string
+  model: string
+  has_api_key: boolean
+}
+
+export interface ProfilesResponse {
+  profiles: Record<string, ProfileInfo>
+  routing: {
+    ask?: string
+    chat?: string
+    processor?: string
+    consolidation?: string
+  }
+}
+
 // --- Telemetry ---
 
 export interface TelemetryConfig {

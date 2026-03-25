@@ -59,6 +59,24 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting Anima v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Database: {}", config.database.path);
 
+    // Resolve LLM provider profiles
+    let resolved_profiles = config.resolve_profiles();
+    for (name, profile) in &resolved_profiles.profiles {
+        tracing::info!(
+            domain = "profiles",
+            "Profile '{name}': {}, model={}",
+            profile.base_url, profile.model
+        );
+    }
+    tracing::info!(
+        domain = "profiles",
+        "Routing: ask={}, chat={}, processor={}, consolidation={}",
+        resolved_profiles.routing.ask.as_deref().unwrap_or("-"),
+        resolved_profiles.routing.chat.as_deref().unwrap_or("-"),
+        resolved_profiles.routing.processor.as_deref().unwrap_or("-"),
+        resolved_profiles.routing.consolidation.as_deref().unwrap_or("-"),
+    );
+
     // --- Startup self-test: validate dependencies before serving ---
 
     // 1. Database
@@ -76,23 +94,24 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Embedding model
     let embedder: Arc<dyn Embedder> = match config.embedding.backend.as_str() {
-        "openai" => {
+        "openai" | "openai_compat" => {
             let base_url = config.embedding.api_base_url.clone()
                 .unwrap_or_else(|| "https://api.openai.com/v1".into());
             let model = config.embedding.api_model.clone()
                 .unwrap_or_else(|| "text-embedding-3-small".into());
             let api_key = config.embedding.api_key.clone()
                 .filter(|k| !k.is_empty())
+                .or_else(|| std::env::var("EMBEDDING_API_KEY").ok().filter(|k| !k.is_empty()))
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()))
                 .ok_or_else(|| {
-                    tracing::error!(domain = "embedding", "Startup check failed — OpenAI API key missing");
+                    tracing::error!(domain = "embedding", "Startup check failed — embedding API key missing");
                     anyhow::anyhow!(
-                        "OpenAI embedding backend requires api_key in config or OPENAI_API_KEY env var"
+                        "OpenAI-compatible embedding backend requires api_key in config, EMBEDDING_API_KEY, or OPENAI_API_KEY env var"
                     )
                 })?;
             tracing::info!(
                 domain = "embedding",
-                "Using OpenAI embedding: model={}, dim={}, base_url={}",
+                "Using OpenAI-compatible embedding: model={}, dim={}, base_url={}",
                 model, config.embedding.dimension, base_url
             );
             Arc::new(OpenAiEmbedder::new(base_url, model, api_key, config.embedding.dimension))
@@ -168,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 other => {
                     tracing::warn!(domain = "llm", "Unknown consolidation backend '{other}', disabling");
-                    return Ok(start_server(store, embedder, None, &config).await?);
+                    return Ok(start_server(store, embedder, None, &config, resolved_profiles).await?);
                 }
             };
         tracing::info!(domain = "llm", "Startup check passed — consolidation LLM configured");
@@ -181,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    start_server(store, embedder, consolidator, &config).await
+    start_server(store, embedder, consolidator, &config, resolved_profiles).await
 }
 
 async fn start_server(
@@ -189,6 +208,7 @@ async fn start_server(
     embedder: Arc<dyn Embedder>,
     consolidator: Option<Arc<Consolidator>>,
     config: &AppConfig,
+    resolved_profiles: crate::config::ResolvedProfiles,
 ) -> anyhow::Result<()> {
     // Build category lambda map: built-in defaults + user overrides from config.
     let mut category_lambdas = std::collections::HashMap::new();
@@ -306,11 +326,12 @@ async fn start_server(
         embedder,
         consolidator,
         processor: bg_processor,
-        scorer_config,
+        scorer_config: tokio::sync::RwLock::new(scorer_config),
         reranker,
         telemetry_enabled: std::sync::atomic::AtomicBool::new(config.telemetry.enabled),
         telemetry_feature_flags: tokio::sync::RwLock::new(telemetry::FeatureFlags::default()),
         config: config.clone(),
+        resolved_profiles,
         ingested_count: std::sync::atomic::AtomicU64::new(0),
         ingested_started_at: std::time::Instant::now(),
     });
@@ -330,6 +351,7 @@ async fn start_server(
         .max(1);
     {
         let store = state.store.clone();
+        let auto_tune_state = state.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(calibrate_secs));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -339,6 +361,31 @@ async fn start_server(
                     tracing::warn!(domain = "db", "Calibration recompute failed: {e}");
                 } else {
                     tracing::debug!("Calibration recompute completed");
+                }
+
+                // Auto-tune hybrid weights from calibration observations
+                match store.compute_optimal_hybrid_weights().await {
+                    Ok(Some((wv, wk))) => {
+                        let mut cfg = auto_tune_state.scorer_config.write().await;
+                        let old_wv = cfg.weight_vector;
+                        let old_wk = cfg.weight_keyword;
+                        // Only update if the change is significant (>5% shift)
+                        if (wv - old_wv).abs() > 0.05 || (wk - old_wk).abs() > 0.05 {
+                            cfg.weight_vector = wv;
+                            cfg.weight_keyword = wk;
+                            tracing::info!(
+                                domain = "calibration",
+                                "Auto-tuned hybrid weights: vector={:.3} → {:.3}, keyword={:.3} → {:.3}",
+                                old_wv, wv, old_wk, wk
+                            );
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::debug!("Hybrid weight auto-tune: insufficient data");
+                    }
+                    Err(e) => {
+                        tracing::warn!(domain = "calibration", "Hybrid weight auto-tune failed: {e}");
+                    }
                 }
             }
         });

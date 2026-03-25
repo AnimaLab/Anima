@@ -5,8 +5,10 @@ port = 3000
 [database]
 path = "./anima.db"
 
-# Embedding backend: "local" (default, ONNX) or "openai" (API-based).
-# Local runs offline with no API calls. OpenAI requires an API key.
+# Embedding backend: "local" (default, ONNX), "openai", or "openai_compat".
+# Local runs offline with no API calls. "openai" and "openai_compat" both use the
+# OpenAI-compatible embedding API — works with OpenAI, Cohere, Voyage, Together, vLLM, etc.
+# API key resolution: config value > EMBEDDING_API_KEY env > OPENAI_API_KEY env.
 [embedding]
 backend = "local"
 model_dir = "./models/qwen3-embedding-0.6b"
@@ -15,12 +17,24 @@ tokenizer_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX
 dimension = 512
 pooling = "last_token"
 query_instruction = "Instruct: Given a question about someone's memories or past conversations, retrieve the most relevant memory excerpts\nQuery:"
-# To use OpenAI text-embedding-3-small instead, set:
+# To use OpenAI text-embedding-3-small:
 #   backend = "openai"
 #   api_base_url = "https://api.openai.com/v1"
 #   api_model = "text-embedding-3-small"
 #   api_key = ""  # or set OPENAI_API_KEY env var
 #   dimension = 1536
+# To use Cohere embed-v4.0:
+#   backend = "openai_compat"
+#   api_base_url = "https://api.cohere.com/compatibility/v1"
+#   api_model = "embed-v4.0"
+#   api_key = ""  # or set EMBEDDING_API_KEY env var
+#   dimension = 1024
+# To use Voyage voyage-3-large:
+#   backend = "openai_compat"
+#   api_base_url = "https://api.voyageai.com/v1"
+#   api_model = "voyage-3-large"
+#   api_key = ""  # or set EMBEDDING_API_KEY env var
+#   dimension = 1024
 
 [search]
 rrf_k = 60.0
@@ -34,7 +48,7 @@ temporal_lambda = 0.001
 similarity_threshold = 0.85
 # Minimum cosine similarity for vector search results.
 # Tune this per embedding model and domain to filter noise.
-min_vector_similarity = 0.40
+min_vector_similarity = 0.50
 # Minimum spread between best and worst vector scores to accept results.
 # Set to 0 to disable.
 min_score_spread = 0.0
@@ -94,6 +108,31 @@ top_n = 10
 # half_life_days = 58
 # [categories.task]
 # half_life_days = 3     # override built-in: expire tasks faster
+
+# --- Provider Profiles (optional, overrides [llm]/[processor]/[consolidation]) ---
+# Named LLM profiles. Each is an OpenAI-compatible endpoint.
+# Multiple profiles can share the same endpoint with different models.
+# When [profiles] is defined, [routing] controls which profile each operation uses.
+# If [profiles] is absent, legacy [llm]/[processor]/[consolidation] sections are used.
+#
+# [profiles.fast]
+# base_url = "http://localhost:11434/v1"
+# model = "qwen3.5:4b"
+#
+# [profiles.strong]
+# base_url = "http://localhost:11434/v1"
+# model = "qwen3:32b"
+#
+# [profiles.cloud]
+# base_url = "https://api.groq.com/openai/v1"
+# model = "qwen/qwen3-32b"
+# api_key = ""  # or set CLOUD_API_KEY env var
+#
+# [routing]
+# ask = "strong"           # /ask answer generation
+# chat = "fast"            # /chat replies
+# processor = "cloud"      # reflection/deduction
+# consolidation = "fast"   # memory consolidation
 
 # Anonymous usage telemetry. Set enabled = false to opt out.
 # Sends only: model names, memory counts, OS info, feature flags.

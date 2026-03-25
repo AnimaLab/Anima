@@ -11,6 +11,10 @@ pub enum SearchMode {
     Hybrid,
     Vector,
     Keyword,
+    /// Multi-stage retrieval pipeline from /ask (query expansion, entity resolution,
+    /// temporal supplement, episode expansion, entity-linked retrieval) exposed as
+    /// a search mode — returns ranked results without forcing an LLM answer.
+    AskRetrieval,
 }
 
 impl Default for SearchMode {

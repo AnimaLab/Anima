@@ -30,27 +30,29 @@
 - Reconsolidation now logs every supersession to contradiction_ledger with old/new content and confidence
 - API exposes confidence and source on add, get, list, and search responses
 
-**Still open:**
+**Shipped (v0.4.0):**
 
-- `/ask` should surface conflicts when relevant ("Note: you previously said X but later said Y")
-- Web UI: conflict inspector panel showing supersession chains
+- **`/ask` conflict detection.** When retrieved memories have supersession history, the response includes a `conflicts` array with `ConflictNote` entries showing old vs new content, resolution method, and timestamp. Clients/agents can surface "Note: you previously said X but later said Y" from this data.
+- **`GET /api/v1/contradictions` endpoint.** Lists contradiction ledger entries with pagination, joining old/new memory content for display. Supports offset/limit.
+- **`GET /api/v1/memories/{id}/history` endpoint.** Returns the full supersession chain for a memory — walks backward to the earliest ancestor, then forward through all successors, returning content, status, confidence, and timestamps for each link.
+- **Web UI: Conflicts page.** Sidebar nav with conflict inspector showing contradiction list (old/new diff, resolution type, date) and supersession chain viewer (click any entry to see the full version history with active/superseded status).
 
 ---
 
-## 3. Retrieval Quality — PARTIALLY SHIPPED
+## 3. Retrieval Quality — SHIPPED
 
-**Shipped:**
+**Shipped (v0.3.0):**
 
 - **Cross-encoder re-ranking pass.** bge-reranker-v2-m3 INT8 (571MB ONNX), configurable via `[reranker]`. Scores top-N candidates after initial retrieval. High-confidence queries skip the reranker (~55ms), ambiguous queries use it (~200ms). Average ~160ms. Auto-downloads on first use.
 - **Confidence-aware scoring.** Higher-confidence memories get a small ranking boost in search results.
 - **Lowered min_vector_similarity to 0.40.** Catches more paraphrased natural language queries that were previously filtered out.
 
-**Still open:**
+**Shipped (v0.4.0):**
 
-- **Expose `/ask`-grade retrieval as a search mode.** Query expansion, entity resolution, and temporal supplement stages should be available without forcing an LLM answer.
-- **Query rewriting for recall.** Formalize the `/ask` keyword extraction into a rewrite stage for the basic search endpoint.
-- **Configurable embedding backend.** Add Cohere, Voyage, or any OpenAI-compatible embedding API as backends.
-- **Hybrid weight auto-tuning.** Close the loop from calibration observations to RRF weights.
+- **`search_mode: "ask_retrieval"` on `/search`.** Exposes the full multi-stage `/ask` retrieval pipeline (keyword expansion, entity resolution, temporal supplement, episode expansion, entity-linked retrieval) as a search mode — returns ranked results without forcing an LLM answer. Shared `run_ask_retrieval_pipeline()` function used by both `/ask` and `/search`.
+- **Query rewriting for `/search`.** New `query_rewrite: true` parameter on search requests. Runs the same zero-LLM keyword extraction from `/ask` (`extract_keyword_queries`) to expand queries before searching. Works with all standard search modes (hybrid/vector/keyword).
+- **Configurable embedding backend.** `"openai_compat"` backend supports any OpenAI-compatible embedding API (Cohere, Voyage, Together, vLLM, etc.) via custom `api_base_url`. API key resolution chain: config > `EMBEDDING_API_KEY` env > `OPENAI_API_KEY` env.
+- **Hybrid weight auto-tuning.** Background auto-tuner runs every calibration cycle (default 5 min), analyzes retrieval observations with component scores (vector_score, keyword_score), computes optimal RRF weights via outcome correlation, and applies changes if >5% shift (0.1 floor on either weight). `scorer_config` is now `RwLock<ScorerConfig>` for live updates. New `GET /api/v1/calibration/weights` endpoint to inspect current weights.
 
 ---
 
@@ -62,13 +64,13 @@
 
 - **Provider-aware parameter filtering.** Different LLM backends accept different parameters. The current OpenAI-compatible client sends everything and hopes for the best. It should know which params each backend supports and strip the rest.
 - **Token/key management.** Support key rotation, environment variable references in config (`api_key = "$OPENAI_API_KEY"`), and credential file references. Not OAuth flows — just clean secret management for a daemon.
-- **Provider profiles.** Instead of one `[llm]` section, support named profiles (`[llm.fast]`, `[llm.strong]`, `[llm.cheap]`) and let different operations use different profiles. Reflection might use a cheap model, `/ask` might use a strong one.
+- ~~**Provider profiles.**~~ **SHIPPED (v0.4.0).** Named `[profiles.*]` sections in config.toml (arbitrary names, each with `base_url`, `model`, `api_key`). Multiple profiles can share the same endpoint with different models. `[routing]` table maps operations (`ask`, `chat`, `processor`, `consolidation`) to profile names. Backward compatible — legacy `[llm]`/`[processor]`/`[consolidation]` synthesized into profiles when `[profiles]` is absent. Per-request client overrides still win. `GET /api/v1/profiles` endpoint exposes routing for clients. Web UI shows server profiles in Settings.
 
 Skip OAuth adapters — proxy/bridge approach works fine for non-standard providers.
 
 ---
 
-## 5. Operational Hardening — SHIPPED (v0.2.0)
+## 5. Operational Hardening — SHIPPED
 
 **Shipped in v0.2.0:**
 
@@ -80,9 +82,9 @@ Skip OAuth adapters — proxy/bridge approach works fine for non-standard provid
 - **Service templates.** Shipped in `service/` (systemd unit + launchd plist).
 - **Telemetry opt-out notice.** Startup log explains what's collected and how to disable.
 
-**Still open:**
+**Shipped (v0.4.0):**
 
-- **Graceful degradation.** If the LLM is down, `/ask` should still return retrieval results with `skip_llm` fallback instead of failing entirely.
+- **Graceful degradation.** When the LLM backend is unavailable, `/ask` returns structured retrieval results (numbered, dated) with `degraded: true` instead of failing. `/chat` does the same via `safe_fallback_chat_reply` with `degraded: true`. Fact extraction is skipped when degraded. The retry-on-IDK logic is also skipped when already degraded to avoid waiting on a down LLM twice.
 
 ---
 
@@ -126,18 +128,18 @@ Namespace hierarchy:
 ## Priority Order
 
 
-| #   | Item                                                 | Impact | Effort     | Status  |
-| --- | ---------------------------------------------------- | ------ | ---------- | ------- |
+| #   | Item                                                 | Impact | Effort     | Status     |
+| --- | ---------------------------------------------------- | ------ | ---------- | ---------- |
 | 1   | Re-ranking pass in retrieval                         | High   | Medium     | **v0.3.0** |
 | 2   | Typed memory categories + per-category decay         | High   | Medium     | **v0.3.0** |
 | 3   | Confidence + source tracking                         | High   | Medium     | **v0.3.0** |
-| 4   | Expose /ask-grade retrieval without LLM              | High   | Low        | Pending |
-| 5   | Provider profiles (fast/strong/cheap)                | Medium | Low        | Pending |
-| 6   | Agent write/read policies + memory verbs             | Medium | Medium     | Pending |
-| 7   | Conflict detection + inspector                       | Medium | Medium     | Pending |
-| 8   | Namespace promotion for multi-agent                  | Medium | Medium     | Pending |
+| 4   | /ask-grade retrieval, query rewrite, embedding backends, weight auto-tune | High | Low | **v0.4.0** |
+| 5   | Provider profiles (fast/strong/cheap)                | Medium | Low        | **v0.4.0** |
+| 6   | Agent write/read policies + memory verbs             | Medium | Medium     | Pending    |
+| 7   | Conflict detection + inspector                       | Medium | Medium     | **v0.4.0** |
+| 8   | Namespace promotion for multi-agent                  | Medium | Medium     | Pending    |
 | 9   | Operational hardening (health, logging, degradation) | Medium | Low-Medium | **v0.2.0** |
-| 10  | Provider parameter filtering                         | Low    | Low        | Pending |
+| 10  | Provider parameter filtering                         | Low    | Low        | Pending    |
 
 
 ---

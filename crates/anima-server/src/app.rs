@@ -17,7 +17,7 @@ use anima_core::search::ScorerConfig;
 use anima_db::store::MemoryStore;
 use anima_embed::Embedder;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ProfileConfig, ResolvedProfiles};
 use crate::dto::ErrorResponse;
 use crate::handlers;
 use crate::processor::BackgroundProcessor;
@@ -29,9 +29,13 @@ pub struct AppState {
     pub embedder: Arc<dyn Embedder>,
     pub consolidator: Option<Arc<Consolidator>>,
     pub processor: Option<BackgroundProcessor>,
-    pub scorer_config: ScorerConfig,
+    /// Hybrid search scorer configuration. Wrapped in RwLock so the background
+    /// auto-tuner can update weights from calibration observations.
+    pub scorer_config: tokio::sync::RwLock<ScorerConfig>,
     pub reranker: Option<Arc<anima_embed::reranker::Reranker>>,
     pub config: AppConfig,
+    /// Resolved LLM provider profiles and operation routing.
+    pub resolved_profiles: ResolvedProfiles,
     /// Ingestion tracking
     pub ingested_count: AtomicU64,
     pub ingested_started_at: std::time::Instant,
@@ -58,9 +62,41 @@ impl AppState {
 }
 
 impl AppState {
+    /// Get the resolved profile for a given operation.
+    pub fn profile_for(&self, operation: &str) -> Option<&ProfileConfig> {
+        let name = match operation {
+            "ask" => self.resolved_profiles.routing.ask.as_deref(),
+            "chat" => self.resolved_profiles.routing.chat.as_deref(),
+            "processor" => self.resolved_profiles.routing.processor.as_deref(),
+            "consolidation" => self.resolved_profiles.routing.consolidation.as_deref(),
+            _ => None,
+        };
+        name.and_then(|n| self.resolved_profiles.profiles.get(n))
+    }
+
     /// Get the LLM client for the processor (reflection/deduction).
-    /// Prefers [processor] config → falls back to consolidation LLM.
+    /// Priority: resolved profile → legacy [processor] config → consolidation LLM.
     pub fn get_processor_llm(&self) -> Option<Arc<dyn LlmClient>> {
+        // Try resolved profile first
+        if let Some(profile) = self.profile_for("processor") {
+            let profile_name = self.resolved_profiles.routing.processor.as_deref().unwrap_or("processor");
+            if let Some(key) = profile.resolve_api_key(profile_name) {
+                return Some(Arc::new(OpenAiCompatClient::new(
+                    profile.base_url.clone(),
+                    Some(key),
+                    profile.model.clone(),
+                ).with_temperature(0.2)));
+            }
+            // Profile exists but no API key — if base_url is local, no key needed
+            if profile.base_url.contains("localhost") || profile.base_url.contains("127.0.0.1") {
+                return Some(Arc::new(OpenAiCompatClient::new(
+                    profile.base_url.clone(),
+                    None,
+                    profile.model.clone(),
+                ).with_temperature(0.2)));
+            }
+        }
+        // Fall back to legacy [processor] config
         let cfg = &self.config.processor;
         if cfg.enabled {
             if let Some(key) = cfg.resolve_api_key() {
@@ -87,6 +123,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/health", get(handlers::health))
         .route("/health/ready", get(handlers::health_ready))
         .route("/api/v1/calibration/metrics", get(handlers::calibration_metrics))
+        .route("/api/v1/calibration/weights", get(handlers::get_hybrid_weights))
+        .route("/api/v1/profiles", get(handlers::get_profiles))
         .route(
             "/api/v1/memories",
             get(handlers::list_memories).post(handlers::add_memory),
@@ -103,6 +141,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/memories/search", post(handlers::search_memories))
         .route("/api/v1/memories/merge", post(handlers::merge_memories))
         .route("/api/v1/corrections", post(handlers::capture_correction))
+        .route("/api/v1/contradictions", get(handlers::list_contradictions))
         .route("/api/v1/audit/events", get(handlers::list_audit_events))
         .route("/api/v1/identities/entities", post(handlers::create_identity_entity))
         .route(
@@ -153,6 +192,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/memories/{id}/patch", post(handlers::patch_memory))
         .route("/api/v1/memories/{id}/rollback", post(handlers::rollback_memory))
         .route("/api/v1/memories/{id}/revisions", get(handlers::list_claim_revisions))
+        .route("/api/v1/memories/{id}/history", get(handlers::get_memory_history))
         .route("/api/v1/memories/purge", post(handlers::purge_deleted_memories))
         .route("/api/v1/stats", get(handlers::get_stats))
         .route("/api/v1/namespaces", get(handlers::list_namespaces))

@@ -3,7 +3,8 @@ import type {
   ListMemoriesResponse, NamespaceStats, NamespaceInfo, GraphData, Memory,
   ChatRequest, ChatResponse, Conversation, ConversationSummary,
   LlmConfig, ChatMessage, StreamEvent, FileAttachment,
-  AskRequest, AskResponse, EmbeddingsResponse
+  AskRequest, AskResponse, EmbeddingsResponse,
+  ContradictionEntry, SupersessionLink, ProfilesResponse
 } from './types'
 
 let currentNamespace = 'default'
@@ -177,6 +178,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(llm),
     }),
+
+  // Profiles
+  getProfiles: () =>
+    request<ProfilesResponse>('/api/v1/profiles'),
+
+  // Conflicts & Contradictions
+  listContradictions: (limit = 50, offset = 0) =>
+    request<ContradictionEntry[]>(`/api/v1/contradictions?limit=${limit}&offset=${offset}`),
+
+  getMemoryHistory: (id: string) =>
+    request<SupersessionLink[]>(`/api/v1/memories/${id}/history`),
 
   // Telemetry
   getTelemetryConfig: () =>

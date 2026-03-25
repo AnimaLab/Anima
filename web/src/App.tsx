@@ -11,9 +11,9 @@ import { MemoriesPage } from './pages/MemoriesPage'
 import { SearchPage } from './pages/SearchPage'
 import { GraphPage } from './pages/GraphPage'
 import { Graph3DPage } from './pages/Graph3DPage'
-import { EmbeddingPage } from './pages/EmbeddingPage'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { ConflictsPage } from './pages/ConflictsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -466,8 +466,8 @@ export default function App() {
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/graph" element={<GraphPage />} />
                 <Route path="/graph3d" element={<Graph3DPage />} />
-                <Route path="/embeddings" element={<EmbeddingPage />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/conflicts" element={<ConflictsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Layout>
