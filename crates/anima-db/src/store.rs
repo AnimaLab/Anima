@@ -1694,7 +1694,7 @@ fn insert_memory_sync(
     )?;
 
     // Sync to vec_memories
-    vector::insert_embedding(&tx, &memory.id, embedding)?;
+    vector::insert_embedding(&tx, &memory.id, embedding, &memory.namespace)?;
 
     // Sync to fts_memories
     fts::insert_fts(&tx, &memory.id, &memory.namespace, &memory.content)?;
@@ -1758,7 +1758,7 @@ fn insert_many_memories_sync(
             ],
         )?;
 
-        vector::insert_embedding(&tx, &memory.id, embedding)?;
+        vector::insert_embedding(&tx, &memory.id, embedding, &memory.namespace)?;
         fts::insert_fts(&tx, &memory.id, &memory.namespace, &memory.content)?;
 
         snapshot_claim_revision_sync(
@@ -1828,7 +1828,7 @@ fn update_content_sync(
     )?;
 
     // Sync vec_memories
-    vector::update_embedding(&tx, id, new_embedding)?;
+    vector::update_embedding(&tx, id, new_embedding, &old.namespace)?;
 
     // Sync fts_memories: delete old, insert new
     fts::delete_fts(&tx, &old.id)?;
@@ -1997,13 +1997,26 @@ fn search_sync(
     // Vector search — filter out low-similarity results.
     // Configurable via search.min_vector_similarity (default 0.35).
     let min_sim = scorer_config.min_vector_similarity;
+
+    // Determine if we can use pre-filtered vector search.
+    // sqlite-vec metadata columns support exact = but not LIKE.
+    // Use pre-filtered search for exact namespace matches (no '/' hierarchy).
+    // Fall back to global search + post-filter for hierarchical namespaces.
+    let ns_str = namespace.as_str();
+    let is_exact_ns = !ns_str.contains('/');
+
     match mode {
         SearchMode::Hybrid | SearchMode::Vector | SearchMode::AskRetrieval => {
-            let raw = vector::search_vectors(conn, query_embedding, candidate_limit)?;
+            let raw = if is_exact_ns {
+                // Pre-filtered: sqlite-vec filters by namespace during ANN search.
+                // Only vectors in this namespace are considered — no wasted comparisons.
+                vector::search_vectors_filtered(conn, query_embedding, ns_str, candidate_limit)?
+            } else {
+                // Hierarchical namespace — global search, post-filter below.
+                vector::search_vectors(conn, query_embedding, candidate_limit)?
+            };
 
-            // Score spread check on RAW results (before namespace filter).
-            // With large namespaces, namespace-filtered top-N are too close together.
-            // Checking the full candidate set gives a better signal for noise detection.
+            // Score spread check on RAW results (before any post-filter).
             let mut spread_ok = true;
             if raw.len() >= 3 && scorer_config.min_score_spread > 0.0 {
                 let best_sim = 1.0 - (raw.first().unwrap().1 / 2.0);
@@ -2019,17 +2032,34 @@ fn search_sync(
             }
 
             if spread_ok {
-                // Filter by similarity, namespace, and active status
-                for (id, dist) in &raw {
-                    let similarity = 1.0 - (dist / 2.0);
-                    if similarity < min_sim {
-                        continue;
+                if is_exact_ns {
+                    // Pre-filtered results: only need similarity threshold + active status check.
+                    // Namespace already matched by sqlite-vec.
+                    for (id, dist) in &raw {
+                        let similarity = 1.0 - (dist / 2.0);
+                        if similarity < min_sim {
+                            continue;
+                        }
+                        let mut stmt = conn.prepare_cached(
+                            "SELECT 1 FROM memories WHERE id = ?1 AND status = 'active'",
+                        )?;
+                        if stmt.exists(params![id])? {
+                            vector_scored.push((id.clone(), similarity));
+                        }
                     }
-                    let mut stmt = conn.prepare_cached(
-                        "SELECT 1 FROM memories WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
-                    )?;
-                    if stmt.exists(params![id, ns_pattern])? {
-                        vector_scored.push((id.clone(), similarity));
+                } else {
+                    // Global results: post-filter by namespace (LIKE) and active status.
+                    for (id, dist) in &raw {
+                        let similarity = 1.0 - (dist / 2.0);
+                        if similarity < min_sim {
+                            continue;
+                        }
+                        let mut stmt = conn.prepare_cached(
+                            "SELECT 1 FROM memories WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
+                        )?;
+                        if stmt.exists(params![id, ns_pattern])? {
+                            vector_scored.push((id.clone(), similarity));
+                        }
                     }
                 }
             }
@@ -3637,7 +3667,7 @@ fn patch_memory_sync(
 
     if content_changed {
         let embedding = new_embedding.unwrap_or_default();
-        vector::update_embedding(&tx, id, embedding)?;
+        vector::update_embedding(&tx, id, embedding, &before.namespace)?;
         fts::delete_fts(&tx, id)?;
         fts::insert_fts(&tx, id, &before.namespace, &patched_content)?;
     }
@@ -3746,7 +3776,7 @@ fn rollback_memory_to_revision_sync(
         return Ok(None);
     }
 
-    vector::update_embedding(&tx, id, &embedding)?;
+    vector::update_embedding(&tx, id, &embedding, &namespace)?;
     fts::delete_fts(&tx, id)?;
     let restored_content: String = tx
         .prepare_cached("SELECT content FROM memories WHERE id = ?1")?
@@ -3843,7 +3873,7 @@ fn merge_memories_sync(
             merged_memory.importance,
         ],
     )?;
-    vector::insert_embedding(&tx, &merged_memory.id, merged_embedding)?;
+    vector::insert_embedding(&tx, &merged_memory.id, merged_embedding, &merged_memory.namespace)?;
     fts::insert_fts(
         &tx,
         &merged_memory.id,
