@@ -13,11 +13,11 @@ export function NamespacePicker() {
 
   return (
     <div>
-      <label className="text-xs text-gray-500 block mb-1">Namespace</label>
+      <label className="text-xs text-ink-muted block mb-1">Namespace</label>
       <select
         value={namespace}
         onChange={(e) => setNamespace(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full bg-paper-deep border border-warm-border-strong rounded-md px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent"
       >
         {namespaces.length === 0 && (
           <option value={namespace}>{namespace}</option>

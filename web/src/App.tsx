@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NamespaceContext } from './hooks/useNamespace'
-import { ChatContext, type DisplayMessage, type SendMessageParams } from './hooks/useChat'
+import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatFeatures } from './hooks/useChat'
 import { setNamespace as setApiNamespace, api } from './api/client'
 import type { LlmConfig, ConversationSummary, FileAttachment, ChatMessage, MemoryContext, StreamEvent } from './api/types'
 import { Layout } from './components/Layout'
@@ -39,6 +39,21 @@ export default function App() {
   // Chat state lifted to App so it survives tab switches
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([])
   const [chatMode, setChatMode] = useState<'rag' | 'tool'>('rag')
+  const [chatFeatures, setChatFeatures] = useState<ChatFeatures>(() => {
+    try {
+      const saved = localStorage.getItem('anima-chat-features')
+      return saved ? JSON.parse(saved) : { recall: true, tools: false }
+    } catch {
+      return { recall: true, tools: false }
+    }
+  })
+  const setChatFeaturesAndSave = useCallback((f: ChatFeatures) => {
+    setChatFeatures(f)
+    localStorage.setItem('anima-chat-features', JSON.stringify(f))
+    // Derive server mode from features
+    if (f.tools) setChatMode('tool')
+    else setChatMode('rag')
+  }, [])
   const [chatConfig, setChatConfig] = useState<LlmConfig>(() => {
     try {
       const saved = localStorage.getItem('anima-llm-config')
@@ -199,7 +214,21 @@ export default function App() {
     fromQueueRef.current = false
 
     const mode = modeRef.current
-    const config = configRef.current
+    const config = { ...configRef.current }
+
+    // Build system prompt from identity context
+    const userName = localStorage.getItem('anima-user-name') || ''
+    const agentName = localStorage.getItem('anima-agent-name') || ''
+    const agentPersona = localStorage.getItem('anima-agent-persona') || ''
+    const parts: string[] = []
+    if (agentName) parts.push(`Your name is ${agentName}.`)
+    if (agentPersona) parts.push(agentPersona)
+    if (userName) parts.push(`The user's name is ${userName}.`)
+    if (parts.length > 0) {
+      config.system_prompt = parts.join(' ')
+    } else if (!config.system_prompt) {
+      config.system_prompt = 'You are a helpful assistant.'
+    }
 
     // Auto-create conversation if none
     let convId = convIdRef.current
@@ -438,6 +467,8 @@ export default function App() {
     setMessages: setChatMessages,
     mode: chatMode,
     setMode: setChatMode,
+    features: chatFeatures,
+    setFeatures: setChatFeaturesAndSave,
     config: chatConfig,
     setConfig: (cfg: LlmConfig) => {
       setChatConfig(cfg)
@@ -452,7 +483,7 @@ export default function App() {
     streamingMemories: visibleStreamingMemories,
     sendMessage,
     stopGeneration,
-  }), [chatMessages, chatMode, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, sendMessage, stopGeneration])
+  }), [chatMessages, chatMode, chatFeatures, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, sendMessage, stopGeneration])
 
   return (
     <QueryClientProvider client={queryClient}>

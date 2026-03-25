@@ -5,14 +5,14 @@ import type { EmbeddingPoint } from '../api/types'
 
 // Tier 1 — raw user input
 const RAW_COLORS: Record<string, string> = {
-  raw: '#9ca3af',
+  raw: '#9C9488',
 }
 
 // Tier 2/3/4 — processor-generated
 const PROCESSED_COLORS: Record<string, string> = {
-  reflected: '#a78bfa',
-  deduced:   '#38bdf8',
-  induced:   '#34d399',
+  reflected: '#8B7DB8',
+  deduced:   '#5B9CA6',
+  induced:   '#5BA88C',
 }
 
 const ALL_COLORS = { ...RAW_COLORS, ...PROCESSED_COLORS }
@@ -111,7 +111,7 @@ export function EmbeddingPage() {
     ctx.save()
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, cssW, cssH)
-    ctx.fillStyle = '#030712'
+    ctx.fillStyle = '#F5F0E8'
     ctx.fillRect(0, 0, cssW, cssH)
 
     const cx = cssW / 2
@@ -183,7 +183,7 @@ export function EmbeddingPage() {
       ctx.fillStyle = getColor(pp.point.memory_type)
       ctx.fill()
       if (isSel || isHov) {
-        ctx.strokeStyle = isSel ? '#fff' : 'rgba(255,255,255,0.6)'
+        ctx.strokeStyle = isSel ? '#2D2A26' : 'rgba(45,42,38,0.6)'
         ctx.lineWidth = isSel ? 1.5 : 1
         ctx.stroke()
       }
@@ -201,15 +201,15 @@ export function EmbeddingPage() {
       let ty = sy - 24
       if (tx + tw + pad * 2 > cssW) tx = sx - tw - pad * 2 - 10
       if (ty < 4) ty = sy + 10
-      ctx.fillStyle = 'rgba(15,23,42,0.92)'
-      ctx.strokeStyle = 'rgba(99,102,241,0.6)'
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'
+      ctx.strokeStyle = 'rgba(224,216,203,0.8)'
       ctx.lineWidth = 1
       ctx.beginPath()
       const rx2 = 4
       ctx.roundRect(tx, ty, tw + pad * 2, th + pad, rx2)
       ctx.fill()
       ctx.stroke()
-      ctx.fillStyle = '#e2e8f0'
+      ctx.fillStyle = '#2D2A26'
       ctx.fillText(text, tx + pad, ty + pad + th - 4)
     }
 
@@ -278,24 +278,24 @@ export function EmbeddingPage() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
-          <h2 className="text-lg font-semibold text-white">Vector Space</h2>
-          <p className="text-xs text-gray-500">PCA · drag to orbit · scroll to zoom · click to inspect</p>
+          <h2 className="text-lg font-semibold text-ink">Vector Space</h2>
+          <p className="text-xs text-ink-muted">PCA · drag to orbit · scroll to zoom · click to inspect</p>
         </div>
-        {!loading && <span className="text-xs text-gray-600">{points.length} memories</span>}
+        {!loading && <span className="text-xs text-ink-faint">{points.length} memories</span>}
       </div>
 
       {loading && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <div className="w-6 h-6 border-2 border-gray-700 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500">Computing PCA projection…</span>
+          <div className="w-6 h-6 border-2 border-warm-border-strong border-t-accent rounded-full animate-spin" />
+          <span className="text-sm text-ink-muted">Computing PCA projection…</span>
         </div>
       )}
-      {error && <div className="text-red-400 text-sm bg-red-950/30 rounded-lg px-4 py-3">Error: {error}</div>}
+      {error && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-4 py-3">Error: {error}</div>}
 
       {!loading && !error && (
         <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
           {/* Canvas */}
-          <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#030712', border: '1px solid rgba(31,41,55,0.6)' }}>
+          <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#F5F0E8', border: '1px solid #E0D8CB' }}>
             <canvas
               ref={canvasRef}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: dragRef.current ? 'grabbing' : 'grab' }}
@@ -311,37 +311,37 @@ export function EmbeddingPage() {
           {/* Side panel */}
           <div style={{ width: '180px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
             {/* Axes legend */}
-            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60">
-              <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Axes</p>
+            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
+              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Axes</p>
               {[['PC1','#ef4444','Most variance'], ['PC2','#22c55e','2nd variance'], ['PC3','#3b82f6','3rd variance']].map(([label, color, desc]) => (
                 <div key={label} className="flex items-center gap-2 mb-1.5">
                   <div className="w-3 h-0.5 shrink-0" style={{ background: color }} />
-                  <span className="text-xs font-mono text-gray-300">{label}</span>
-                  <span className="text-xs text-gray-600 truncate">{desc}</span>
+                  <span className="text-xs font-mono text-ink-light">{label}</span>
+                  <span className="text-xs text-ink-faint truncate">{desc}</span>
                 </div>
               ))}
             </div>
 
             {/* Types legend */}
-            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60 flex-1 overflow-auto" style={{ minHeight: 0 }}>
+            <div className="bg-card rounded-xl p-3 border border-warm-border/60 flex-1 overflow-auto" style={{ minHeight: 0 }}>
               {processedPresent.length > 0 && <>
-                <p className="text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wider">Processed</p>
+                <p className="text-xs text-ink-muted mb-1.5 font-medium uppercase tracking-wider">Processed</p>
                 {processedPresent.map(type => (
                   <div key={type} className="flex items-center gap-2 mb-1">
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(type) }} />
-                    <span className="text-xs text-gray-300 flex-1 capitalize">{type}</span>
-                    <span className="text-xs text-gray-600 tabular-nums">{points.filter(p => p.memory_type === type).length}</span>
+                    <span className="text-xs text-ink-light flex-1 capitalize">{type}</span>
+                    <span className="text-xs text-ink-faint tabular-nums">{points.filter(p => p.memory_type === type).length}</span>
                   </div>
                 ))}
-                {rawPresent.length > 0 && <div className="border-t border-gray-800 my-2" />}
+                {rawPresent.length > 0 && <div className="border-t border-warm-border my-2" />}
               </>}
               {rawPresent.length > 0 && <>
-                <p className="text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wider">Raw</p>
+                <p className="text-xs text-ink-muted mb-1.5 font-medium uppercase tracking-wider">Raw</p>
                 {rawPresent.map(type => (
                   <div key={type} className="flex items-center gap-2 mb-1">
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(type) }} />
-                    <span className="text-xs text-gray-400 flex-1 capitalize">{type}</span>
-                    <span className="text-xs text-gray-600 tabular-nums">{points.filter(p => p.memory_type === type).length}</span>
+                    <span className="text-xs text-ink-muted flex-1 capitalize">{type}</span>
+                    <span className="text-xs text-ink-faint tabular-nums">{points.filter(p => p.memory_type === type).length}</span>
                   </div>
                 ))}
               </>}
@@ -349,16 +349,16 @@ export function EmbeddingPage() {
 
             {/* Selected memory */}
             {selected && (
-              <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60 overflow-auto" style={{ maxHeight: '35%', minHeight: '80px' }}>
+              <div className="bg-card rounded-xl p-3 border border-warm-border/60 overflow-auto" style={{ maxHeight: '35%', minHeight: '80px' }}>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Memory</p>
-                  <button onClick={() => setSelected(null)} className="text-gray-600 hover:text-gray-400 text-sm leading-none">✕</button>
+                  <p className="text-xs text-ink-muted uppercase tracking-wider font-medium">Memory</p>
+                  <button onClick={() => setSelected(null)} className="text-ink-faint hover:text-ink-muted text-sm leading-none">✕</button>
                 </div>
                 <div className="flex items-center gap-1.5 mb-2">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(selected.memory_type) }} />
-                  <span className="text-xs text-gray-400 capitalize">{selected.memory_type}</span>
+                  <span className="text-xs text-ink-muted capitalize">{selected.memory_type}</span>
                 </div>
-                <p className="text-xs text-gray-200 leading-relaxed">{selected.content}</p>
+                <p className="text-xs text-ink leading-relaxed">{selected.content}</p>
               </div>
             )}
           </div>

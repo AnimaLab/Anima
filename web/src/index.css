@@ -1,9 +1,26 @@
 @import "tailwindcss";
 
-/* Dark scrollbar matching the app theme */
+@theme {
+  --color-paper: #F5F0E8;
+  --color-paper-warm: #EDE8DE;
+  --color-paper-deep: #E6DFD1;
+  --color-card: #FFFFFF;
+  --color-ink: #2D2A26;
+  --color-ink-light: #504A44;
+  --color-ink-muted: #6B6259;
+  --color-ink-faint: #8A847A;
+  --color-warm-border: #E0D8CB;
+  --color-warm-border-strong: #D4CBC0;
+  --color-accent: #C47B3B;
+  --color-accent-hover: #B06A2E;
+  --color-accent-light: #F7EDE3;
+  --color-input: #FAF7F2;
+}
+
+/* Warm scrollbar matching the notebook theme */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #374151 transparent;
+  scrollbar-color: #D4CBC0 transparent;
 }
 
 *::-webkit-scrollbar {
@@ -16,10 +33,10 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #374151;
+  background-color: #D4CBC0;
   border-radius: 3px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #4b5563;
+  background-color: #B8AFA2;
 }

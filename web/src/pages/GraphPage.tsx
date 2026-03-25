@@ -6,29 +6,29 @@ import { X, Tag, Pencil, Trash2, Check } from 'lucide-react'
 import type { GraphData, Memory } from '../api/types'
 
 const STATUS_COLORS: Record<string, string> = {
-  active: '#3b82f6',
-  superseded: '#f59e0b',
-  deleted: '#ef4444',
+  active: '#5B8C5A',
+  superseded: '#C49A3C',
+  deleted: '#C25B4E',
 }
 
 const TYPE_NODE_COLOR: Record<string, string> = {
-  raw:       '#9ca3af',
-  reflected: '#a78bfa',
-  deduced:   '#38bdf8',
-  induced:   '#34d399',
+  raw:       '#9C9488',
+  reflected: '#8B7DB8',
+  deduced:   '#5B9CA6',
+  induced:   '#5BA88C',
 }
 
 const TYPE_COLOR: Record<string, string> = {
-  raw:       'bg-gray-500/20 text-gray-400',
-  reflected: 'bg-violet-500/20 text-violet-400',
-  deduced:   'bg-sky-500/20 text-sky-400',
-  induced:   'bg-emerald-500/20 text-emerald-400',
+  raw:       'bg-stone-500/15 text-stone-600',
+  reflected: 'bg-violet-500/15 text-violet-600',
+  deduced:   'bg-sky-500/15 text-sky-600',
+  induced:   'bg-emerald-500/15 text-emerald-600',
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  active: 'bg-green-500/20 text-green-400',
-  superseded: 'bg-amber-500/20 text-amber-400',
-  deleted: 'bg-red-500/20 text-red-400',
+  active: 'bg-green-500/15 text-green-700',
+  superseded: 'bg-amber-500/15 text-amber-700',
+  deleted: 'bg-red-500/15 text-red-700',
 }
 
 /** Word-wrap text into lines that fit within maxWidth (canvas pixels). */
@@ -111,7 +111,7 @@ const MemoGraph = memo(function MemoGraph({
 })
 
 export function GraphPage() {
-  const [threshold, setThreshold] = useState(0.55)
+  const [threshold, setThreshold] = useState(0.75)
   const [showSuperseded, setShowSuperseded] = useState(true)
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
   const [loadingMemory, setLoadingMemory] = useState(false)
@@ -248,7 +248,7 @@ export function GraphPage() {
     const bgRadius = 2 / globalScale
     const bgX = node.x! - bgWidth / 2, bgY = labelY - padY
 
-    ctx.fillStyle = 'rgba(17, 24, 39, 0.85)'
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
     ctx.beginPath()
     ctx.moveTo(bgX + bgRadius, bgY)
     ctx.lineTo(bgX + bgWidth - bgRadius, bgY)
@@ -262,37 +262,49 @@ export function GraphPage() {
     ctx.closePath()
     ctx.fill()
 
-    ctx.fillStyle = 'rgba(229, 231, 235, 0.9)'
+    ctx.fillStyle = 'rgba(45, 42, 38, 0.9)'
     lines.forEach((line, i) => { ctx.fillText(line, node.x!, labelY + i * lineHeight) })
   }, [])
 
   return (
     <div className="space-y-4 h-full max-h-[calc(100vh-3rem)] flex flex-col">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-white">Knowledge Graph</h2>
-          {data && <span className="text-xs text-gray-600">{data.nodes.length} nodes, {data.edges.length} edges</span>}
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-ink">Graph</h2>
+            {data && <span className="text-xs text-ink-faint">{data.nodes.length} nodes, {data.edges.length} edges</span>}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">Threshold:</span>
-            <input type="range" min="0.3" max="0.9" step="0.05" value={threshold}
-              onChange={(e) => setThreshold(parseFloat(e.target.value))} className="w-24 accent-blue-500" />
-            <span className="text-xs text-gray-400 font-mono">{threshold.toFixed(2)}</span>
+          {/* Type legend */}
+          <div className="hidden sm:flex items-center gap-2">
+            {Object.entries(TYPE_NODE_COLOR).map(([type, color]) => (
+              <div key={type} className="flex items-center gap-1">
+                <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                <span className="text-[10px] text-ink-faint capitalize">{type}</span>
+              </div>
+            ))}
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-gray-400">
+          <div className="hidden sm:block w-px h-3 bg-warm-border" />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-muted">Sim:</span>
+            <input type="range" min="0.3" max="0.9" step="0.05" value={threshold}
+              onChange={(e) => setThreshold(parseFloat(e.target.value))} className="w-20 accent-[#C47B3B]" />
+            <span className="text-xs text-ink-muted font-mono">{threshold.toFixed(2)}</span>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-ink-muted">
             <input type="checkbox" checked={showSuperseded} onChange={(e) => setShowSuperseded(e.target.checked)} />
             Superseded
           </label>
-          <button onClick={() => graphRef.current?.zoomToFit(400, 40)} className="text-xs text-gray-500 hover:text-white">
+          <button onClick={() => graphRef.current?.zoomToFit(400, 40)} className="text-xs text-ink-muted hover:text-ink">
             Fit
           </button>
         </div>
       </div>
 
-      <div ref={containerRef} className="flex-1 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden relative">
+      <div ref={containerRef} className="flex-1 bg-card border border-warm-border rounded-xl overflow-hidden relative">
         {isLoading ? (
-          <div className="flex items-center justify-center h-full text-gray-500 text-sm">Loading graph...</div>
+          <div className="flex items-center justify-center h-full text-ink-muted text-sm">Loading graph...</div>
         ) : (
           <MemoGraph
             graphRef={graphRef}
@@ -311,55 +323,55 @@ export function GraphPage() {
         )}
 
         {(selectedMemory || loadingMemory) && (
-          <div className="absolute top-3 right-3 w-80 max-w-[calc(100%-1.5rem)] bg-gray-950 border border-gray-700 rounded-xl shadow-2xl z-10">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-              <span className="text-sm font-medium text-white">Memory Detail</span>
+          <div className="absolute top-3 right-3 w-80 max-w-[calc(100%-1.5rem)] bg-card border border-warm-border-strong rounded-xl shadow-2xl z-10">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-warm-border">
+              <span className="text-sm font-medium text-ink">Memory Detail</span>
               <div className="flex items-center gap-1">
                 {selectedMemory && selectedMemory.status === 'active' && !isEditing && (
                   <>
-                    <button onClick={() => { setEditContent(selectedMemory.content); setIsEditing(true) }} className="p-1 text-gray-500 hover:text-blue-400 transition-colors" title="Edit">
+                    <button onClick={() => { setEditContent(selectedMemory.content); setIsEditing(true) }} className="p-1 text-ink-muted hover:text-accent transition-colors" title="Edit">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => setShowDeleteConfirm(true)} className="p-1 text-gray-500 hover:text-red-400 transition-colors" title="Delete">
+                    <button onClick={() => setShowDeleteConfirm(true)} className="p-1 text-ink-muted hover:text-[#C25B4E] transition-colors" title="Delete">
                       <Trash2 size={14} />
                     </button>
                   </>
                 )}
-                <button onClick={() => { setSelectedMemory(null); setIsEditing(false); setShowDeleteConfirm(false) }} className="p-1 text-gray-500 hover:text-gray-300 transition-colors">
+                <button onClick={() => { setSelectedMemory(null); setIsEditing(false); setShowDeleteConfirm(false) }} className="p-1 text-ink-muted hover:text-ink transition-colors">
                   <X size={14} />
                 </button>
               </div>
             </div>
             {loadingMemory ? (
-              <div className="px-4 py-6 text-center text-gray-500 text-sm">Loading...</div>
+              <div className="px-4 py-6 text-center text-ink-muted text-sm">Loading...</div>
             ) : selectedMemory && (
               <div className="px-4 py-3 space-y-3 max-h-[60vh] overflow-y-auto">
                 {isEditing ? (
                   <div className="space-y-2">
                     <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 resize-y min-h-[80px] focus:outline-none focus:border-blue-500" rows={4} />
+                      className="w-full bg-card border border-warm-border-strong rounded-lg p-2 text-sm text-ink resize-y min-h-[80px] focus:outline-none focus:border-accent" rows={4} />
                     <div className="flex gap-2">
                       <button onClick={() => updateMutation.mutate({ id: selectedMemory.id, content: editContent })}
                         disabled={updateMutation.isPending || editContent.trim() === ''}
-                        className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded-lg">
+                        className="flex items-center gap-1 px-3 py-1 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs rounded-lg">
                         <Check size={12} /> Save
                       </button>
-                      <button onClick={() => setIsEditing(false)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-lg">Cancel</button>
+                      <button onClick={() => setIsEditing(false)} className="px-3 py-1 bg-paper-deep hover:bg-paper-deep text-ink-light text-xs rounded-lg">Cancel</button>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-200 leading-relaxed">{selectedMemory.content}</p>
+                  <p className="text-sm text-ink leading-relaxed">{selectedMemory.content}</p>
                 )}
 
                 {showDeleteConfirm && (
-                  <div className="bg-red-950/50 border border-red-800/50 rounded-lg p-3 space-y-2">
-                    <p className="text-xs text-red-400">Delete this memory?</p>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                    <p className="text-xs text-red-600">Delete this memory?</p>
                     <div className="flex gap-2">
                       <button onClick={() => deleteMutation.mutate(selectedMemory.id)} disabled={deleteMutation.isPending}
-                        className="px-3 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs rounded-lg">
+                        className="px-3 py-1 bg-[#C25B4E] hover:bg-[#B5503F] disabled:opacity-50 text-white text-xs rounded-lg">
                         {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
                       </button>
-                      <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-lg">Cancel</button>
+                      <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1 bg-paper-deep hover:bg-paper-deep text-ink-light text-xs rounded-lg">Cancel</button>
                     </div>
                   </div>
                 )}
@@ -368,29 +380,29 @@ export function GraphPage() {
                   <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_BADGE[selectedMemory.status] || ''}`}>{selectedMemory.status}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_COLOR[selectedMemory.memory_type] || TYPE_COLOR.raw}`}>{selectedMemory.memory_type}</span>
                   {selectedMemory.tags.length > 0 && selectedMemory.tags.map(tag => (
-                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-700/50 text-gray-400 inline-flex items-center gap-0.5">
+                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-paper-deep/50 text-ink-muted inline-flex items-center gap-0.5">
                       <Tag size={8} />{tag}
                     </span>
                   ))}
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                  <div><span className="text-gray-600">Created</span><p className="text-gray-400">{new Date(selectedMemory.created_at).toLocaleDateString()}</p></div>
-                  <div><span className="text-gray-600">Updated</span><p className="text-gray-400">{new Date(selectedMemory.updated_at).toLocaleDateString()}</p></div>
-                  <div><span className="text-gray-600">Accessed</span><p className="text-gray-400">{selectedMemory.access_count}x</p></div>
-                  <div><span className="text-gray-600">Namespace</span><p className="text-gray-400 truncate">{selectedMemory.namespace}</p></div>
+                  <div><span className="text-ink-faint">Created</span><p className="text-ink-muted">{new Date(selectedMemory.created_at).toLocaleDateString()}</p></div>
+                  <div><span className="text-ink-faint">Updated</span><p className="text-ink-muted">{new Date(selectedMemory.updated_at).toLocaleDateString()}</p></div>
+                  <div><span className="text-ink-faint">Accessed</span><p className="text-ink-muted">{selectedMemory.access_count}x</p></div>
+                  <div><span className="text-ink-faint">Namespace</span><p className="text-ink-muted truncate">{selectedMemory.namespace}</p></div>
                 </div>
 
                 {selectedMemory.metadata && Object.keys(selectedMemory.metadata).length > 0 && (
                   <div>
-                    <span className="text-[10px] text-gray-600 uppercase tracking-wider">Metadata</span>
-                    <pre className="mt-1 text-[11px] text-gray-500 bg-gray-900 rounded-lg p-2 overflow-x-auto">
+                    <span className="text-[10px] text-ink-faint uppercase tracking-wider">Metadata</span>
+                    <pre className="mt-1 text-[11px] text-ink-muted bg-card rounded-lg p-2 overflow-x-auto">
                       {JSON.stringify(selectedMemory.metadata, null, 2)}
                     </pre>
                   </div>
                 )}
 
-                <p className="text-[10px] text-gray-700 font-mono truncate" title={selectedMemory.id}>{selectedMemory.id}</p>
+                <p className="text-[10px] text-ink-faint font-mono truncate" title={selectedMemory.id}>{selectedMemory.id}</p>
               </div>
             )}
           </div>

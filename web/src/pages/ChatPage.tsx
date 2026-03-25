@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2 } from 'lucide-react'
+import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -9,20 +9,20 @@ import { useChat, type DisplayMessage } from '../hooks/useChat'
 import { api } from '../api/client'
 
 const typeColor: Record<string, string> = {
-  preference: 'bg-purple-500/20 text-purple-400',
-  fact: 'bg-blue-500/20 text-blue-400',
-  event: 'bg-cyan-500/20 text-cyan-400',
-  decision: 'bg-orange-500/20 text-orange-400',
-  story: 'bg-rose-500/20 text-rose-400',
-  reflection: 'bg-indigo-500/20 text-indigo-400',
-  context: 'bg-gray-500/20 text-gray-400',
-  goal: 'bg-emerald-500/20 text-emerald-400',
-  relationship: 'bg-pink-500/20 text-pink-400',
-  emotion: 'bg-red-500/20 text-red-400',
-  habit: 'bg-teal-500/20 text-teal-400',
-  belief: 'bg-amber-500/20 text-amber-400',
-  skill: 'bg-lime-500/20 text-lime-400',
-  location: 'bg-sky-500/20 text-sky-400',
+  preference: 'bg-purple-500/15 text-purple-700',
+  fact: 'bg-blue-500/15 text-blue-700',
+  event: 'bg-cyan-500/15 text-cyan-700',
+  decision: 'bg-orange-500/15 text-orange-700',
+  story: 'bg-rose-500/15 text-rose-700',
+  reflection: 'bg-indigo-500/15 text-indigo-700',
+  context: 'bg-stone-500/15 text-stone-600',
+  goal: 'bg-emerald-500/15 text-emerald-700',
+  relationship: 'bg-pink-500/15 text-pink-700',
+  emotion: 'bg-red-500/15 text-red-700',
+  habit: 'bg-teal-500/15 text-teal-700',
+  belief: 'bg-amber-500/15 text-amber-700',
+  skill: 'bg-lime-500/15 text-lime-700',
+  location: 'bg-sky-500/15 text-sky-700',
 }
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -32,7 +32,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 export function ChatPage() {
   const {
-    messages, setMessages, mode, setMode, config, setConfig,
+    messages, setMessages, features, setFeatures, config, setConfig,
     conversationId, setConversationId, conversations, setConversations,
     loading, streamingContent, streamingMemories,
     sendMessage: contextSendMessage,
@@ -216,10 +216,10 @@ export function ChatPage() {
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-3rem)] md:max-h-[calc(100vh-3rem)]">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-gray-800 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-warm-border shrink-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-white truncate">
+            <h2 className="text-lg font-semibold text-ink truncate">
               {conversationId
                 ? conversations.find(c => c.id === conversationId)?.title || 'Chat'
                 : 'New Chat'}
@@ -237,7 +237,7 @@ export function ChatPage() {
                   } catch { /* ignore */ }
                   setRegenningTitle(false)
                 }}
-                className="text-gray-600 hover:text-gray-400 transition-colors shrink-0"
+                className="text-ink-faint hover:text-ink-muted transition-colors shrink-0"
                 title="Regenerate title"
               >
                 {regenningTitle ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -249,7 +249,7 @@ export function ChatPage() {
               <select
                 value={config.model}
                 onChange={e => setConfig({ ...config, model: e.target.value })}
-                className="bg-transparent text-xs text-gray-500 hover:text-gray-300 cursor-pointer focus:outline-none appearance-none pr-4 max-w-[240px] truncate"
+                className="bg-transparent text-xs text-ink-muted hover:text-ink-light cursor-pointer focus:outline-none appearance-none pr-4 max-w-[240px] truncate"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0 center' }}
               >
                 {!models.find(m => m.id === config.model) && (
@@ -260,12 +260,12 @@ export function ChatPage() {
                 ))}
               </select>
             ) : (
-              <span className="text-xs text-gray-500 truncate max-w-[240px]">{config.model}</span>
+              <span className="text-xs text-ink-muted truncate max-w-[240px]">{config.model}</span>
             )}
             <button
               onClick={fetchModels}
               disabled={loadingModels}
-              className="text-gray-600 hover:text-gray-400 transition-colors shrink-0"
+              className="text-ink-faint hover:text-ink-muted transition-colors shrink-0"
               title="Refresh models"
             >
               {loadingModels ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
@@ -273,30 +273,34 @@ export function ChatPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className="flex bg-gray-800 rounded-lg p-0.5">
-            <button
-              onClick={() => setMode('rag')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                mode === 'rag' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Brain size={14} />
-              RAG
-            </button>
-            <button
-              onClick={() => setMode('tool')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                mode === 'tool' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Wrench size={14} />
-              Tool Use
-            </button>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 cursor-pointer" title="Auto-retrieve relevant memories">
+              <input type="checkbox" checked={features.recall}
+                onChange={e => setFeatures({ ...features, recall: e.target.checked })}
+                className="sr-only peer" />
+              <div className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                features.recall ? 'bg-accent text-white' : 'bg-paper-deep text-ink-muted'
+              }`}>
+                <Brain size={13} />
+                Recall
+              </div>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer" title="Let the model use memory tools">
+              <input type="checkbox" checked={features.tools}
+                onChange={e => setFeatures({ ...features, tools: e.target.checked })}
+                className="sr-only peer" />
+              <div className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                features.tools ? 'bg-[#8B7DB8] text-white' : 'bg-paper-deep text-ink-muted'
+              }`}>
+                <Wrench size={13} />
+                Tools
+              </div>
+            </label>
           </div>
           {messages.length > 0 && (
             <button
               onClick={() => { setMessages([]); setConversationId(null) }}
-              className="p-2 text-gray-400 hover:bg-gray-800 hover:text-gray-200 rounded-lg transition-colors"
+              className="p-2 text-ink-muted hover:bg-paper-deep hover:text-ink rounded-lg transition-colors"
               title="Clear chat"
             >
               <X size={16} />
@@ -308,13 +312,17 @@ export function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto mt-4 space-y-4 min-h-0 relative pr-2" ref={scrollContainerRef} onScroll={handleScroll}>
         {messages.length === 0 && !streamingContent && (
-          <div className="flex flex-col items-center justify-center h-full text-gray-600">
-            <Sparkles size={40} className="mb-3 text-gray-700" />
-            <p className="text-lg font-medium text-gray-500">Start a conversation</p>
-            <p className="text-sm mt-1">
-              {mode === 'rag'
-                ? 'Relevant memories are retrieved and new facts auto-extracted'
-                : 'The LLM calls Anima tools to search and store memories'}
+          <div className="flex flex-col items-center justify-center h-full text-ink-faint">
+            <Sparkles size={32} className="mb-3 text-ink-faint" />
+            <p className="text-base font-medium text-ink-muted">What's on your mind?</p>
+            <p className="text-sm text-ink-faint mt-1">
+              {features.recall && features.tools
+                ? 'Memories are recalled and the model can actively search and store'
+                : features.recall
+                ? 'Your memories are searched automatically to help the conversation'
+                : features.tools
+                ? 'The model can search and store memories using tools'
+                : 'Plain chat — no memory features enabled'}
             </p>
           </div>
         )}
@@ -326,15 +334,15 @@ export function ChatPage() {
         {/* Streaming message */}
         {streamingContent && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center shrink-0">
-              <Brain size={16} className="text-blue-400" />
+            <div className="w-8 h-8 rounded-full bg-accent-light flex items-center justify-center shrink-0">
+              <Brain size={16} className="text-accent" />
             </div>
             <div className="max-w-[90%] sm:max-w-[75%]">
-              <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-sm leading-relaxed text-gray-200">
+              <div className="bg-card border border-warm-border rounded-lg px-4 py-2.5 text-sm leading-relaxed text-ink">
                 <AssistantContent content={streamingContent} />
               </div>
               {streamingMemories.length > 0 && (
-                <p className="text-xs text-gray-600 mt-1">{streamingMemories.length} memories used</p>
+                <p className="text-xs text-ink-faint mt-1">{streamingMemories.length} memories used</p>
               )}
             </div>
           </div>
@@ -342,14 +350,14 @@ export function ChatPage() {
 
         {loading && !streamingContent && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center shrink-0">
-              <Brain size={16} className="text-blue-400" />
+            <div className="w-8 h-8 rounded-full bg-accent-light flex items-center justify-center shrink-0">
+              <Brain size={16} className="text-accent" />
             </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+            <div className="bg-card border border-warm-border rounded-lg px-4 py-3">
               <div className="flex gap-1">
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           </div>
@@ -363,7 +371,7 @@ export function ChatPage() {
         <div className="flex justify-center -mt-5 mb-1 relative z-10">
           <button
             onClick={() => { setIsScrollPinned(true); scrollToBottom() }}
-            className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-full hover:bg-gray-700 hover:text-white transition-colors shadow-lg"
+            className="flex items-center gap-1 px-3 py-1.5 bg-paper-deep border border-warm-border-strong text-ink-light text-xs rounded-full hover:bg-paper-deep hover:text-ink transition-colors shadow-lg"
           >
             <ArrowDown size={12} />
             Scroll to bottom
@@ -380,19 +388,19 @@ export function ChatPage() {
               {attachedFiles.map((file, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1.5 bg-gray-800 border border-gray-700 text-gray-300 text-xs px-2.5 py-1 rounded-md"
+                  className="inline-flex items-center gap-1.5 bg-paper-deep border border-warm-border-strong text-ink-light text-xs px-2.5 py-1 rounded-md"
                 >
                   {file.previewUrl ? (
                     <img src={file.previewUrl} alt="" className="w-6 h-6 rounded object-cover shrink-0" />
                   ) : file.type === 'image' ? (
-                    <ImageIcon size={12} className="text-gray-500 shrink-0" />
+                    <ImageIcon size={12} className="text-ink-muted shrink-0" />
                   ) : (
-                    <FileIcon size={12} className="text-gray-500 shrink-0" />
+                    <FileIcon size={12} className="text-ink-muted shrink-0" />
                   )}
                   <span className="truncate max-w-[200px]">{file.name}</span>
                   <button
                     onClick={() => removeFile(i)}
-                    className="text-gray-500 hover:text-gray-300 transition-colors"
+                    className="text-ink-muted hover:text-ink-light transition-colors"
                   >
                     <X size={12} />
                   </button>
@@ -400,13 +408,13 @@ export function ChatPage() {
               ))}
             </div>
             {!(config.vision ?? false) && attachedFiles.some(f => f.type === 'image') && (
-              <p className="text-[11px] text-amber-500/80 mt-1.5">
+              <p className="text-[11px] text-amber-600 mt-1.5">
                 Vision is off — images won't be sent to the model. Enable it in Settings.
               </p>
             )}
           </div>
         )}
-        <div className="flex gap-2 items-end bg-gray-900 border border-gray-800 rounded-lg p-2">
+        <div className="flex gap-2 items-end bg-card border border-warm-border rounded-lg p-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -417,7 +425,7 @@ export function ChatPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-800 rounded-lg transition-colors shrink-0"
+            className="p-2 text-ink-muted hover:text-ink hover:bg-paper-deep rounded-lg transition-colors shrink-0"
             title="Attach files"
           >
             <Paperclip size={16} />
@@ -429,13 +437,13 @@ export function ChatPage() {
             onKeyDown={handleKeyDown}
             placeholder={loading ? "Type to queue a message..." : "Type a message..."}
             rows={1}
-            className="flex-1 bg-transparent text-white text-sm resize-none focus:outline-none max-h-32 py-1.5 px-2"
+            className="flex-1 bg-transparent text-ink text-sm resize-none focus:outline-none max-h-32 py-1.5 px-2"
             style={{ minHeight: '2rem' }}
           />
           {loading && (
             <button
               onClick={stopGeneration}
-              className="p-2 bg-red-600/80 hover:bg-red-500 text-white rounded-lg transition-colors shrink-0"
+              className="p-2 bg-[#C25B4E] hover:bg-[#B5503F] text-white rounded-lg transition-colors shrink-0"
               title="Stop generating"
             >
               <Square size={14} />
@@ -444,7 +452,7 @@ export function ChatPage() {
           <button
             onClick={handleSend}
             disabled={!input.trim() && attachedFiles.length === 0}
-            className="p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors shrink-0"
+            className="p-2 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white rounded-lg transition-colors shrink-0"
           >
             <Send size={16} />
           </button>
@@ -465,11 +473,11 @@ function CodeBlock({ language, children }: { language: string; children: string 
 
   return (
     <div className="relative group my-2">
-      <div className="flex items-center justify-between bg-gray-800 rounded-t-lg px-3 py-1 text-xs text-gray-400">
+      <div className="flex items-center justify-between bg-paper-deep rounded-t-lg px-3 py-1 text-xs text-ink-muted">
         <span>{language || 'code'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-gray-200 transition-colors"
+          className="flex items-center gap-1 hover:text-ink transition-colors"
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
@@ -519,14 +527,14 @@ function ThinkBlock({ content }: { content: string }) {
     <div className="my-2">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink-light transition-colors"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="font-medium">Thinking</span>
-        {!open && <span className="text-gray-600 truncate max-w-[300px]">{content.slice(0, 80)}{content.length > 80 ? '...' : ''}</span>}
+        {!open && <span className="text-ink-faint truncate max-w-[300px]">{content.slice(0, 80)}{content.length > 80 ? '...' : ''}</span>}
       </button>
       {open && (
-        <div className="mt-1.5 pl-4 border-l-2 border-gray-700 text-xs text-gray-400 leading-relaxed whitespace-pre-wrap">
+        <div className="mt-1.5 pl-4 border-l-2 border-warm-border-strong text-xs text-ink-muted leading-relaxed whitespace-pre-wrap">
           {content}
         </div>
       )}
@@ -561,7 +569,7 @@ function MarkdownContent({ content }: { content: string }) {
             return <CodeBlock language={match[1]}>{codeStr}</CodeBlock>
           }
           return (
-            <code className="bg-gray-800 text-blue-300 px-1.5 py-0.5 rounded text-xs" {...props}>
+            <code className="bg-paper-deep text-accent px-1.5 py-0.5 rounded text-xs" {...props}>
               {children}
             </code>
           )
@@ -585,22 +593,22 @@ function MarkdownContent({ content }: { content: string }) {
           return <h3 className="text-sm font-bold mb-1">{children}</h3>
         },
         blockquote({ children }) {
-          return <blockquote className="border-l-2 border-gray-600 pl-3 italic text-gray-400 my-2">{children}</blockquote>
+          return <blockquote className="border-l-2 border-warm-border-strong pl-3 italic text-ink-muted my-2">{children}</blockquote>
         },
         a({ href, children }) {
-          return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{children}</a>
+          return <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{children}</a>
         },
         table({ children }) {
           return <table className="border-collapse my-2 text-xs w-full">{children}</table>
         },
         th({ children }) {
-          return <th className="border border-gray-700 px-2 py-1 bg-gray-800 text-left font-medium">{children}</th>
+          return <th className="border border-warm-border px-2 py-1 bg-paper-deep text-left font-medium">{children}</th>
         },
         td({ children }) {
-          return <td className="border border-gray-700 px-2 py-1">{children}</td>
+          return <td className="border border-warm-border px-2 py-1">{children}</td>
         },
         hr() {
-          return <hr className="border-gray-700 my-3" />
+          return <hr className="border-warm-border my-3" />
         },
         pre({ children }) {
           return <>{children}</>
@@ -623,21 +631,21 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div
         className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-          isUser ? 'bg-gray-700' : 'bg-blue-600/20'
+          isUser ? 'bg-paper-deep' : 'bg-accent-light'
         }`}
       >
         {isUser ? (
-          <span className="text-xs text-gray-300 font-medium">U</span>
+          <User size={14} className="text-ink-light" />
         ) : (
-          <Brain size={16} className="text-blue-400" />
+          <Brain size={16} className="text-accent" />
         )}
       </div>
       <div className={`max-w-[90%] sm:max-w-[75%] ${isUser ? 'text-right' : ''}`}>
         <div
           className={`rounded-lg px-4 py-2.5 text-sm leading-relaxed ${
             isUser
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-900 border border-gray-800 text-gray-200'
+              ? 'bg-accent text-white'
+              : 'bg-card border border-warm-border text-ink'
           }`}
         >
           {isUser ? (
@@ -654,7 +662,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
                   {message.attachments
                     .filter(name => !/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name))
                     .map((name, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 bg-blue-500/30 text-blue-200 text-xs px-2 py-0.5 rounded">
+                      <span key={i} className="inline-flex items-center gap-1 bg-accent/20 text-accent text-xs px-2 py-0.5 rounded">
                         <FileIcon size={10} />
                         {name}
                       </span>
@@ -674,7 +682,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
           <div className="mt-1">
             <button
               onClick={() => setShowMemories(!showMemories)}
-              className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              className="flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted transition-colors"
             >
               {showMemories ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               {message.memoriesUsed?.length || 0} memories used
@@ -683,13 +691,13 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
             </button>
 
             {showMemories && (
-              <div className="mt-2 p-3 bg-gray-900/50 border border-gray-800 rounded-lg space-y-2 text-left">
+              <div className="mt-2 p-3 bg-card/80 border border-warm-border rounded-lg space-y-2 text-left">
                 {message.memoriesUsed && message.memoriesUsed.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-gray-500 mb-1">Memories Retrieved</p>
+                    <p className="text-xs font-medium text-ink-muted mb-1">Memories Retrieved</p>
                     {message.memoriesUsed.map((m, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-gray-400 py-1">
-                        <span className="text-blue-400/60 shrink-0">{m.score.toFixed(3)}</span>
+                      <div key={i} className="flex items-start gap-2 text-xs text-ink-muted py-1">
+                        <span className="text-accent/60 shrink-0">{m.score.toFixed(3)}</span>
                         {m.memory_type && (
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${typeColor[m.memory_type] || typeColor.fact}`}>
                             {m.memory_type}
@@ -702,9 +710,9 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
                 )}
                 {message.memoriesAdded && message.memoriesAdded.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-gray-500 mb-1">Memories Stored</p>
+                    <p className="text-xs font-medium text-ink-muted mb-1">Memories Stored</p>
                     {message.memoriesAdded.map((m, i) => (
-                      <p key={i} className="text-xs text-green-400/70 py-0.5">+ {typeof m === 'string' ? m : m.content}</p>
+                      <p key={i} className="text-xs text-[#5B8C5A] py-0.5">+ {typeof m === 'string' ? m : m.content}</p>
                     ))}
                   </div>
                 )}

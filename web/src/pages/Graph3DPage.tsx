@@ -4,10 +4,10 @@ import { useNamespace } from '../hooks/useNamespace'
 import type { EmbeddingPoint, GraphEdge } from '../api/types'
 
 const TIER_COLORS: Record<string, string> = {
-  raw:       '#9ca3af',
-  reflected: '#a78bfa',
-  deduced:   '#38bdf8',
-  induced:   '#34d399',
+  raw:       '#9C9488',
+  reflected: '#8B7DB8',
+  deduced:   '#5B9CA6',
+  induced:   '#5BA88C',
 }
 
 function getColor(type: string): string {
@@ -53,7 +53,7 @@ export function Graph3DPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<EmbeddingPoint | null>(null)
-  const [threshold, setThreshold] = useState(0.4)
+  const [threshold, setThreshold] = useState(0.75)
   const [showSuperseded, setShowSuperseded] = useState(true)
 
   const rotRef = useRef({ x: 0.35, y: 0.5 })
@@ -65,7 +65,7 @@ export function Graph3DPage() {
   const pointsRef = useRef<EmbeddingPoint[]>([])
   const edgesRef = useRef<GraphEdge[]>([])
   const selectedRef = useRef<EmbeddingPoint | null>(null)
-  const thresholdRef = useRef(0.5)
+  const thresholdRef = useRef(0.75)
   const showSupersededRef = useRef(true)
   const rafRef = useRef<number>(0)
 
@@ -118,7 +118,7 @@ export function Graph3DPage() {
     ctx.save()
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, cssW, cssH)
-    ctx.fillStyle = '#030712'
+    ctx.fillStyle = '#F5F0E8'
     ctx.fillRect(0, 0, cssW, cssH)
 
     const cx = cssW / 2
@@ -155,10 +155,10 @@ export function Graph3DPage() {
       const t = (edge.similarity - thresh) / Math.max(1 - thresh, 0.001)
       const alpha = 0.2 + t * 0.55
       if (edge.edge_type === 'superseded') {
-        ctx.strokeStyle = `rgba(251,191,36,${alpha.toFixed(3)})`
+        ctx.strokeStyle = `rgba(196,154,60,${alpha.toFixed(3)})`
         ctx.lineWidth = 1.5
       } else {
-        ctx.strokeStyle = `rgba(99,102,241,${alpha.toFixed(3)})`
+        ctx.strokeStyle = `rgba(139,125,184,${alpha.toFixed(3)})`
         ctx.lineWidth = 1
       }
       ctx.beginPath()
@@ -178,7 +178,7 @@ export function Graph3DPage() {
       ctx.fillStyle = getColor(pp.point.memory_type)
       ctx.fill()
       if (isSel || isHov) {
-        ctx.strokeStyle = isSel ? '#fff' : 'rgba(255,255,255,0.6)'
+        ctx.strokeStyle = isSel ? '#2D2A26' : 'rgba(45,42,38,0.6)'
         ctx.lineWidth = isSel ? 1.5 : 1
         ctx.stroke()
       }
@@ -196,15 +196,15 @@ export function Graph3DPage() {
       let ty = sy - 24
       if (tx + tw + pad * 2 > cssW) tx = sx - tw - pad * 2 - 10
       if (ty < 4) ty = sy + 10
-      ctx.fillStyle = 'rgba(15,23,42,0.92)'
-      ctx.strokeStyle = 'rgba(99,102,241,0.6)'
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'
+      ctx.strokeStyle = 'rgba(224,216,203,0.8)'
       ctx.lineWidth = 1
       ctx.beginPath()
       const rx2 = 4
       ctx.roundRect(tx, ty, tw + pad * 2, th + pad, rx2)
       ctx.fill()
       ctx.stroke()
-      ctx.fillStyle = '#e2e8f0'
+      ctx.fillStyle = '#2D2A26'
       ctx.fillText(text, tx + pad, ty + pad + th - 4)
     }
 
@@ -277,24 +277,24 @@ export function Graph3DPage() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
-          <h2 className="text-lg font-semibold text-white">Graph 3D</h2>
-          <p className="text-xs text-gray-500">PCA positions · drag to orbit · scroll to zoom · click to inspect</p>
+          <h2 className="text-lg font-semibold text-ink">Embeddings</h2>
+          <p className="text-xs text-ink-muted">Vector space · drag to orbit · scroll to zoom · click to inspect</p>
         </div>
-        {!loading && <span className="text-xs text-gray-600">{points.length} nodes · {visibleEdges.length} edges</span>}
+        {!loading && <span className="text-xs text-ink-faint">{points.length} nodes · {visibleEdges.length} edges</span>}
       </div>
 
       {loading && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <div className="w-6 h-6 border-2 border-gray-700 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-sm text-gray-500">Loading graph…</span>
+          <div className="w-6 h-6 border-2 border-warm-border-strong border-t-accent rounded-full animate-spin" />
+          <span className="text-sm text-ink-muted">Loading graph…</span>
         </div>
       )}
-      {error && <div className="text-red-400 text-sm bg-red-950/30 rounded-lg px-4 py-3">Error: {error}</div>}
+      {error && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-4 py-3">Error: {error}</div>}
 
       {!loading && !error && (
         <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
           {/* Canvas */}
-          <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#030712', border: '1px solid rgba(31,41,55,0.6)' }}>
+          <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#F5F0E8', border: '1px solid #E0D8CB' }}>
             <canvas
               ref={canvasRef}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'grab' }}
@@ -310,18 +310,18 @@ export function Graph3DPage() {
           {/* Side panel */}
           <div style={{ width: '180px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
             {/* Threshold */}
-            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60">
-              <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Edge Threshold</p>
+            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
+              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Edge Threshold</p>
               <input
                 type="range" min="0.4" max="0.95" step="0.05"
                 value={threshold}
                 onChange={e => setThreshold(parseFloat(e.target.value))}
-                className="w-full accent-blue-500"
+                className="w-full accent-[#C47B3B]"
               />
               <div className="flex justify-between mt-1">
-                <span className="text-[10px] text-gray-600">0.40</span>
-                <span className="text-[10px] font-mono text-gray-300">{threshold.toFixed(2)}</span>
-                <span className="text-[10px] text-gray-600">0.95</span>
+                <span className="text-[10px] text-ink-faint">0.40</span>
+                <span className="text-[10px] font-mono text-ink-light">{threshold.toFixed(2)}</span>
+                <span className="text-[10px] text-ink-faint">0.95</span>
               </div>
               <label className="flex items-center gap-1.5 mt-2 cursor-pointer">
                 <input
@@ -330,55 +330,55 @@ export function Graph3DPage() {
                   onChange={e => setShowSuperseded(e.target.checked)}
                   className="rounded"
                 />
-                <span className="text-xs text-gray-400">Show superseded</span>
+                <span className="text-xs text-ink-muted">Show superseded</span>
               </label>
             </div>
 
             {/* Node types */}
-            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60">
-              <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Nodes</p>
+            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
+              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Nodes</p>
               {tierTypes.map(type => {
                 const count = points.filter(p => p.memory_type === type).length
                 if (count === 0) return null
                 return (
                   <div key={type} className="flex items-center gap-2 mb-1">
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(type) }} />
-                    <span className="text-xs text-gray-300 flex-1 capitalize">{type}</span>
-                    <span className="text-xs text-gray-600 tabular-nums">{count}</span>
+                    <span className="text-xs text-ink-light flex-1 capitalize">{type}</span>
+                    <span className="text-xs text-ink-faint tabular-nums">{count}</span>
                   </div>
                 )
               })}
             </div>
 
             {/* Edge types */}
-            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60">
-              <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Edges</p>
+            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
+              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Edges</p>
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(99,102,241,0.8)' }} />
-                <span className="text-xs text-gray-300 flex-1">Similarity</span>
-                <span className="text-xs text-gray-600 tabular-nums">{simEdgeCount}</span>
+                <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(139,125,184,0.8)' }} />
+                <span className="text-xs text-ink-light flex-1">Similarity</span>
+                <span className="text-xs text-ink-faint tabular-nums">{simEdgeCount}</span>
               </div>
               {supEdgeCount > 0 && (
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(251,191,36,0.8)' }} />
-                  <span className="text-xs text-gray-300 flex-1">Superseded</span>
-                  <span className="text-xs text-gray-600 tabular-nums">{supEdgeCount}</span>
+                  <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(196,154,60,0.8)' }} />
+                  <span className="text-xs text-ink-light flex-1">Superseded</span>
+                  <span className="text-xs text-ink-faint tabular-nums">{supEdgeCount}</span>
                 </div>
               )}
             </div>
 
             {/* Selected node */}
             {selected && (
-              <div className="bg-gray-900 rounded-xl p-3 border border-gray-800/60 overflow-auto" style={{ maxHeight: '35%', minHeight: '80px' }}>
+              <div className="bg-card rounded-xl p-3 border border-warm-border/60 overflow-auto" style={{ maxHeight: '35%', minHeight: '80px' }}>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Selected</p>
-                  <button onClick={() => setSelected(null)} className="text-gray-600 hover:text-gray-400 text-sm leading-none">✕</button>
+                  <p className="text-xs text-ink-muted uppercase tracking-wider font-medium">Selected</p>
+                  <button onClick={() => setSelected(null)} className="text-ink-faint hover:text-ink-muted text-sm leading-none">✕</button>
                 </div>
                 <div className="flex items-center gap-1.5 mb-2">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(selected.memory_type) }} />
-                  <span className="text-xs text-gray-400 capitalize">{selected.memory_type}</span>
+                  <span className="text-xs text-ink-muted capitalize">{selected.memory_type}</span>
                 </div>
-                <p className="text-xs text-gray-200 leading-relaxed">{selected.content}</p>
+                <p className="text-xs text-ink leading-relaxed">{selected.content}</p>
               </div>
             )}
           </div>

@@ -13,21 +13,21 @@ function timeAgo(dateStr: string | null): string {
 
 export function StatCards({ stats }: { stats: NamespaceStats | undefined }) {
   const cards = [
-    { label: 'Total Memories', value: stats?.total ?? '-', icon: Database, color: 'text-blue-400' },
-    { label: 'Active', value: stats?.active ?? '-', icon: Activity, color: 'text-green-400' },
-    { label: 'Avg Access', value: stats ? stats.avg_access_count.toFixed(1) : '-', icon: Eye, color: 'text-purple-400' },
-    { label: 'Newest', value: stats ? timeAgo(stats.newest_memory) : '-', icon: Clock, color: 'text-amber-400' },
+    { label: 'Total Memories', value: stats?.total ?? '-', icon: Database, color: 'text-accent' },
+    { label: 'Active', value: stats?.active ?? '-', icon: Activity, color: 'text-[#5B8C5A]' },
+    { label: 'Avg Access', value: stats ? stats.avg_access_count.toFixed(1) : '-', icon: Eye, color: 'text-[#8B7DB8]' },
+    { label: 'Newest', value: stats ? timeAgo(stats.newest_memory) : '-', icon: Clock, color: 'text-amber-600' },
   ]
 
   return (
     <div className="grid grid-cols-4 gap-4">
       {cards.map(({ label, value, icon: Icon, color }) => (
-        <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div key={label} className="bg-card border border-warm-border rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Icon size={16} className={color} />
-            <span className="text-xs text-gray-500">{label}</span>
+            <span className="text-xs text-ink-muted">{label}</span>
           </div>
-          <p className="text-2xl font-semibold text-white">{value}</p>
+          <p className="text-2xl font-semibold text-ink">{value}</p>
         </div>
       ))}
     </div>
