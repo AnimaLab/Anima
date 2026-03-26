@@ -104,6 +104,9 @@ pub struct ScoredResult {
     pub sparse_score: Option<f64>,
     pub keyword_score: Option<f64>,
     pub temporal_score: Option<f64>,
+    /// Per-named-vector similarity breakdown (e.g., {"content": 0.85, "summary": 0.90}).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_scores: Option<HashMap<String, f64>>,
 }
 
 /// Hybrid scorer using Reciprocal Rank Fusion + temporal decay.
@@ -201,6 +204,7 @@ impl HybridScorer {
                     sparse_score: sparse_raw.get(&id).copied(),
                     keyword_score: kw_raw.get(&id).copied(),
                     temporal_score: Some(decay),
+                    vector_scores: None,
                 }
             })
             .collect();
@@ -246,6 +250,7 @@ impl HybridScorer {
                     sparse_score: None,
                     keyword_score: if !is_vector { Some(normalized) } else { None },
                     temporal_score: Some(decay),
+                    vector_scores: None,
                 }
             })
             .collect();
@@ -320,6 +325,96 @@ impl HybridScorer {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
+}
+
+/// Blend results from multiple named vector searches into one score list.
+/// Each memory: blended_score = sum(weight_i * sim_i) / sum(active_weight_i).
+/// Only vectors where the memory has a result contribute to its score.
+/// Returns (memory_id, blended_similarity, per_vector_scores).
+pub fn blend_named_vectors(
+    per_vector: &[(&str, f64, Vec<(String, f64)>)], // (name, weight, results)
+) -> Vec<(String, f64, HashMap<String, f64>)> {
+    let mut memory_scores: HashMap<String, Vec<(&str, f64, f64)>> = HashMap::new();
+
+    for (name, weight, results) in per_vector {
+        for (id, sim) in results {
+            memory_scores
+                .entry(id.clone())
+                .or_default()
+                .push((name, *weight, *sim));
+        }
+    }
+
+    let mut blended: Vec<(String, f64, HashMap<String, f64>)> = memory_scores
+        .into_iter()
+        .map(|(id, scores)| {
+            let weight_sum: f64 = scores.iter().map(|(_, w, _)| w).sum();
+            let weighted_sim: f64 = scores.iter().map(|(_, w, s)| w * s).sum();
+            let blended_sim = if weight_sum > 0.0 {
+                weighted_sim / weight_sum
+            } else {
+                0.0
+            };
+            let per_vector: HashMap<String, f64> = scores
+                .iter()
+                .map(|(name, _, sim)| (name.to_string(), *sim))
+                .collect();
+            (id, blended_sim, per_vector)
+        })
+        .collect();
+
+    blended.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    blended
+}
+
+/// Adjust per-vector weights based on query heuristics.
+/// Applies multipliers then renormalizes so weights sum to 1.0.
+pub fn adjust_vector_weights(
+    query: &str,
+    base_weights: &HashMap<String, f64>,
+) -> HashMap<String, f64> {
+    if base_weights.len() <= 1 {
+        return base_weights.clone();
+    }
+
+    let query_lower = query.to_lowercase();
+    let query_len = query.trim().len();
+    let is_question = query.trim().ends_with('?')
+        || query_lower.starts_with("who ")
+        || query_lower.starts_with("what ")
+        || query_lower.starts_with("when ")
+        || query_lower.starts_with("where ")
+        || query_lower.starts_with("how ")
+        || query_lower.starts_with("why ");
+    let is_short_factual = query_len <= 40
+        && (query_lower.contains("who ") || query_lower.contains("what ")
+            || query_lower.contains("when ") || query_lower.contains("where "));
+    let is_long = query_len > 100;
+
+    let mut weights = base_weights.clone();
+
+    if is_short_factual {
+        if let Some(w) = weights.get_mut("summary") {
+            *w *= 1.5;
+        }
+    } else if is_long {
+        if let Some(w) = weights.get_mut("content") {
+            *w *= 1.3;
+        }
+    } else if is_question {
+        if let Some(w) = weights.get_mut("summary") {
+            *w *= 1.2;
+        }
+    }
+
+    let sum: f64 = weights.values().sum();
+    if sum > 0.0 {
+        for w in weights.values_mut() {
+            *w /= sum;
+        }
+    }
+
+    weights
 }
 
 #[cfg(test)]
@@ -863,5 +958,135 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(results[0].score > 0.80);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // NAMED VECTOR BLENDING TESTS
+    // ═══════════════════════════════════════════════════════════
+
+    #[test]
+    fn blend_single_vector_passthrough() {
+        let results = vec![("a".to_string(), 0.9), ("b".to_string(), 0.7)];
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> =
+            vec![("content", 1.0, results)];
+        let blended = blend_named_vectors(&per_vector);
+        assert_eq!(blended.len(), 2);
+        assert_eq!(blended[0].0, "a");
+        assert!((blended[0].1 - 0.9).abs() < 0.001);
+    }
+
+    #[test]
+    fn blend_two_vectors_weighted() {
+        let content = vec![("m1".to_string(), 0.85)];
+        let summary = vec![("m1".to_string(), 0.90)];
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> =
+            vec![("content", 0.6, content), ("summary", 0.4, summary)];
+        let blended = blend_named_vectors(&per_vector);
+        assert_eq!(blended.len(), 1);
+        assert!((blended[0].1 - 0.87).abs() < 0.001);
+    }
+
+    #[test]
+    fn blend_partial_coverage() {
+        let content = vec![("m1".to_string(), 0.85), ("m2".to_string(), 0.80)];
+        let summary = vec![("m1".to_string(), 0.90)];
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> =
+            vec![("content", 0.7, content), ("summary", 0.3, summary)];
+        let blended = blend_named_vectors(&per_vector);
+        assert_eq!(blended.len(), 2);
+        let m2 = blended.iter().find(|(id, _, _)| id == "m2").unwrap();
+        assert!((m2.1 - 0.80).abs() < 0.001);
+    }
+
+    #[test]
+    fn blend_empty_returns_empty() {
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> = vec![];
+        let blended = blend_named_vectors(&per_vector);
+        assert!(blended.is_empty());
+    }
+
+    #[test]
+    fn blend_sorted_descending() {
+        let content = vec![
+            ("a".to_string(), 0.5),
+            ("b".to_string(), 0.9),
+            ("c".to_string(), 0.7),
+        ];
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> =
+            vec![("content", 1.0, content)];
+        let blended = blend_named_vectors(&per_vector);
+        for w in blended.windows(2) {
+            assert!(w[0].1 >= w[1].1);
+        }
+    }
+
+    #[test]
+    fn blend_per_vector_scores_populated() {
+        let content = vec![("m1".to_string(), 0.85)];
+        let summary = vec![("m1".to_string(), 0.90)];
+        let per_vector: Vec<(&str, f64, Vec<(String, f64)>)> =
+            vec![("content", 0.6, content), ("summary", 0.4, summary)];
+        let blended = blend_named_vectors(&per_vector);
+        let scores = &blended[0].2;
+        assert!((scores["content"] - 0.85).abs() < 0.001);
+        assert!((scores["summary"] - 0.90).abs() < 0.001);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ROUTING HEURISTIC TESTS
+    // ═══════════════════════════════════════════════════════════
+
+    #[test]
+    fn routing_single_vector_unchanged() {
+        let mut base = HashMap::new();
+        base.insert("content".to_string(), 1.0);
+        let result = adjust_vector_weights("who is Alice?", &base);
+        assert_eq!(result.len(), 1);
+        assert!((result["content"] - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn routing_short_factual_boosts_summary() {
+        let mut base = HashMap::new();
+        base.insert("content".to_string(), 0.7);
+        base.insert("summary".to_string(), 0.3);
+        let result = adjust_vector_weights("who is Alice?", &base);
+        assert!(result["summary"] > 0.3, "summary should be boosted");
+        assert!(result["content"] < 0.7, "content should decrease after renorm");
+        let sum: f64 = result.values().sum();
+        assert!((sum - 1.0).abs() < 0.001, "weights should sum to 1.0");
+    }
+
+    #[test]
+    fn routing_long_query_boosts_content() {
+        let mut base = HashMap::new();
+        base.insert("content".to_string(), 0.7);
+        base.insert("summary".to_string(), 0.3);
+        let long_query = "I remember having a conversation about the architecture of distributed systems and how they handle fault tolerance in production environments with high traffic";
+        let result = adjust_vector_weights(long_query, &base);
+        assert!(result["content"] > 0.7, "content should be boosted for long queries");
+    }
+
+    #[test]
+    fn routing_question_boosts_summary() {
+        let mut base = HashMap::new();
+        base.insert("content".to_string(), 0.7);
+        base.insert("summary".to_string(), 0.3);
+        let result = adjust_vector_weights("how does the auth system work?", &base);
+        assert!(result["summary"] > 0.3, "summary should be boosted for questions");
+    }
+
+    #[test]
+    fn routing_weights_sum_to_one() {
+        let mut base = HashMap::new();
+        base.insert("content".to_string(), 0.5);
+        base.insert("summary".to_string(), 0.3);
+        base.insert("title".to_string(), 0.2);
+        let queries = vec!["who is Alice?", "tell me everything", "x?", "a very long query that goes on and on and on and on and on and on and on and on and on and on and on and on and on and on"];
+        for q in queries {
+            let result = adjust_vector_weights(q, &base);
+            let sum: f64 = result.values().sum();
+            assert!((sum - 1.0).abs() < 0.001, "weights should sum to 1.0 for '{q}'");
+        }
     }
 }
