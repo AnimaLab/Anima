@@ -394,7 +394,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Vector-only search with large limit to see score distribution
         let results = store
-            .search(&query_emb, query, &ns, &SearchMode::Vector, 200, &large_config)
+            .search(&query_emb, &anima_embed::SparseVector::default(), query, &ns, &SearchMode::Vector, 200, &large_config)
             .await?;
 
         let mut top_display: Vec<String> = Vec::new();
@@ -612,7 +612,7 @@ async fn main() -> anyhow::Result<()> {
 
                 // Phase 1: Search top-K (using hybrid mode like the real pipeline)
                 let search_results = store
-                    .search(&query_emb, query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
+                    .search(&query_emb, &anima_embed::SparseVector::default(), query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
                     .await?;
 
                 let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -684,7 +684,7 @@ async fn main() -> anyhow::Result<()> {
         let query_emb = embedder.embed_query(query)?;
 
         let search_results = store
-            .search(&query_emb, query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
+            .search(&query_emb, &anima_embed::SparseVector::default(), query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
             .await?;
 
         println!("Query: \"{query}\"");
@@ -739,7 +739,7 @@ async fn main() -> anyhow::Result<()> {
 
         let query_emb = embedder.embed_query(query)?;
         let search_results = store
-            .search(&query_emb, query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
+            .search(&query_emb, &anima_embed::SparseVector::default(), query, &ns, &SearchMode::Hybrid, search_top_k, &large_config)
             .await?;
 
         let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();

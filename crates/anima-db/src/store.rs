@@ -436,7 +436,7 @@ impl MemoryStore {
         embedding: &[f32],
     ) -> Result<(), DbError> {
         let conn = self.pool.writer().await;
-        insert_memory_sync(&conn, memory, embedding)
+        insert_memory_sync(&conn, memory, embedding, None)
     }
 
     /// Insert many memories in a single transaction (high-throughput ingest path).
@@ -522,6 +522,7 @@ impl MemoryStore {
     pub async fn search(
         &self,
         query_embedding: &[f32],
+        query_sparse: &anima_embed::SparseVector,
         query_text: &str,
         namespace: &Namespace,
         mode: &SearchMode,
@@ -533,6 +534,7 @@ impl MemoryStore {
             search_sync(
                 &conn,
                 query_embedding,
+                query_sparse,
                 query_text,
                 namespace,
                 mode,
@@ -544,6 +546,7 @@ impl MemoryStore {
             search_sync(
                 &conn,
                 query_embedding,
+                query_sparse,
                 query_text,
                 namespace,
                 mode,
@@ -1678,6 +1681,7 @@ fn insert_memory_sync(
     conn: &Connection,
     memory: &Memory,
     embedding: &[f32],
+    sparse: Option<&anima_embed::SparseVector>,
 ) -> Result<(), DbError> {
     let metadata_json = memory
         .metadata
@@ -1727,6 +1731,11 @@ fn insert_memory_sync(
 
     // Sync to fts_memories
     fts::insert_fts(&tx, &memory.id, &memory.namespace, &memory.content)?;
+
+    // Sync to sparse_vectors + sparse_postings
+    if let Some(sv) = sparse {
+        crate::sparse::insert_sparse(&tx, &memory.id, &memory.namespace, sv)?;
+    }
 
     snapshot_claim_revision_sync(
         &tx,
@@ -1861,6 +1870,7 @@ fn update_content_sync(
 
     // Sync fts_memories: delete old, insert new
     fts::delete_fts(&tx, &old.id)?;
+    crate::sparse::delete_sparse(&tx, &old.id)?;
     fts::insert_fts(&tx, id, &old.namespace, new_content)?;
 
     snapshot_claim_revision_sync(
@@ -1940,6 +1950,7 @@ fn soft_delete_sync(conn: &Connection, id: &str) -> Result<bool, DbError> {
     // Remove from search indexes
     vector::delete_embedding(&tx, id)?;
     fts::delete_fts(&tx, id)?;
+    crate::sparse::delete_sparse(&tx, id)?;
 
     snapshot_claim_revision_sync(
         &tx,
@@ -1972,6 +1983,7 @@ fn hard_delete_sync(conn: &Connection, id: &str) -> Result<bool, DbError> {
 
     vector::delete_embedding(&tx, id)?;
     fts::delete_fts(&tx, id)?;
+    crate::sparse::delete_sparse(&tx, id)?;
     tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
 
     tx.commit().map_err(DbError::Sqlite)?;
@@ -1993,6 +2005,7 @@ fn mark_superseded_sync(conn: &Connection, id: &str, superseded_by: &str) -> Res
 
     vector::delete_embedding(&tx, id)?;
     fts::delete_fts(&tx, id)?;
+    crate::sparse::delete_sparse(&tx, id)?;
 
     snapshot_claim_revision_sync(
         &tx,
@@ -2010,6 +2023,7 @@ fn mark_superseded_sync(conn: &Connection, id: &str, superseded_by: &str) -> Res
 fn search_sync(
     conn: &Connection,
     query_embedding: &[f32],
+    query_sparse: &anima_embed::SparseVector,
     query_text: &str,
     namespace: &Namespace,
     mode: &SearchMode,
@@ -2120,8 +2134,24 @@ fn search_sync(
         SearchMode::Vector => {}
     }
 
+    // Sparse vector search
+    let mut sparse_scored: Vec<(String, f64)> = vec![];
+    if !query_sparse.is_empty() {
+        match mode {
+            SearchMode::Hybrid | SearchMode::Vector | SearchMode::AskRetrieval => {
+                sparse_scored = if is_exact_ns {
+                    crate::sparse::search_sparse(conn, query_sparse, ns_str, candidate_limit)?
+                } else {
+                    crate::sparse::search_sparse_global(conn, query_sparse, candidate_limit)?
+                };
+            }
+            SearchMode::Keyword => {}
+        }
+    }
+
     // Collect timestamps, access counts, importances, tiers, and event_dates for scoring
     let all_ids: Vec<&String> = vector_scored.iter().map(|(id, _)| id)
+        .chain(sparse_scored.iter().map(|(id, _)| id))
         .chain(keyword_scored.iter().map(|(id, _)| id))
         .collect();
     let mut timestamps: HashMap<String, DateTime<Utc>> = HashMap::new();
@@ -2155,6 +2185,7 @@ fn search_sync(
             .collect();
         if !over_tier.is_empty() {
             vector_scored.retain(|(id, _)| !over_tier.contains(id));
+            sparse_scored.retain(|(id, _)| !over_tier.contains(id));
             keyword_scored.retain(|(id, _)| !over_tier.contains(id));
         }
     }
@@ -2187,13 +2218,14 @@ fn search_sync(
         }
         if !excluded.is_empty() {
             vector_scored.retain(|(id, _)| !excluded.contains(id));
+            sparse_scored.retain(|(id, _)| !excluded.contains(id));
             keyword_scored.retain(|(id, _)| !excluded.contains(id));
         }
     }
 
     // Fuse with RRF + temporal decay
     let scorer = HybridScorer::new(scorer_config.clone());
-    let mut results = scorer.fuse(&vector_scored, &[], &keyword_scored, &timestamps, now);
+    let mut results = scorer.fuse(&vector_scored, &sparse_scored, &keyword_scored, &timestamps, now);
 
     // Apply access frequency, importance, and tier boosts
     scorer.apply_boosts(&mut results, &access_counts, &importances, &tiers);
@@ -2609,6 +2641,7 @@ fn delete_namespace_sync(conn: &Connection, namespace: &Namespace) -> Result<u64
     for id in &ids {
         let _ = crate::vector::delete_embedding(&tx, id);
         let _ = crate::fts::delete_fts(&tx, id);
+        let _ = crate::sparse::delete_sparse(&tx, id);
     }
 
     // Delete from all namespace-scoped tables
@@ -3805,6 +3838,7 @@ fn patch_memory_sync(
         let embedding = new_embedding.unwrap_or_default();
         vector::update_embedding(&tx, id, embedding, &before.namespace)?;
         fts::delete_fts(&tx, id)?;
+        crate::sparse::delete_sparse(&tx, id)?;
         fts::insert_fts(&tx, id, &before.namespace, &patched_content)?;
     }
 
@@ -3914,6 +3948,7 @@ fn rollback_memory_to_revision_sync(
 
     vector::update_embedding(&tx, id, &embedding, &namespace)?;
     fts::delete_fts(&tx, id)?;
+    crate::sparse::delete_sparse(&tx, id)?;
     let restored_content: String = tx
         .prepare_cached("SELECT content FROM memories WHERE id = ?1")?
         .query_row(params![id], |row| row.get(0))?;
@@ -4035,6 +4070,7 @@ fn merge_memories_sync(
         )?;
         vector::delete_embedding(&tx, source_id)?;
         fts::delete_fts(&tx, source_id)?;
+        crate::sparse::delete_sparse(&tx, source_id)?;
         snapshot_claim_revision_sync(
             &tx,
             source_id,
@@ -6027,7 +6063,7 @@ mod tests {
             confidence: 1.0,
             source: "user_stated".to_string(),
         };
-        insert_memory_sync(conn, &mem, embedding).unwrap();
+        insert_memory_sync(conn, &mem, embedding, None).unwrap();
         id
     }
 
@@ -6070,7 +6106,7 @@ mod tests {
             };
 
             let results = search_sync(
-                &conn, &query_emb, "Memory about topic", &namespace,
+                &conn, &query_emb, &anima_embed::SparseVector::default(), "Memory about topic", &namespace,
                 &SearchMode::Vector, 10, &config,
             ).unwrap();
 
@@ -6135,7 +6171,7 @@ mod tests {
             let config = ScorerConfig::default();
 
             let results = search_sync(
-                &conn, &query_emb, "camping", &namespace,
+                &conn, &query_emb, &anima_embed::SparseVector::default(), "camping", &namespace,
                 &SearchMode::Hybrid, 10, &config,
             ).unwrap();
 
@@ -6175,7 +6211,7 @@ mod tests {
             };
 
             let results = search_sync(
-                &conn, &query_emb, "content", &namespace,
+                &conn, &query_emb, &anima_embed::SparseVector::default(), "content", &namespace,
                 &SearchMode::Vector, 10, &config_with_spread,
             ).unwrap();
 
@@ -6190,7 +6226,7 @@ mod tests {
                     ..Default::default()
                 };
                 let results_no_spread = search_sync(
-                    &conn, &query_emb, "content", &namespace,
+                    &conn, &query_emb, &anima_embed::SparseVector::default(), "content", &namespace,
                     &SearchMode::Vector, 10, &config_no_spread,
                 ).unwrap();
                 assert!(results_no_spread.is_empty(),
@@ -6219,7 +6255,7 @@ mod tests {
             let config = ScorerConfig::default();
 
             let results = search_sync(
-                &conn, &query_emb, "camping", &namespace,
+                &conn, &query_emb, &anima_embed::SparseVector::default(), "camping", &namespace,
                 &SearchMode::Keyword, 5, &config,
             ).unwrap();
 
@@ -6299,6 +6335,7 @@ mod tests {
             let results = search_sync(
                 &conn,
                 &emb,
+                &anima_embed::SparseVector::default(),
                 "specific retrievable",
                 &namespace,
                 &SearchMode::Vector,
@@ -6343,7 +6380,7 @@ mod tests {
                     Some("event".to_string()),
                 );
                 let new_id = new_mem.id.clone();
-                insert_memory_sync(&conn, &new_mem, &make_embedding(dim, 2)).unwrap();
+                insert_memory_sync(&conn, &new_mem, &make_embedding(dim, 2), None).unwrap();
                 mark_superseded_sync(&conn, &old_id, &new_id).unwrap();
                 (old_id, new_id)
             };

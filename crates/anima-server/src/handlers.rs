@@ -1297,7 +1297,7 @@ async fn run_ask_retrieval_pipeline(
     let embedding = embed_query_cached(state, query)?;
 
     // 1. Initial hybrid search
-    let results = state.store.search(&embedding, query, ns, &SearchMode::Hybrid, limit, scorer_config)
+    let results = state.store.search(&embedding, &anima_embed::SparseVector::default(), query, ns, &SearchMode::Hybrid, limit, scorer_config)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, "ask_retrieval_hybrid").await;
@@ -1309,7 +1309,7 @@ async fn run_ask_retrieval_pipeline(
         let kq_embedding = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, kq, ns, &SearchMode::Hybrid, limit, scorer_config)
+            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, &SearchMode::Hybrid, limit, scorer_config)
             .await
         {
             expanded_results.extend(kw_results);
@@ -1374,7 +1374,7 @@ async fn run_ask_retrieval_pipeline(
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state
             .store
-            .search(&embedding, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
+            .search(&embedding, &anima_embed::SparseVector::default(), entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
             .await
         {
             record_retrieval_observations(state, ns, &kw_results, 0.15, "ask_retrieval_entity_kw").await;
@@ -1384,7 +1384,7 @@ async fn run_ask_retrieval_pipeline(
             let combined = format!("{entity} {topic}");
             if let Ok(kw_results) = state
                 .store
-                .search(&embedding, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
+                .search(&embedding, &anima_embed::SparseVector::default(), &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
                 .await
             {
                 entity_results.extend(kw_results);
@@ -1512,7 +1512,7 @@ async fn run_query_rewrite(
         let kq_embedding = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, kq, ns, mode, limit, scorer_config)
+            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, mode, limit, scorer_config)
             .await
         {
             for sr in kw_results {
@@ -1605,7 +1605,7 @@ pub async fn search_memories(
     let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
     let mut scored = state
         .store
-        .search(&embedding, &req.query, &ns, &mode, fetch_limit, &scorer_config)
+        .search(&embedding, &anima_embed::SparseVector::default(), &req.query, &ns, &mode, fetch_limit, &scorer_config)
         .await?;
 
     // Feature 2: Query rewriting — expand with keyword extraction if enabled
@@ -2517,6 +2517,7 @@ pub async fn simulate_counterfactual(
             .store
             .search(
                 &embedding,
+                &anima_embed::SparseVector::default(),
                 &query,
                 &ns,
                 &SearchMode::Hybrid,
@@ -3516,7 +3517,7 @@ async fn enriched_retrieval(
 
     // 1. Primary hybrid search
     let results = state.store
-        .search(&embedding, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+        .search(&embedding, &anima_embed::SparseVector::default(), query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, label).await;
@@ -3527,7 +3528,7 @@ async fn enriched_retrieval(
     for kq in &keyword_queries {
         let kq_embedding = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state.store
-            .search(&kq_embedding, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
             .await
         {
             expanded_results.extend(kw_results);
@@ -3570,7 +3571,7 @@ async fn enriched_retrieval(
     let mut entity_results = Vec::new();
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state.store
-            .search(&embedding, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
+            .search(&embedding, &anima_embed::SparseVector::default(), entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
             .await
         {
             entity_results.extend(kw_results);
@@ -3994,6 +3995,7 @@ async fn handle_tool_search(
         .store
         .search(
             &embedding,
+            &anima_embed::SparseVector::default(),
             query,
             ns,
             &SearchMode::Hybrid,
@@ -5270,7 +5272,7 @@ pub async fn chat_stream(
     let chat_scorer = state.scorer_config.read().await.clone();
     let scored = state
         .store
-        .search(&embedding, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
+        .search(&embedding, &anima_embed::SparseVector::default(), &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
         .await?;
 
     // Gate: only include memories with meaningful relevance scores
