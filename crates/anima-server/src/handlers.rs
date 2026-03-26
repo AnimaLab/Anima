@@ -1565,6 +1565,40 @@ async fn run_query_rewrite(
     Ok(merged)
 }
 
+/// Group search results by a field, keeping only the top-scoring result per group.
+fn group_search_results(
+    results: Vec<SearchResultDto>,
+    group_field: &str,
+) -> Vec<SearchResultDto> {
+    let extract_field = |r: &SearchResultDto| -> String {
+        match group_field {
+            "episode_id" => r.episode_id.clone().unwrap_or_else(|| "__none__".to_string()),
+            "category" => r.category.clone(),
+            "source" => r.source.clone(),
+            _ => "__unknown__".to_string(),
+        }
+    };
+
+    let mut group_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for r in &results {
+        *group_counts.entry(extract_field(r)).or_insert(0) += 1;
+    }
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut grouped: Vec<SearchResultDto> = Vec::new();
+    for mut r in results {
+        let key = extract_field(&r);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        let display_value = if key == "__none__" { None } else { Some(key.clone()) };
+        r.group_size = group_counts.get(&key).copied();
+        r.group_value = display_value;
+        grouped.push(r);
+    }
+    grouped
+}
+
 pub async fn search_memories(
     State(state): State<Arc<AppState>>,
     ExtractNamespace(ns): ExtractNamespace,
@@ -1624,8 +1658,24 @@ pub async fn search_memories(
                 temporal_score: None,
                 created_at: memory.created_at.to_rfc3339(),
                 updated_at: memory.updated_at.to_rfc3339(),
+                episode_id: memory.episode_id.clone(),
+                group_size: None,
+                group_value: None,
             });
         }
+
+        // Apply result grouping if requested
+        if let Some(ref group_field) = req.group_by {
+            let valid_fields = ["episode_id", "category", "source"];
+            if !valid_fields.contains(&group_field.as_str()) {
+                return Err(AppError::BadRequest(format!(
+                    "invalid group_by field '{}'. Valid values: episode_id, category, source",
+                    group_field
+                )));
+            }
+            results = group_search_results(results, group_field);
+        }
+
         return Ok(Json(SearchResponse {
             results,
             query_time_ms: start.elapsed().as_secs_f64() * 1000.0,
@@ -1716,8 +1766,23 @@ pub async fn search_memories(
                 temporal_score: sr.temporal_score,
                 created_at: memory.created_at.to_rfc3339(),
                 updated_at: memory.updated_at.to_rfc3339(),
+                episode_id: memory.episode_id.clone(),
+                group_size: None,
+                group_value: None,
             });
         }
+    }
+
+    // Apply result grouping if requested
+    if let Some(ref group_field) = req.group_by {
+        let valid_fields = ["episode_id", "category", "source"];
+        if !valid_fields.contains(&group_field.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "invalid group_by field '{}'. Valid values: episode_id, category, source",
+                group_field
+            )));
+        }
+        results = group_search_results(results, group_field);
     }
 
     let elapsed = start.elapsed();
@@ -5399,6 +5464,74 @@ mod tests {
     fn extract_candidate_entities_ignores_question_stop_words() {
         let entities = extract_candidate_entities("What did you say about the project timeline?");
         assert!(entities.is_empty());
+    }
+
+    fn make_search_dto(id: &str, score: f64, category: &str, source: &str, episode_id: Option<&str>) -> SearchResultDto {
+        SearchResultDto {
+            id: id.to_string(),
+            content: "test".to_string(),
+            metadata: None,
+            tags: vec![],
+            memory_type: "raw".to_string(),
+            category: category.to_string(),
+            confidence: 1.0,
+            source: source.to_string(),
+            score,
+            vector_score: None,
+            sparse_score: None,
+            keyword_score: None,
+            temporal_score: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            episode_id: episode_id.map(|s| s.to_string()),
+            group_size: None,
+            group_value: None,
+        }
+    }
+
+    #[test]
+    fn group_results_by_category() {
+        let results = vec![
+            make_search_dto("m1", 0.9, "general", "user_stated", None),
+            make_search_dto("m2", 0.8, "general", "user_stated", None),
+            make_search_dto("m3", 0.7, "identity", "user_stated", None),
+        ];
+        let grouped = group_search_results(results, "category");
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].id, "m1"); // best in "general"
+        assert_eq!(grouped[0].group_size, Some(2));
+        assert_eq!(grouped[0].group_value, Some("general".to_string()));
+        assert_eq!(grouped[1].id, "m3"); // best in "identity"
+        assert_eq!(grouped[1].group_size, Some(1));
+    }
+
+    #[test]
+    fn group_results_by_episode_id() {
+        let results = vec![
+            make_search_dto("m1", 0.9, "general", "user_stated", Some("ep1")),
+            make_search_dto("m2", 0.8, "general", "user_stated", Some("ep1")),
+            make_search_dto("m3", 0.7, "general", "user_stated", None),
+        ];
+        let grouped = group_search_results(results, "episode_id");
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].id, "m1");
+        assert_eq!(grouped[0].group_value, Some("ep1".to_string()));
+        assert_eq!(grouped[1].id, "m3");
+        assert_eq!(grouped[1].group_value, None); // null episode_id
+    }
+
+    #[test]
+    fn group_results_preserves_order() {
+        let results = vec![
+            make_search_dto("m1", 0.9, "a", "user_stated", None),
+            make_search_dto("m2", 0.8, "b", "observed", None),
+            make_search_dto("m3", 0.7, "c", "inferred", None),
+        ];
+        let grouped = group_search_results(results, "source");
+        assert_eq!(grouped.len(), 3); // all unique sources
+        assert_eq!(grouped[0].id, "m1");
+        assert_eq!(grouped[1].id, "m2");
+        assert_eq!(grouped[2].id, "m3");
     }
 }
 

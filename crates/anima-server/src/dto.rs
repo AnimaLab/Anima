@@ -87,6 +87,10 @@ pub struct SearchRequest {
     /// Uses the same zero-LLM keyword extraction as /ask. Default: false.
     #[serde(default)]
     pub query_rewrite: bool,
+    /// Group results by a memory field, returning only the top result per group.
+    /// Valid values: "episode_id", "category", "source".
+    #[serde(default)]
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,6 +116,14 @@ pub struct SearchResultDto {
     pub temporal_score: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
+    /// Number of results in this group (only present when group_by is used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_size: Option<usize>,
+    /// The value of the grouped field (only present when group_by is used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_value: Option<String>,
 }
 
 // --- Get Memory ---
