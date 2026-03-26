@@ -413,6 +413,22 @@ pub struct MemoryMergeResult {
     pub merged_revision_number: i64,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProcessorLogEntry {
+    pub id: String,
+    pub namespace: String,
+    pub pipeline: String,
+    pub status: String,
+    pub input_count: i64,
+    pub output_count: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
+    pub elapsed_ms: f64,
+    pub details: Option<serde_json::Value>,
+    pub created_at: String,
+}
+
 /// High-level memory store operations.
 #[derive(Clone)]
 pub struct MemoryStore {
@@ -1135,6 +1151,30 @@ impl MemoryStore {
         Ok(results)
     }
 
+    pub async fn list_all_conversations(&self) -> Result<Vec<ConversationSummary>, DbError> {
+        let conn = self.pool.writer().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, mode, created_at, updated_at
+             FROM conversations
+             ORDER BY updated_at DESC"
+        ).map_err(DbError::Sqlite)?;
+        let rows = stmt.query_map(
+            [],
+            |row: &rusqlite::Row| Ok(ConversationSummary {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                mode: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            }),
+        ).map_err(DbError::Sqlite)?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(DbError::Sqlite)?);
+        }
+        Ok(results)
+    }
+
     pub async fn get_conversation(&self, id: &str) -> Result<Option<Conversation>, DbError> {
         let conn = self.pool.writer().await;
         let mut stmt = conn.prepare(
@@ -1720,6 +1760,46 @@ impl MemoryStore {
     /// Acquire the writer connection (for WAL checkpoint).
     pub async fn writer_conn(&self) -> tokio::sync::MutexGuard<'_, rusqlite::Connection> {
         self.pool.writer().await
+    }
+
+    /// Insert a processor log entry.
+    pub async fn insert_processor_log(&self, entry: &ProcessorLogEntry) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        let details_str = entry.details.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default());
+        conn.execute(
+            "INSERT INTO processor_log (id, namespace, pipeline, status, input_count, output_count, prompt_tokens, completion_tokens, total_tokens, elapsed_ms, details, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![entry.id, entry.namespace, entry.pipeline, entry.status, entry.input_count, entry.output_count, entry.prompt_tokens, entry.completion_tokens, entry.total_tokens, entry.elapsed_ms, details_str, entry.created_at],
+        ).map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// List processor log entries, newest first.
+    pub async fn list_processor_log(&self, limit: usize, offset: usize) -> Result<Vec<ProcessorLogEntry>, DbError> {
+        let conn = self.pool.writer().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, namespace, pipeline, status, input_count, output_count, prompt_tokens, completion_tokens, total_tokens, elapsed_ms, details, created_at
+             FROM processor_log ORDER BY created_at DESC LIMIT ?1 OFFSET ?2"
+        ).map_err(DbError::Sqlite)?;
+        let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
+            let details_str: Option<String> = row.get(10)?;
+            let details = details_str.and_then(|s| serde_json::from_str(&s).ok());
+            Ok(ProcessorLogEntry {
+                id: row.get(0)?,
+                namespace: row.get(1)?,
+                pipeline: row.get(2)?,
+                status: row.get(3)?,
+                input_count: row.get(4)?,
+                output_count: row.get(5)?,
+                prompt_tokens: row.get(6)?,
+                completion_tokens: row.get(7)?,
+                total_tokens: row.get(8)?,
+                elapsed_ms: row.get(9)?,
+                details,
+                created_at: row.get(11)?,
+            })
+        }).map_err(DbError::Sqlite)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 }
 

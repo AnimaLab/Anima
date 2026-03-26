@@ -444,6 +444,28 @@ pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
         ",
     )?;
 
+    // Processor activity log
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS processor_log (
+            id TEXT PRIMARY KEY,
+            namespace TEXT NOT NULL,
+            pipeline TEXT NOT NULL,
+            status TEXT NOT NULL,
+            input_count INTEGER DEFAULT 0,
+            output_count INTEGER DEFAULT 0,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            elapsed_ms REAL DEFAULT 0,
+            details TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_processor_log_ns_created ON processor_log(namespace, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_processor_log_pipeline ON processor_log(pipeline, created_at DESC);
+        ",
+    )?;
+
     Ok(())
 }
 
