@@ -203,7 +203,7 @@ pub fn delete_embedding(conn: &Connection, memory_id: &str) -> rusqlite::Result<
 /// than the equivalent float distances. Dividing by this factor normalizes
 /// distances back to the [0, 2] range expected for unit vectors, preserving
 /// the `similarity = 1.0 - (distance / 2.0)` conversion used by callers.
-const INT8_DISTANCE_SCALE: f64 = 127.0;
+pub const INT8_DISTANCE_SCALE: f64 = 127.0;
 
 /// Search for nearest neighbors by vector similarity, filtered by namespace.
 pub fn search_vectors_filtered(
@@ -269,6 +269,243 @@ pub fn update_embedding(
     delete_embedding(conn, memory_id)?;
     insert_embedding(conn, memory_id, embedding, namespace)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Named vector table functions
+// ---------------------------------------------------------------------------
+
+/// Initialize a named vec0 table (e.g., vec_content, vec_summary).
+/// Uses int8 quantization matching the existing vec_memories table.
+pub fn initialize_named_vec_table(
+    conn: &Connection,
+    vector_name: &str,
+    dimension: usize,
+) -> rusqlite::Result<VecTableStatus> {
+    let table = format!("vec_{vector_name}");
+    let table_exists: bool = conn
+        .prepare(&format!(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table}'"
+        ))?
+        .exists([])?;
+
+    if !table_exists {
+        let sql = format!(
+            "CREATE VIRTUAL TABLE \"{table}\" USING vec0(
+                memory_id TEXT PRIMARY KEY,
+                embedding int8[{dimension}],
+                namespace TEXT
+            );"
+        );
+        conn.execute_batch(&sql)?;
+        return Ok(VecTableStatus::Created);
+    }
+
+    // Verify dimension by probe insert
+    let test_blob: Vec<u8> = vec![0u8; dimension]; // int8 = 1 byte per dim
+    let dim_ok = conn
+        .execute(
+            &format!(
+                "INSERT INTO \"{table}\"(memory_id, embedding, namespace) VALUES ('__dim_check__', vec_int8(?1), '__test__')"
+            ),
+            rusqlite::params![test_blob],
+        )
+        .is_ok();
+
+    if dim_ok {
+        conn.execute(
+            &format!("DELETE FROM \"{table}\" WHERE memory_id = '__dim_check__'"),
+            [],
+        )?;
+        return Ok(VecTableStatus::Ready);
+    }
+
+    let existing_dim = detect_existing_dimension(conn).unwrap_or(0);
+    Ok(VecTableStatus::DimensionMismatch {
+        existing: existing_dim,
+        requested: dimension,
+    })
+}
+
+/// Insert a vector embedding into a named vec table.
+pub fn insert_named_embedding(
+    conn: &Connection,
+    table_name: &str,
+    memory_id: &str,
+    embedding: &[f32],
+    namespace: &str,
+) -> rusqlite::Result<()> {
+    let blob = crate::quantize::embedding_to_int8_blob(embedding);
+    conn.execute(
+        &format!(
+            "INSERT INTO \"{table_name}\"(memory_id, embedding, namespace) VALUES (?1, vec_int8(?2), ?3)"
+        ),
+        rusqlite::params![memory_id, blob, namespace],
+    )?;
+    Ok(())
+}
+
+/// Delete a vector embedding from a named vec table.
+pub fn delete_named_embedding(
+    conn: &Connection,
+    table_name: &str,
+    memory_id: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        &format!("DELETE FROM \"{table_name}\" WHERE memory_id = ?1"),
+        rusqlite::params![memory_id],
+    )?;
+    Ok(())
+}
+
+/// Search nearest neighbors in a named vec table, filtered by namespace.
+pub fn search_named_vectors_filtered(
+    conn: &Connection,
+    table_name: &str,
+    query_embedding: &[f32],
+    namespace: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<(String, f64)>> {
+    let blob = crate::quantize::embedding_to_int8_blob(query_embedding);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT memory_id, distance
+         FROM \"{table_name}\"
+         WHERE embedding MATCH ?1
+           AND k = ?2
+           AND namespace = ?3
+         ORDER BY distance"
+    ))?;
+
+    let rows = stmt.query_map(rusqlite::params![blob, limit as i64, namespace], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+/// Search nearest neighbors in a named vec table, global (no namespace filter).
+pub fn search_named_vectors(
+    conn: &Connection,
+    table_name: &str,
+    query_embedding: &[f32],
+    limit: usize,
+) -> rusqlite::Result<Vec<(String, f64)>> {
+    let blob = crate::quantize::embedding_to_int8_blob(query_embedding);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT memory_id, distance
+         FROM \"{table_name}\"
+         WHERE embedding MATCH ?1
+           AND k = ?2
+         ORDER BY distance"
+    ))?;
+
+    let rows = stmt.query_map(rusqlite::params![blob, limit as i64], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+/// Force reindex a named vec table from memory_vectors.
+pub fn force_reindex_named(
+    conn: &Connection,
+    vector_name: &str,
+    dimension: usize,
+) -> rusqlite::Result<usize> {
+    let table = format!("vec_{vector_name}");
+    conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\";"))?;
+    let sql = format!(
+        "CREATE VIRTUAL TABLE \"{table}\" USING vec0(
+            memory_id TEXT PRIMARY KEY,
+            embedding int8[{dimension}],
+            namespace TEXT
+        );"
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rebuild from memory_vectors
+    let expected_bytes = dimension * 4; // f32
+    let mut stmt = conn.prepare(
+        "SELECT mv.memory_id, mv.embedding, mv.namespace
+         FROM memory_vectors mv
+         JOIN memories m ON m.id = mv.memory_id
+         WHERE mv.vector_name = ?1
+           AND m.status = 'active'
+           AND length(mv.embedding) = ?2"
+    )?;
+    let mut count = 0usize;
+    let mut rows = stmt.query(rusqlite::params![vector_name, expected_bytes as i64])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let f32_blob: Vec<u8> = row.get(1)?;
+        let namespace: String = row.get(2)?;
+        let floats: Vec<f32> = f32_blob
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let int8_blob = crate::quantize::embedding_to_int8_blob(&floats);
+        if let Err(e) = conn.execute(
+            &format!(
+                "INSERT OR IGNORE INTO \"{table}\"(memory_id, embedding, namespace) VALUES (?1, vec_int8(?2), ?3)"
+            ),
+            rusqlite::params![id, int8_blob, namespace],
+        ) {
+            tracing::warn!("Failed to rebuild {table} for {id}: {e}");
+        } else {
+            count += 1;
+        }
+    }
+    tracing::info!("Rebuilt {table} index: {count} vectors (dim={dimension}, int8)");
+    Ok(count)
+}
+
+// ---------------------------------------------------------------------------
+// memory_vectors CRUD helpers
+// ---------------------------------------------------------------------------
+
+/// Insert a raw f32 embedding into memory_vectors (source of truth for reindex).
+pub fn insert_memory_vector(
+    conn: &Connection,
+    memory_id: &str,
+    vector_name: &str,
+    embedding: &[f32],
+    namespace: &str,
+) -> rusqlite::Result<()> {
+    let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_vectors(memory_id, vector_name, embedding, namespace)
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![memory_id, vector_name, blob, namespace],
+    )?;
+    Ok(())
+}
+
+/// Delete all named vectors for a memory from memory_vectors.
+pub fn delete_memory_vectors(conn: &Connection, memory_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM memory_vectors WHERE memory_id = ?1",
+        rusqlite::params![memory_id],
+    )?;
+    Ok(())
+}
+
+/// Count how many memories have a given vector_name populated.
+pub fn count_named_vectors(
+    conn: &Connection,
+    vector_name: &str,
+) -> rusqlite::Result<u64> {
+    conn.prepare(
+        "SELECT COUNT(*) FROM memory_vectors WHERE vector_name = ?1"
+    )?
+    .query_row(rusqlite::params![vector_name], |row| row.get(0))
 }
 
 #[cfg(test)]
