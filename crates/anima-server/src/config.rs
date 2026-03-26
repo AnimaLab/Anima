@@ -1,6 +1,33 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PopulateStrategy {
+    Ingestion,
+    Async,
+}
+
+impl Default for PopulateStrategy {
+    fn default() -> Self {
+        Self::Ingestion
+    }
+}
+
+fn default_vector_weight() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VectorConfig {
+    pub name: String,
+    pub source: String,
+    #[serde(default = "default_vector_weight")]
+    pub weight: f64,
+    #[serde(default)]
+    pub populate: PopulateStrategy,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
@@ -20,6 +47,10 @@ pub struct AppConfig {
     /// Sparse vector (BGE-M3 sparse head) configuration.
     #[serde(default)]
     pub sparse: SparseConfig,
+    /// Named vector configurations. Each entry creates a separate vec0 table.
+    /// If empty, a single implicit "content" vector is used (backward compat).
+    #[serde(default)]
+    pub vectors: Vec<VectorConfig>,
     /// User-defined memory categories with custom decay rates.
     /// Keys are category names, values configure the decay lambda.
     /// Built-in defaults (identity, preference, environment, routine, task, inferred, general)
@@ -113,6 +144,20 @@ impl CategoryConfig {
 }
 
 impl AppConfig {
+    /// Returns the configured vectors, or a default single "content" vector if none configured.
+    pub fn resolved_vectors(&self) -> Vec<VectorConfig> {
+        if self.vectors.is_empty() {
+            vec![VectorConfig {
+                name: "content".to_string(),
+                source: "content".to_string(),
+                weight: 1.0,
+                populate: PopulateStrategy::Ingestion,
+            }]
+        } else {
+            self.vectors.clone()
+        }
+    }
+
     /// Look up the decay lambda for a category.
     /// Priority: user config > built-in defaults > global search.temporal_lambda.
     pub fn category_lambda(&self, category: &str) -> f64 {
@@ -482,6 +527,7 @@ impl Default for AppConfig {
             telemetry: TelemetryConfig::default(),
             reranker: RerankerConfig::default(),
             sparse: SparseConfig::default(),
+            vectors: Vec::new(),
             categories: HashMap::new(),
             profiles: HashMap::new(),
             routing: RoutingConfig::default(),

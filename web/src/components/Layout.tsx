@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box, GitCompareArrows, Activity } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
+import { useToast } from '../hooks/useToast'
 import { api } from '../api/client'
 import type { DisplayMessage } from '../hooks/useChat'
 import type { NamespaceInfo } from '../api/types'
@@ -30,11 +31,40 @@ export function Layout({ children }: { children: React.ReactNode }) {
   } = useChat()
 
   const { namespace, setNamespace } = useNamespace()
+  const { show: showToast } = useToast()
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([])
+  const prevFailedRef = useRef<number | null>(null)
 
   useEffect(() => {
     api.listNamespaces().then(setNamespaces).catch(() => {})
   }, [])
+
+  // Poll processor status for LLM errors
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const status = await api.getProcessorStatus()
+        const failed = status.metrics.failed_jobs
+        if (prevFailedRef.current !== null && failed > prevFailedRef.current) {
+          // Fetch latest failed log entry for details
+          try {
+            const logs = await api.getProcessorLog(5, 0)
+            const failedLog = logs.find(l => l.status === 'failed')
+            const detail = failedLog?.details
+              ? String(typeof failedLog.details === 'object' ? (failedLog.details as any).error || JSON.stringify(failedLog.details) : failedLog.details)
+              : 'Unknown error'
+            showToast(`Processor error: ${detail}`, true)
+          } catch {
+            showToast(`Processor: ${failed - prevFailedRef.current} job(s) failed`, true)
+          }
+        }
+        prevFailedRef.current = failed
+      } catch { /* server unreachable, ignore */ }
+    }
+    check()
+    const interval = setInterval(check, 15_000)
+    return () => clearInterval(interval)
+  }, [showToast])
 
   const isOnChat = location.pathname === '/chat' || location.pathname.startsWith('/chat/')
 

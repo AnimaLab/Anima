@@ -207,6 +207,12 @@ export const api = {
     request<SupersessionLink[]>(`/api/v1/memories/${id}/history`),
 
   // Processor log
+  getProcessorStatus: () =>
+    request<{
+      queue_depth: number; in_flight: number; dead_letter_count: number;
+      idle: boolean; metrics: { completed_jobs: number; failed_jobs: number };
+    }>('/api/v1/processor/status'),
+
   getProcessorLog: (limit = 50, offset = 0) =>
     request<Array<{
       id: string; namespace: string; pipeline: string; status: string;

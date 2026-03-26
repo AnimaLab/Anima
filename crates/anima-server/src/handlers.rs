@@ -5052,7 +5052,13 @@ fn build_llm_body(
         body["temperature"] = serde_json::json!(temp);
     }
     if let Some(max_tok) = config.max_tokens {
-        body["max_tokens"] = serde_json::json!(max_tok);
+        // OpenAI o-series and gpt-5+ models require max_completion_tokens
+        let key = if config.base_url.contains("openai.com") {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        };
+        body[key] = serde_json::json!(max_tok);
     }
     // Set seed for reproducibility when temperature is 0
     if config.temperature == Some(0.0) {
@@ -5589,7 +5595,12 @@ pub async fn chat_stream(
                 body["temperature"] = serde_json::json!(temp);
             }
             if let Some(max_tok) = llm_config.max_tokens {
-                body["max_tokens"] = serde_json::json!(max_tok);
+                let key = if llm_config.base_url.contains("openai.com") {
+                    "max_completion_tokens"
+                } else {
+                    "max_tokens"
+                };
+                body[key] = serde_json::json!(max_tok);
             }
             if let Some(ref t) = tools {
                 body["tools"] = t.clone();
@@ -5877,11 +5888,16 @@ pub async fn chat_stream(
                 "content": followup_system
             }));
 
+            let followup_token_key = if llm_config.base_url.contains("openai.com") {
+                "max_completion_tokens"
+            } else {
+                "max_tokens"
+            };
             let followup_body = serde_json::json!({
                 "model": llm_config.model,
                 "messages": followup_messages,
                 "stream": true,
-                "max_tokens": 200,
+                followup_token_key: 200,
             });
 
             let mut followup_req = client.post(&url).json(&followup_body);

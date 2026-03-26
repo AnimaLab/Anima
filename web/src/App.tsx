@@ -6,6 +6,7 @@ import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatFeat
 import { setNamespace as setApiNamespace, api } from './api/client'
 import type { LlmConfig, ConversationSummary, FileAttachment, ChatMessage, MemoryContext, StreamEvent } from './api/types'
 import { Layout } from './components/Layout'
+import { ToastProvider } from './hooks/useToast'
 import { DashboardPage } from './pages/DashboardPage'
 import { MemoriesPage } from './pages/MemoriesPage'
 import { SearchPage } from './pages/SearchPage'
@@ -535,6 +536,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <NamespaceContext.Provider value={nsContext}>
         <ChatContext.Provider value={chatContext}>
           <BrowserRouter>
@@ -555,6 +557,7 @@ export default function App() {
           </BrowserRouter>
         </ChatContext.Provider>
       </NamespaceContext.Provider>
+      </ToastProvider>
     </QueryClientProvider>
   )
 }

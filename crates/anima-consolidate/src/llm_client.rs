@@ -272,6 +272,8 @@ struct ChatRequest {
     temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -317,6 +319,7 @@ impl LlmClient for OpenAiCompatClient {
             });
         }
 
+        let is_openai = self.base_url.contains("openai.com");
         let req = ChatRequest {
             model: self.model.clone(),
             messages: vec![ChatMessage {
@@ -324,7 +327,8 @@ impl LlmClient for OpenAiCompatClient {
                 content: prompt.to_string(),
             }],
             temperature: self.temperature,
-            max_tokens: Some(4096),
+            max_tokens: if is_openai { None } else { Some(4096) },
+            max_completion_tokens: if is_openai { Some(4096) } else { None },
         };
 
         let mut request = self

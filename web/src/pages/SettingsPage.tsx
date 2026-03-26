@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle, Check, Pencil } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
+import { useToast } from '../hooks/useToast'
 import { api } from '../api/client'
 import type { NamespaceInfo, ProfilesResponse } from '../api/types'
 
@@ -47,19 +48,8 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
   )
 }
 
-function useToast() {
-  const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout>>(null)
-  const show = useCallback((msg: string, error = false) => {
-    if (timer.current) clearTimeout(timer.current)
-    setToast({ msg, error })
-    timer.current = setTimeout(() => setToast(null), 2500)
-  }, [])
-  return { toast, show }
-}
-
 export function SettingsPage() {
-  const { toast, show: showToast } = useToast()
+  const { show: showToast } = useToast()
   const { config, setConfig: setConfigRaw } = useChat()
   const { namespace, setNamespace: setNamespaceRaw, refreshNamespaces: refreshSidebar } = useNamespace()
 
@@ -848,15 +838,6 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
-          <div className={`flex items-center gap-2 text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg ${toast.error ? 'bg-red-600' : 'bg-ink'}`}>
-            {toast.error ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5 text-green-400" />}
-            {toast.msg}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
