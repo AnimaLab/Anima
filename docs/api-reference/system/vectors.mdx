@@ -1,0 +1,49 @@
+---
+title: 'Vector Status'
+description: 'Check named vector configuration and population stats'
+---
+
+## GET /api/v1/vectors/status
+
+Returns the configured named vectors, their search weights, population counts, and table status.
+
+## Response
+
+<ResponseField name="vectors" type="array">
+  Array of configured vector entries.
+
+  <Expandable>
+    <ResponseField name="name" type="string">
+      Vector name (e.g. `content`, `summary`)
+    </ResponseField>
+    <ResponseField name="weight" type="number">
+      Base search weight from config
+    </ResponseField>
+    <ResponseField name="count" type="integer">
+      Number of memories with this vector populated
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Table status: `ready` or `missing`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="dimension" type="integer">
+  Embedding dimension from config
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/vectors/status
+```
+
+```json
+{
+  "vectors": [
+    {"name": "content", "weight": 0.7, "count": 1523, "status": "ready"},
+    {"name": "summary", "weight": 0.3, "count": 842, "status": "ready"}
+  ],
+  "dimension": 1024
+}
+```

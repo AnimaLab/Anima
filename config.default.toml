@@ -46,6 +46,23 @@ pooling = "mean"
 enabled = true
 weights_path = "./models/bge-m3/sparse_linear.bin"
 
+# Named vectors: multiple embeddings per memory for improved retrieval.
+# Each entry creates a separate vector index. Search blends results across
+# all configured vectors with heuristic-adjusted weights.
+# If omitted, a single implicit "content" vector is used (backward compatible).
+#
+# [[vectors]]
+# name = "content"           # unique name, becomes vec table suffix
+# source = "content"         # which text to embed: "content" = Memory.content
+# weight = 0.7               # base search weight (heuristics adjust at query time)
+# populate = "ingestion"     # "ingestion" = embed on create, "async" = processor fills later
+#
+# [[vectors]]
+# name = "summary"
+# source = "summary"         # processor-generated summary
+# weight = 0.3
+# populate = "async"
+
 [search]
 rrf_k = 60.0
 weight_vector = 0.6

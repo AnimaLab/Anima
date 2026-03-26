@@ -457,11 +457,19 @@ export function ChatPage() {
           <textarea
             ref={inputRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              setInput(e.target.value)
+              // Auto-resize to content, max 17 lines
+              const el = e.target
+              el.style.height = 'auto'
+              const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
+              const maxHeight = lineHeight * 17
+              el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+            }}
             onKeyDown={handleKeyDown}
             placeholder={loading ? "Type to queue a message..." : "Type a message..."}
             rows={1}
-            className="flex-1 bg-transparent text-ink text-sm resize-none focus:outline-none max-h-32 py-1.5 px-2"
+            className="flex-1 bg-transparent text-ink text-sm resize-none focus:outline-none py-1.5 px-2"
             style={{ minHeight: '2rem' }}
           />
           {loading && (

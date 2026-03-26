@@ -201,6 +201,10 @@ impl EmbeddingModel {
     }
 
     /// Core single-text ONNX inference. Both embed() and embed_batch() use this.
+    /// Maximum token length for the embedding model.
+    /// BGE-M3 supports 8192; truncate to avoid ONNX shape errors.
+    const MAX_TOKENS: usize = 8192;
+
     fn embed_single(&self, text: &str) -> Result<(Vec<f32>, crate::SparseVector), EmbedError> {
         let texts = &[text];
         let encodings = self
@@ -209,7 +213,7 @@ impl EmbeddingModel {
             .map_err(|e| EmbedError::Tokenizer(e.to_string()))?;
 
         let batch_size = encodings.len();
-        let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
+        let max_len = encodings.iter().map(|e| e.get_ids().len().min(Self::MAX_TOKENS)).max().unwrap_or(0);
 
         let mut input_ids_vec = vec![0i64; batch_size * max_len];
         let mut attn_mask_vec = vec![0i64; batch_size * max_len];
@@ -219,11 +223,12 @@ impl EmbeddingModel {
             let ids = encoding.get_ids();
             let mask = encoding.get_attention_mask();
             let types = encoding.get_type_ids();
-            for (j, (&id, (&m, &t))) in ids.iter().zip(mask.iter().zip(types.iter())).enumerate() {
+            let len = ids.len().min(max_len);
+            for j in 0..len {
                 let idx = i * max_len + j;
-                input_ids_vec[idx] = id as i64;
-                attn_mask_vec[idx] = m as i64;
-                token_type_vec[idx] = t as i64;
+                input_ids_vec[idx] = ids[j] as i64;
+                attn_mask_vec[idx] = mask[j] as i64;
+                token_type_vec[idx] = types[j] as i64;
             }
         }
 

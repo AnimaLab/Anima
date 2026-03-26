@@ -55,6 +55,8 @@ part of the repo.
 | ------------------------- | ------- | ----------------------------------------------------------- |
 | Persistent memory API     | Shipped | Add, search, list, update, merge, and delete memories       |
 | Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking with auto-tuned weights |
+| Multi-vector search       | Shipped | Named vectors per memory with query routing heuristics      |
+| Scalar quantization       | Shipped | Int8 quantized vec indexes with f32 source for reindexing   |
 | Cross-encoder re-ranking  | Shipped | Optional bge-reranker-v2-m3 for better natural language     |
 | Confidence + source       | Shipped | Per-memory trust scoring and provenance tracking            |
 | Typed memory categories   | Shipped | Per-category decay rates and filtering                      |

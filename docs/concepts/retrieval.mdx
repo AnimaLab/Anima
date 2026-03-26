@@ -11,10 +11,34 @@ Queries are embedded and compared against stored memory embeddings via cosine si
 
 Anima supports multiple embedding backends:
 
-- **Local** (default) — Qwen3-Embedding-0.6B via ONNX. Runs offline, no API calls, no cost.
+- **Local** (default) — BGE-M3 via ONNX (1024d). Runs offline, no API calls, no cost.
 - **OpenAI-compatible** — OpenAI, Cohere, Voyage, Together, vLLM, or any provider with an `/embeddings` endpoint.
 
 See the [quickstart](/quickstart#embedding-backend) for setup.
+
+## Multi-Vector Search
+
+Anima supports multiple named vector embeddings per memory, each derived from different source text (e.g., raw content vs. a summary). Configure named vectors via `[[vectors]]` in `config.toml`:
+
+```toml
+[[vectors]]
+name = "content"
+source = "content"
+weight = 0.7
+populate = "ingestion"
+
+[[vectors]]
+name = "summary"
+source = "summary"
+weight = 0.3
+populate = "async"
+```
+
+When multiple vectors are configured, search queries all vec tables and blends per-memory results using a weighted average. Query routing heuristics automatically adjust weights: short factual queries boost summary vectors, long narrative queries boost content vectors. All vectors always participate — routing shifts emphasis, never excludes.
+
+If no `[[vectors]]` section is present, a single implicit `content` vector is used and search behaves identically to before.
+
+Vector status is available at `GET /api/v1/vectors/status`.
 
 ## Keyword Search
 

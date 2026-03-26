@@ -49,9 +49,13 @@ description: 'Search memories using hybrid, vector, keyword, or ask-retrieval mo
   Filter results by semantic category (e.g. `preference`, `identity`, `routine`)
 </ParamField>
 
+<ParamField body="vectors" type="string">
+  Comma-separated list of named vectors to search (e.g. `content,summary`). Defaults to all configured vectors. Only useful when `[[vectors]]` is configured in `config.toml`.
+</ParamField>
+
 ## Response
 
-Returns an object with `results` (array of memory objects ranked by relevance) and `query_time_ms`. Each result includes `score`, `vector_score`, `keyword_score`, `temporal_score`, `category`, `confidence`, and `source`.
+Returns an object with `results` (array of memory objects ranked by relevance) and `query_time_ms`. Each result includes `score`, `vector_score`, `keyword_score`, `temporal_score`, `category`, `confidence`, `source`, and `vector_scores` (per-named-vector similarity breakdown when multi-vector is configured).
 
 ## Examples
 
