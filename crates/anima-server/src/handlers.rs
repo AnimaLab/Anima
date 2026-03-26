@@ -254,7 +254,7 @@ fn to_working_memory_dto(entry: anima_db::store::WorkingMemoryEntry) -> WorkingM
 }
 
 struct QueryEmbeddingCache {
-    map: HashMap<String, Vec<f32>>,
+    map: HashMap<String, (Vec<f32>, anima_embed::SparseVector)>,
     fifo: VecDeque<String>,
     capacity: usize,
 }
@@ -268,11 +268,11 @@ impl QueryEmbeddingCache {
         }
     }
 
-    fn get(&self, key: &str) -> Option<Vec<f32>> {
+    fn get(&self, key: &str) -> Option<(Vec<f32>, anima_embed::SparseVector)> {
         self.map.get(key).cloned()
     }
 
-    fn insert(&mut self, key: String, value: Vec<f32>) {
+    fn insert(&mut self, key: String, value: (Vec<f32>, anima_embed::SparseVector)) {
         if self.map.contains_key(&key) {
             self.map.insert(key, value);
             return;
@@ -292,7 +292,7 @@ impl QueryEmbeddingCache {
 static QUERY_EMBED_CACHE: OnceLock<Mutex<QueryEmbeddingCache>> = OnceLock::new();
 static REFLECT_BATCH_BUFFER: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
-fn embed_query_cached(state: &AppState, query: &str) -> Result<Vec<f32>, AppError> {
+fn embed_query_cached(state: &AppState, query: &str) -> Result<(Vec<f32>, anima_embed::SparseVector), AppError> {
     let key = query.trim().to_ascii_lowercase();
     let cacheable = key.len() <= 256 && !key.is_empty();
     if cacheable {
@@ -310,20 +310,20 @@ fn embed_query_cached(state: &AppState, query: &str) -> Result<Vec<f32>, AppErro
         }
     }
 
-    let embedding = state
+    let (embedding, sparse) = state
         .embedder
-        .embed_query(query)
+        .embed_query_with_sparse(query)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     if cacheable {
         if let Some(cache) = QUERY_EMBED_CACHE.get() {
             if let Ok(mut guard) = cache.lock() {
-                guard.insert(key, embedding.clone());
+                guard.insert(key, (embedding.clone(), sparse.clone()));
             }
         }
     }
 
-    Ok(embedding)
+    Ok((embedding, sparse))
 }
 
 fn reflect_batch_size() -> usize {
@@ -1061,10 +1061,10 @@ pub async fn add_memory(
         return Err(AppError::BadRequest("content cannot be empty".into()));
     }
 
-    // Embed the content
-    let embedding = state
+    // Embed the content (dense + sparse)
+    let (embedding, content_sparse) = state
         .embedder
-        .embed(&content)
+        .embed_with_sparse(&content)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     // Step 1: Exact dedup by hash
@@ -1149,7 +1149,7 @@ pub async fn add_memory(
                                 .map(|s| s.to_string())
                         });
                         let new_id = memory.id.clone();
-                        state.store.insert(&memory, &embedding).await?;
+                        state.store.insert_with_sparse(&memory, &embedding, Some(&content_sparse)).await?;
                         ingest_identity_hints(&state, &ns, &memory.content, 0.72, Some(&new_id)).await;
 
                         // Mark old as superseded, linking to the new memory
@@ -1187,14 +1187,14 @@ pub async fn add_memory(
 
     // Step 3: Create new memory
     // Use novel_content if predict-calibrate identified only a subset as new.
-    let (final_content, final_embedding) = if let Some(novel) = novel_content_override {
-        let emb = state
+    let (final_content, final_embedding, final_sparse) = if let Some(novel) = novel_content_override {
+        let (emb, sp) = state
             .embedder
-            .embed(&novel)
+            .embed_with_sparse(&novel)
             .map_err(|e| AppError::Embedding(e.to_string()))?;
-        (novel, emb)
+        (novel, emb, sp)
     } else {
-        (content, embedding)
+        (content, embedding, content_sparse)
     };
     // Resolve episode_id: explicit field > metadata.session
     let resolved_episode = episode_id.or_else(|| {
@@ -1209,7 +1209,7 @@ pub async fn add_memory(
     memory.confidence = source_confidence;
     memory.source = parsed_source;
     let id = memory.id.clone();
-    state.store.insert(&memory, &final_embedding).await?;
+    state.store.insert_with_sparse(&memory, &final_embedding, Some(&final_sparse)).await?;
     state.record_ingestion(1);
     ingest_identity_hints(&state, &ns, &memory.content, 0.72, Some(&id)).await;
 
@@ -1294,10 +1294,10 @@ async fn run_ask_retrieval_pipeline(
     limit: usize,
     scorer_config: &anima_core::search::ScorerConfig,
 ) -> Result<Vec<(anima_core::memory::Memory, f64)>, AppError> {
-    let embedding = embed_query_cached(state, query)?;
+    let (embedding, query_sparse) = embed_query_cached(state, query)?;
 
     // 1. Initial hybrid search
-    let results = state.store.search(&embedding, &anima_embed::SparseVector::default(), query, ns, &SearchMode::Hybrid, limit, scorer_config)
+    let results = state.store.search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, limit, scorer_config)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, "ask_retrieval_hybrid").await;
@@ -1306,10 +1306,10 @@ async fn run_ask_retrieval_pipeline(
     let keyword_queries = extract_keyword_queries(query);
     let mut expanded_results = Vec::new();
     for kq in &keyword_queries {
-        let kq_embedding = embed_query_cached(state, kq)?;
+        let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, &SearchMode::Hybrid, limit, scorer_config)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, limit, scorer_config)
             .await
         {
             expanded_results.extend(kw_results);
@@ -1374,7 +1374,7 @@ async fn run_ask_retrieval_pipeline(
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state
             .store
-            .search(&embedding, &anima_embed::SparseVector::default(), entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
             .await
         {
             record_retrieval_observations(state, ns, &kw_results, 0.15, "ask_retrieval_entity_kw").await;
@@ -1384,7 +1384,7 @@ async fn run_ask_retrieval_pipeline(
             let combined = format!("{entity} {topic}");
             if let Ok(kw_results) = state
                 .store
-                .search(&embedding, &anima_embed::SparseVector::default(), &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
+                .search(&embedding, &query_sparse, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
                 .await
             {
                 entity_results.extend(kw_results);
@@ -1509,10 +1509,10 @@ async fn run_query_rewrite(
     }
 
     for kq in &keyword_queries {
-        let kq_embedding = embed_query_cached(state, kq)?;
+        let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, mode, limit, scorer_config)
+            .search(&kq_embedding, &kq_sparse, kq, ns, mode, limit, scorer_config)
             .await
         {
             for sr in kw_results {
@@ -1598,14 +1598,14 @@ pub async fn search_memories(
 
     // ── Standard search modes (hybrid/vector/keyword) ──
     // Embed query
-    let embedding = embed_query_cached(&state, &req.query)?;
+    let (embedding, query_sparse) = embed_query_cached(&state, &req.query)?;
 
     // Search — fetch more candidates if reranker is enabled so it has room to reorder
     let reranker_top_n = state.config.reranker.top_n;
     let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
     let mut scored = state
         .store
-        .search(&embedding, &anima_embed::SparseVector::default(), &req.query, &ns, &mode, fetch_limit, &scorer_config)
+        .search(&embedding, &query_sparse, &req.query, &ns, &mode, fetch_limit, &scorer_config)
         .await?;
 
     // Feature 2: Query rewriting — expand with keyword extraction if enabled
@@ -1973,9 +1973,9 @@ pub async fn merge_memories(
     });
     let _ = redact_metadata_value(&mut metadata);
     let (content, _, _) = redact_content_and_metadata(&req.content, None);
-    let embedding = state
+    let (embedding, _merge_sparse) = state
         .embedder
-        .embed(&content)
+        .embed_with_sparse(&content)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
     let mut merged = Memory::new(
         ns.as_str().to_string(),
@@ -2511,13 +2511,13 @@ pub async fn simulate_counterfactual(
         }
     } else {
         let query = req.query.clone().unwrap_or_else(|| intervention.to_string());
-        let embedding = embed_query_cached(&state, &query)?;
+        let (embedding, query_sparse) = embed_query_cached(&state, &query)?;
         let cf_scorer_config = state.scorer_config.read().await.clone();
         let scored = state
             .store
             .search(
                 &embedding,
-                &anima_embed::SparseVector::default(),
+                &query_sparse,
                 &query,
                 &ns,
                 &SearchMode::Hybrid,
@@ -2580,9 +2580,9 @@ pub async fn capture_correction(
 
     let target_ns = anima_core::namespace::Namespace::parse(&target.namespace)
         .map_err(|e| AppError::BadRequest(format!("invalid target namespace: {e}")))?;
-    let embedding = state
+    let (embedding, correct_sparse) = state
         .embedder
-        .embed(&corrected_content)
+        .embed_with_sparse(&corrected_content)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     let tier = target
@@ -2612,7 +2612,7 @@ pub async fn capture_correction(
         Some(target.memory_type.clone()),
     );
     let new_id = memory.id.clone();
-    state.store.insert(&memory, &embedding).await?;
+    state.store.insert_with_sparse(&memory, &embedding, Some(&correct_sparse)).await?;
     ingest_identity_hints(&state, &target_ns, &memory.content, 0.95, Some(&new_id)).await;
 
     if let Some(importance) = req.importance {
@@ -3512,12 +3512,12 @@ async fn enriched_retrieval(
     max_results: usize,
     label: &str,
 ) -> Result<(String, Vec<MemoryContext>), AppError> {
-    let embedding = embed_query_cached(state, query)?;
+    let (embedding, query_sparse) = embed_query_cached(state, query)?;
     let scorer_cfg = state.scorer_config.read().await.clone();
 
     // 1. Primary hybrid search
     let results = state.store
-        .search(&embedding, &anima_embed::SparseVector::default(), query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+        .search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, label).await;
@@ -3526,9 +3526,9 @@ async fn enriched_retrieval(
     let keyword_queries = extract_keyword_queries(query);
     let mut expanded_results = Vec::new();
     for kq in &keyword_queries {
-        let kq_embedding = embed_query_cached(state, kq)?;
+        let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state.store
-            .search(&kq_embedding, &anima_embed::SparseVector::default(), kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
             .await
         {
             expanded_results.extend(kw_results);
@@ -3571,7 +3571,7 @@ async fn enriched_retrieval(
     let mut entity_results = Vec::new();
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state.store
-            .search(&embedding, &anima_embed::SparseVector::default(), entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
             .await
         {
             entity_results.extend(kw_results);
@@ -3985,9 +3985,9 @@ async fn handle_tool_search(
     ns: &anima_core::namespace::Namespace,
     query: &str,
 ) -> Result<(String, Vec<MemoryContext>), AppError> {
-    let embedding = state
+    let (embedding, query_sparse) = state
         .embedder
-        .embed_query(query)
+        .embed_query_with_sparse(query)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     let tool_scorer = state.scorer_config.read().await.clone();
@@ -3995,7 +3995,7 @@ async fn handle_tool_search(
         .store
         .search(
             &embedding,
-            &anima_embed::SparseVector::default(),
+            &query_sparse,
             query,
             ns,
             &SearchMode::Hybrid,
@@ -4032,9 +4032,9 @@ async fn handle_tool_add(
         return Err(AppError::BadRequest("content cannot be empty".into()));
     }
 
-    let embedding = state
+    let (embedding, content_sparse) = state
         .embedder
-        .embed(&content)
+        .embed_with_sparse(&content)
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     // Step 1: Exact dedup by hash
@@ -4085,7 +4085,7 @@ async fn handle_tool_add(
                             None,
                     );
                     let new_id = memory.id.clone();
-                    state.store.insert(&memory, &embedding).await?;
+                    state.store.insert_with_sparse(&memory, &embedding, Some(&content_sparse)).await?;
                     ingest_identity_hints(state, ns, &memory.content, 0.7, Some(&new_id)).await;
                     if let Some(target_id) = &decision.target_id {
                         state.store.mark_superseded(target_id, &new_id).await?;
@@ -4100,9 +4100,9 @@ async fn handle_tool_add(
                         let orig_len = content.len();
                         orig_len == 0 || novel.len() * 100 / orig_len >= 40
                     }) {
-                        let novel_embedding = state
+                        let (novel_embedding, novel_sparse) = state
                             .embedder
-                            .embed(&novel)
+                            .embed_with_sparse(&novel)
                             .map_err(|e| AppError::Embedding(e.to_string()))?;
                         let memory = Memory::new(
                             ns.as_str().to_string(),
@@ -4112,7 +4112,7 @@ async fn handle_tool_add(
                             None,
                         );
                         let id = memory.id.clone();
-                        state.store.insert(&memory, &novel_embedding).await?;
+                        state.store.insert_with_sparse(&memory, &novel_embedding, Some(&novel_sparse)).await?;
                         ingest_identity_hints(state, ns, &memory.content, 0.68, Some(&id)).await;
                         return Ok(id);
                     }
@@ -4125,7 +4125,7 @@ async fn handle_tool_add(
     // Step 3: Create new memory
     let memory = Memory::new(ns.as_str().to_string(), content.to_string(), None, tags, None);
     let id = memory.id.clone();
-    state.store.insert(&memory, &embedding).await?;
+    state.store.insert_with_sparse(&memory, &embedding, Some(&content_sparse)).await?;
     ingest_identity_hints(state, ns, &memory.content, 0.68, Some(&id)).await;
     Ok(id)
 }
@@ -5268,11 +5268,11 @@ pub async fn chat_stream(
     req.llm = Some(resolved_llm);
 
     // Search anima for relevant memories
-    let embedding = embed_query_cached(&state, &req.message)?;
+    let (embedding, query_sparse) = embed_query_cached(&state, &req.message)?;
     let chat_scorer = state.scorer_config.read().await.clone();
     let scored = state
         .store
-        .search(&embedding, &anima_embed::SparseVector::default(), &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
+        .search(&embedding, &query_sparse, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
         .await?;
 
     // Gate: only include memories with meaningful relevance scores

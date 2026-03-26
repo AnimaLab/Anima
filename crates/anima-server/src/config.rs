@@ -17,6 +17,9 @@ pub struct AppConfig {
     /// Cross-encoder re-ranker for improved retrieval quality.
     #[serde(default)]
     pub reranker: RerankerConfig,
+    /// Sparse vector (BGE-M3 sparse head) configuration.
+    #[serde(default)]
+    pub sparse: SparseConfig,
     /// User-defined memory categories with custom decay rates.
     /// Keys are category names, values configure the decay lambda.
     /// Built-in defaults (identity, preference, environment, routine, task, inferred, general)
@@ -188,6 +191,8 @@ pub struct SearchConfig {
     pub rrf_k: f64,
     pub weight_vector: f64,
     pub weight_keyword: f64,
+    #[serde(default)]
+    pub weight_sparse: f64,
     pub temporal_weight: f64,
     pub temporal_lambda: f64,
     pub similarity_threshold: f64,
@@ -401,6 +406,27 @@ impl Default for RerankerConfig {
     }
 }
 
+/// Sparse vector configuration (BGE-M3 sparse head).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SparseConfig {
+    #[serde(default = "sparse_default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "sparse_default_weights_path")]
+    pub weights_path: String,
+}
+
+fn sparse_default_enabled() -> bool { true }
+fn sparse_default_weights_path() -> String { "./models/bge-m3/sparse_linear.bin".into() }
+
+impl Default for SparseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: sparse_default_enabled(),
+            weights_path: sparse_default_weights_path(),
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -427,6 +453,7 @@ impl Default for AppConfig {
                 rrf_k: 10.0,
                 weight_vector: 0.6,
                 weight_keyword: 0.4,
+                weight_sparse: 0.0,
                 temporal_weight: 0.2,
                 temporal_lambda: 0.001,
                 similarity_threshold: 0.85,
@@ -454,6 +481,7 @@ impl Default for AppConfig {
             processor: ProcessorLlmConfig::default(),
             telemetry: TelemetryConfig::default(),
             reranker: RerankerConfig::default(),
+            sparse: SparseConfig::default(),
             categories: HashMap::new(),
             profiles: HashMap::new(),
             routing: RoutingConfig::default(),

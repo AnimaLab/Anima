@@ -42,10 +42,15 @@ pooling = "mean"
 #   api_key = ""  # or set EMBEDDING_API_KEY env var
 #   dimension = 1024
 
+[sparse]
+enabled = true
+weights_path = "./models/bge-m3/sparse_linear.bin"
+
 [search]
 rrf_k = 60.0
 weight_vector = 0.6
 weight_keyword = 0.4
+weight_sparse = 0.0
 temporal_weight = 0.2
 # Global temporal decay rate. Per-category overrides are applied automatically:
 # identity=0.00001 (~permanent), preference=0.0001, environment=0.0005,

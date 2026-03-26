@@ -439,6 +439,17 @@ impl MemoryStore {
         insert_memory_sync(&conn, memory, embedding, None)
     }
 
+    /// Insert a new memory with both dense and sparse vectors.
+    pub async fn insert_with_sparse(
+        &self,
+        memory: &Memory,
+        embedding: &[f32],
+        sparse: Option<&anima_embed::SparseVector>,
+    ) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        insert_memory_sync(&conn, memory, embedding, sparse)
+    }
+
     /// Insert many memories in a single transaction (high-throughput ingest path).
     pub async fn insert_many(
         &self,

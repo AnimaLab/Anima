@@ -147,13 +147,32 @@ async fn main() -> anyhow::Result<()> {
                 })?;
             let query_instruction = config.embedding.query_instruction.clone()
                 .filter(|s| !s.is_empty());
+
+            let sparse_weights_path = if config.sparse.enabled
+                && config.embedding.backend == "local"
+            {
+                let sp = std::path::Path::new(&config.sparse.weights_path);
+                if sp.exists() {
+                    Some(sp.to_path_buf())
+                } else {
+                    tracing::warn!(
+                        domain = "embedding",
+                        "Sparse weights not found at {}; sparse disabled",
+                        sp.display()
+                    );
+                    None
+                }
+            } else {
+                None
+            };
+
             let embedder = EmbeddingModel::load(
                 &model_path,
                 &tokenizer_path,
                 config.embedding.dimension,
                 pooling,
                 query_instruction.clone(),
-                None,
+                sparse_weights_path.as_deref(),
             )
             .map_err(|e| {
                 tracing::error!(domain = "embedding", "Startup check failed — model load: {e}");
@@ -236,7 +255,7 @@ async fn start_server(
         rrf_k: config.search.rrf_k,
         weight_vector: config.search.weight_vector,
         weight_keyword: config.search.weight_keyword,
-        weight_sparse: 0.0,
+        weight_sparse: config.search.weight_sparse,
         temporal_weight: config.search.temporal_weight,
         lambda: config.search.temporal_lambda,
         access_weight: config.search.access_weight,
