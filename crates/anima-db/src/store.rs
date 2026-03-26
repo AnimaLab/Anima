@@ -452,7 +452,7 @@ impl MemoryStore {
         embedding: &[f32],
     ) -> Result<(), DbError> {
         let conn = self.pool.writer().await;
-        insert_memory_sync(&conn, memory, embedding, None)
+        insert_memory_sync(&conn, memory, &[("content", embedding)], None)
     }
 
     /// Insert a new memory with both dense and sparse vectors.
@@ -463,7 +463,18 @@ impl MemoryStore {
         sparse: Option<&anima_embed::SparseVector>,
     ) -> Result<(), DbError> {
         let conn = self.pool.writer().await;
-        insert_memory_sync(&conn, memory, embedding, sparse)
+        insert_memory_sync(&conn, memory, &[("content", embedding)], sparse)
+    }
+
+    /// Insert a memory with multiple named vector embeddings.
+    pub async fn insert_with_named_vectors(
+        &self,
+        memory: &Memory,
+        named_embeddings: &[(&str, &[f32])],
+        sparse: Option<&anima_embed::SparseVector>,
+    ) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        insert_memory_sync(&conn, memory, named_embeddings, sparse)
     }
 
     /// Insert many memories in a single transaction (high-throughput ingest path).
@@ -1808,14 +1819,18 @@ impl MemoryStore {
 fn insert_memory_sync(
     conn: &Connection,
     memory: &Memory,
-    embedding: &[f32],
+    named_embeddings: &[(&str, &[f32])],
     sparse: Option<&anima_embed::SparseVector>,
 ) -> Result<(), DbError> {
     let metadata_json = memory
         .metadata
         .as_ref()
         .map(|v| serde_json::to_string(v).unwrap_or_default());
-    let embedding_blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let embedding_blob: Vec<u8> = if let Some((_, first_emb)) = named_embeddings.first() {
+        first_emb.iter().flat_map(|f| f.to_le_bytes()).collect()
+    } else {
+        vec![]
+    };
 
     let tags_json = serde_json::to_string(&memory.tags).unwrap_or_else(|_| "[]".to_string());
 
@@ -1854,8 +1869,21 @@ fn insert_memory_sync(
         ],
     )?;
 
-    // Sync to vec_memories
-    vector::insert_embedding(&tx, &memory.id, embedding, &memory.namespace)?;
+    // Sync to memory_vectors + named vec tables
+    for (vec_name, emb) in named_embeddings {
+        vector::insert_memory_vector(&tx, &memory.id, vec_name, emb, &memory.namespace)?;
+        // Determine target table: "content" uses vec_memories (legacy compat), others use vec_{name}
+        let target_table = if *vec_name == "content" {
+            let has_legacy: bool = tx
+                .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_memories'")
+                .and_then(|mut s| s.exists([]))
+                .unwrap_or(false);
+            if has_legacy { "vec_memories".to_string() } else { format!("vec_{vec_name}") }
+        } else {
+            format!("vec_{vec_name}")
+        };
+        vector::insert_named_embedding(&tx, &target_table, &memory.id, emb, &memory.namespace)?;
+    }
 
     // Sync to fts_memories
     fts::insert_fts(&tx, &memory.id, &memory.namespace, &memory.content)?;
@@ -1924,7 +1952,8 @@ fn insert_many_memories_sync(
             ],
         )?;
 
-        vector::insert_embedding(&tx, &memory.id, embedding, &memory.namespace)?;
+        vector::insert_memory_vector(&tx, &memory.id, "content", embedding, &memory.namespace)?;
+        vector::insert_named_embedding(&tx, "vec_memories", &memory.id, embedding, &memory.namespace)?;
         fts::insert_fts(&tx, &memory.id, &memory.namespace, &memory.content)?;
 
         snapshot_claim_revision_sync(
@@ -2077,6 +2106,7 @@ fn soft_delete_sync(conn: &Connection, id: &str) -> Result<bool, DbError> {
 
     // Remove from search indexes
     vector::delete_embedding(&tx, id)?;
+    vector::delete_memory_vectors(&tx, id)?;
     fts::delete_fts(&tx, id)?;
     crate::sparse::delete_sparse(&tx, id)?;
 
@@ -2110,6 +2140,7 @@ fn hard_delete_sync(conn: &Connection, id: &str) -> Result<bool, DbError> {
     )?;
 
     vector::delete_embedding(&tx, id)?;
+    vector::delete_memory_vectors(&tx, id)?;
     fts::delete_fts(&tx, id)?;
     crate::sparse::delete_sparse(&tx, id)?;
     tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
@@ -2132,6 +2163,7 @@ fn mark_superseded_sync(conn: &Connection, id: &str, superseded_by: &str) -> Res
     )?;
 
     vector::delete_embedding(&tx, id)?;
+    vector::delete_memory_vectors(&tx, id)?;
     fts::delete_fts(&tx, id)?;
     crate::sparse::delete_sparse(&tx, id)?;
 
@@ -2768,6 +2800,7 @@ fn delete_namespace_sync(conn: &Connection, namespace: &Namespace) -> Result<u64
     };
     for id in &ids {
         let _ = crate::vector::delete_embedding(&tx, id);
+        let _ = crate::vector::delete_memory_vectors(&tx, id);
         let _ = crate::fts::delete_fts(&tx, id);
         let _ = crate::sparse::delete_sparse(&tx, id);
     }
@@ -4172,7 +4205,8 @@ fn merge_memories_sync(
             merged_memory.importance,
         ],
     )?;
-    vector::insert_embedding(&tx, &merged_memory.id, merged_embedding, &merged_memory.namespace)?;
+    vector::insert_memory_vector(&tx, &merged_memory.id, "content", merged_embedding, &merged_memory.namespace)?;
+    vector::insert_named_embedding(&tx, "vec_memories", &merged_memory.id, merged_embedding, &merged_memory.namespace)?;
     fts::insert_fts(
         &tx,
         &merged_memory.id,
@@ -4197,6 +4231,7 @@ fn merge_memories_sync(
             params![merged_memory.id, now, source_id],
         )?;
         vector::delete_embedding(&tx, source_id)?;
+        vector::delete_memory_vectors(&tx, source_id)?;
         fts::delete_fts(&tx, source_id)?;
         crate::sparse::delete_sparse(&tx, source_id)?;
         snapshot_claim_revision_sync(
@@ -6191,7 +6226,7 @@ mod tests {
             confidence: 1.0,
             source: "user_stated".to_string(),
         };
-        insert_memory_sync(conn, &mem, embedding, None).unwrap();
+        insert_memory_sync(conn, &mem, &[("content", embedding)], None).unwrap();
         id
     }
 
@@ -6508,7 +6543,8 @@ mod tests {
                     Some("event".to_string()),
                 );
                 let new_id = new_mem.id.clone();
-                insert_memory_sync(&conn, &new_mem, &make_embedding(dim, 2), None).unwrap();
+                let emb = make_embedding(dim, 2);
+                insert_memory_sync(&conn, &new_mem, &[("content", emb.as_slice())], None).unwrap();
                 mark_superseded_sync(&conn, &old_id, &new_id).unwrap();
                 (old_id, new_id)
             };
