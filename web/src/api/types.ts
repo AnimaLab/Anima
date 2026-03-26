@@ -195,7 +195,19 @@ export interface StreamErrorEvent {
   error: string
 }
 
-export type StreamEvent = StreamMemoriesEvent | StreamTokenEvent | StreamDoneEvent | StreamErrorEvent
+export interface StreamMessageEndEvent {
+  type: 'message_end'
+}
+
+export interface StreamActionEvent {
+  type: 'action'
+  tool: string
+  query?: string
+  summary: string
+  details?: unknown[]
+}
+
+export type StreamEvent = StreamMemoriesEvent | StreamTokenEvent | StreamDoneEvent | StreamErrorEvent | StreamMessageEndEvent | StreamActionEvent
 
 // --- Embeddings (3D visualization) ---
 

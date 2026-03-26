@@ -1,6 +1,15 @@
 import { createContext, useContext } from 'react'
 import type { LlmConfig, MemoryContext, ConversationSummary, FileAttachment } from '../api/types'
 
+export interface ChatSegment {
+  type: 'text' | 'action'
+  content?: string
+  tool?: string
+  query?: string
+  summary?: string
+  details?: unknown[]
+}
+
 export interface DisplayMessage {
   role: 'user' | 'assistant'
   content: string
@@ -8,6 +17,7 @@ export interface DisplayMessage {
   memoriesAdded?: { id: string; content: string }[]
   attachments?: string[]       // file names attached to this message
   imageDataUrls?: string[]     // base64 data URLs for image previews
+  segments?: ChatSegment[]   // multi-bubble segments for agentic responses
 }
 
 export interface SendMessageParams {
