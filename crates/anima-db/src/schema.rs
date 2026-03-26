@@ -466,6 +466,24 @@ pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
         ",
     )?;
 
+    // Named vector storage for multi-vector support (source of truth for reindexing)
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_vectors (
+            memory_id   TEXT NOT NULL,
+            vector_name TEXT NOT NULL,
+            embedding   BLOB NOT NULL,
+            namespace   TEXT NOT NULL,
+            created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            PRIMARY KEY (memory_id, vector_name),
+            FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );"
+    )?;
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memory_vectors_name
+         ON memory_vectors(vector_name, namespace);"
+    )?;
+
     Ok(())
 }
 
