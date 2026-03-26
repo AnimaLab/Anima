@@ -318,12 +318,12 @@ export function SettingsPage() {
         <div className="relative">
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {namespaces.map(ns => (
-              <div key={ns.namespace} className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+              <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)} className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
                   namespace === ns.namespace
                     ? 'bg-accent-light text-accent font-medium'
                     : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
                 }`}>
-                <span className="truncate" onClick={() => setNamespace(ns.namespace)}>{ns.namespace}</span>
+                <span className="truncate">{ns.namespace}</span>
                 <div className="flex items-center gap-2 shrink-0 ml-2">
                   <span className="text-[11px] text-ink-faint tabular-nums">{ns.active_count}/{ns.total_count}</span>
                   <button
