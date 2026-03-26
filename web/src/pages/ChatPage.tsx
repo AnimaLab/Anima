@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import * as pdfjsLib from 'pdfjs-dist'
-import { useChat, type DisplayMessage } from '../hooks/useChat'
+import { useChat, type DisplayMessage, type ChatSegment } from '../hooks/useChat'
 import { api } from '../api/client'
 
 const typeColor: Record<string, string> = {
@@ -34,7 +34,7 @@ export function ChatPage() {
   const {
     messages, setMessages, features, setFeatures, config, setConfig,
     conversationId, setConversationId, conversations, setConversations,
-    loading, streamingContent, streamingMemories,
+    loading, streamingContent, streamingMemories, streamingSegments,
     sendMessage: contextSendMessage,
     stopGeneration,
   } = useChat()
@@ -339,7 +339,11 @@ export function ChatPage() {
             </div>
             <div className="max-w-[90%] sm:max-w-[75%]">
               <div className="bg-card border border-warm-border rounded-lg px-4 py-2.5 text-sm leading-relaxed text-ink">
-                <AssistantContent content={streamingContent} />
+                {streamingSegments.length > 1 ? (
+                  <SegmentedContent segments={streamingSegments.filter(s => s.type === 'action' || (s.type === 'text' && s.content))} />
+                ) : (
+                  <AssistantContent content={streamingContent} />
+                )}
               </div>
               {streamingMemories.length > 0 && (
                 <p className="text-xs text-ink-faint mt-1">{streamingMemories.length} memories used</p>
@@ -620,6 +624,57 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
+function ActionIndicator({ segment }: { segment: ChatSegment }) {
+  const [expanded, setExpanded] = useState(false)
+  const icons: Record<string, string> = {
+    memory_search: '🔍',
+    memory_add: '💾',
+    memory_update: '✏️',
+    send_message: '💬',
+  }
+  return (
+    <div className="py-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-xs text-ink-faint hover:text-ink-muted transition-colors"
+      >
+        <span>{icons[segment.tool || ''] || '⚙️'}</span>
+        <span>{segment.summary}</span>
+        {segment.details && segment.details.length > 0 && (
+          expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+        )}
+      </button>
+      {expanded && segment.details && (
+        <div className="mt-1.5 ml-5 p-2 bg-paper-deep rounded-lg text-[11px] text-ink-muted space-y-1 max-h-40 overflow-y-auto">
+          {segment.details.map((d, i) => (
+            <div key={i} className="truncate">{typeof d === 'string' ? d : JSON.stringify(d)}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SegmentedContent({ segments }: { segments: ChatSegment[] }) {
+  return (
+    <div className="space-y-3">
+      {segments.map((seg, i) => {
+        if (seg.type === 'action') {
+          return <ActionIndicator key={i} segment={seg} />
+        }
+        if (seg.type === 'text' && seg.content) {
+          return (
+            <div key={i} className={i > 0 ? 'border-t border-warm-border pt-3' : ''}>
+              <AssistantContent content={seg.content} />
+            </div>
+          )
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
 function MessageBubble({ message }: { message: DisplayMessage }) {
   const [showMemories, setShowMemories] = useState(false)
   const isUser = message.role === 'user'
@@ -673,7 +728,11 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
             </>
           ) : (
             <>
-              <AssistantContent content={message.content} />
+              {message.segments && message.segments.length > 1 ? (
+                <SegmentedContent segments={message.segments} />
+              ) : (
+                <AssistantContent content={message.content} />
+              )}
             </>
           )}
         </div>
