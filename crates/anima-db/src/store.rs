@@ -3361,7 +3361,7 @@ fn compute_optimal_hybrid_weights_sync(
              WHERE prediction_kind = 'retrieval_relevance'
                AND outcome IS NOT NULL
                AND metadata IS NOT NULL
-             ORDER BY created_at DESC
+             ORDER BY observed_at DESC
              LIMIT 5000",
         )
         .map_err(DbError::Sqlite)?;
