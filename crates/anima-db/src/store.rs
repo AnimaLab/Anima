@@ -440,6 +440,11 @@ impl MemoryStore {
         Self { pool }
     }
 
+    /// Open a read-only database connection.
+    pub fn reader_conn(&self) -> Result<rusqlite::Connection, DbError> {
+        self.pool.reader()
+    }
+
     /// Quick health check: verify the database is accessible.
     pub async fn ping(&self) -> Result<(), DbError> {
         self.pool.ping().await

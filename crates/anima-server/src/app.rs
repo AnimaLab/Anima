@@ -206,6 +206,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/namespaces", get(handlers::list_namespaces).delete(handlers::delete_namespace))
         .route("/api/v1/namespaces/rename", post(handlers::rename_namespace))
         .route("/api/v1/vec/status", get(handlers::get_vec_status))
+        .route("/api/v1/vectors/status", get(handlers::vectors_status))
         .route("/api/v1/vec/reindex", post(handlers::reindex_embeddings))
         .route("/api/v1/graph", get(handlers::get_graph))
         .route("/api/v1/embeddings", get(handlers::get_embeddings))

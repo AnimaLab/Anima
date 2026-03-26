@@ -3101,6 +3101,43 @@ pub async fn get_vec_status(
     }
 }
 
+pub async fn vectors_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let conn = state.store.reader_conn()?;
+
+    let mut vectors = Vec::new();
+    for (name, weight) in &state.vector_configs {
+        let count = anima_db::vector::count_named_vectors(&conn, name).unwrap_or(0);
+        let table = if name == "content" {
+            "vec_memories".to_string()
+        } else {
+            format!("vec_{name}")
+        };
+        let table_exists: bool = conn
+            .prepare(&format!(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='{}'",
+                table
+            ))
+            .and_then(|mut s| s.exists([]))
+            .unwrap_or(false);
+        let status = if table_exists { "ready" } else { "missing" };
+
+        vectors.push(serde_json::json!({
+            "name": name,
+            "weight": weight,
+            "count": count,
+            "status": status,
+        }));
+    }
+
+    let dimension = state.config.embedding.dimension;
+    Ok(Json(serde_json::json!({
+        "vectors": vectors,
+        "dimension": dimension,
+    })))
+}
+
 pub async fn reindex_embeddings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
