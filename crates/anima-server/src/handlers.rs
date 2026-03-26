@@ -1327,8 +1327,10 @@ async fn run_ask_retrieval_pipeline(
     let (embedding, query_sparse) = embed_query_cached(state, query)?;
 
     // 1. Initial hybrid search
-    let default_vc = vec![("content".to_string(), 1.0)];
-    let results = state.store.search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, limit, scorer_config, &default_vc)
+    let base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let adjusted = anima_core::search::adjust_vector_weights(query, &base_weights);
+    let vector_configs: Vec<(String, f64)> = adjusted.into_iter().collect();
+    let results = state.store.search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, limit, scorer_config, &vector_configs)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, "ask_retrieval_hybrid").await;
@@ -1340,7 +1342,7 @@ async fn run_ask_retrieval_pipeline(
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, limit, scorer_config, &default_vc)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, limit, scorer_config, &vector_configs)
             .await
         {
             expanded_results.extend(kw_results);
@@ -1405,7 +1407,7 @@ async fn run_ask_retrieval_pipeline(
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state
             .store
-            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config, &default_vc)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config, &vector_configs)
             .await
         {
             record_retrieval_observations(state, ns, &kw_results, 0.15, "ask_retrieval_entity_kw").await;
@@ -1415,7 +1417,7 @@ async fn run_ask_retrieval_pipeline(
             let combined = format!("{entity} {topic}");
             if let Ok(kw_results) = state
                 .store
-                .search(&embedding, &query_sparse, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config, &default_vc)
+                .search(&embedding, &query_sparse, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config, &vector_configs)
                 .await
             {
                 entity_results.extend(kw_results);
@@ -1539,12 +1541,14 @@ async fn run_query_rewrite(
         best_scores.insert(sr.memory_id.clone(), sr.clone());
     }
 
-    let default_vc = vec![("content".to_string(), 1.0)];
+    let base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let adjusted = anima_core::search::adjust_vector_weights(query, &base_weights);
+    let vector_configs: Vec<(String, f64)> = adjusted.into_iter().collect();
     for kq in &keyword_queries {
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &kq_sparse, kq, ns, mode, limit, scorer_config, &default_vc)
+            .search(&kq_embedding, &kq_sparse, kq, ns, mode, limit, scorer_config, &vector_configs)
             .await
         {
             for sr in kw_results {
@@ -1635,9 +1639,12 @@ pub async fn search_memories(
     // Search — fetch more candidates if reranker is enabled so it has room to reorder
     let reranker_top_n = state.config.reranker.top_n;
     let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
+    let base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let adjusted = anima_core::search::adjust_vector_weights(&req.query, &base_weights);
+    let vector_configs: Vec<(String, f64)> = adjusted.into_iter().collect();
     let mut scored = state
         .store
-        .search(&embedding, &query_sparse, &req.query, &ns, &mode, fetch_limit, &scorer_config, &[("content".to_string(), 1.0)])
+        .search(&embedding, &query_sparse, &req.query, &ns, &mode, fetch_limit, &scorer_config, &vector_configs)
         .await?;
 
     // Feature 2: Query rewriting — expand with keyword extraction if enabled
@@ -2545,6 +2552,9 @@ pub async fn simulate_counterfactual(
         let query = req.query.clone().unwrap_or_else(|| intervention.to_string());
         let (embedding, query_sparse) = embed_query_cached(&state, &query)?;
         let cf_scorer_config = state.scorer_config.read().await.clone();
+        let cf_base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+        let cf_adjusted = anima_core::search::adjust_vector_weights(&query, &cf_base_weights);
+        let cf_vector_configs: Vec<(String, f64)> = cf_adjusted.into_iter().collect();
         let scored = state
             .store
             .search(
@@ -2555,7 +2565,7 @@ pub async fn simulate_counterfactual(
                 &SearchMode::Hybrid,
                 8,
                 &cf_scorer_config,
-                &[("content".to_string(), 1.0)],
+                &cf_vector_configs,
             )
             .await?;
         for sr in scored {
@@ -3597,8 +3607,11 @@ async fn enriched_retrieval(
     let scorer_cfg = state.scorer_config.read().await.clone();
 
     // 1. Primary hybrid search
+    let base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let adjusted = anima_core::search::adjust_vector_weights(query, &base_weights);
+    let vector_configs: Vec<(String, f64)> = adjusted.into_iter().collect();
     let results = state.store
-        .search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &[("content".to_string(), 1.0)])
+        .search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &vector_configs)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, label).await;
@@ -3606,11 +3619,10 @@ async fn enriched_retrieval(
     // 2. Keyword expansion (zero-latency, pure DB queries)
     let keyword_queries = extract_keyword_queries(query);
     let mut expanded_results = Vec::new();
-    let default_vc = vec![("content".to_string(), 1.0)];
     for kq in &keyword_queries {
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state.store
-            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &default_vc)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &vector_configs)
             .await
         {
             expanded_results.extend(kw_results);
@@ -3653,7 +3665,7 @@ async fn enriched_retrieval(
     let mut entity_results = Vec::new();
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state.store
-            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg, &default_vc)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg, &vector_configs)
             .await
         {
             entity_results.extend(kw_results);
@@ -4073,6 +4085,9 @@ async fn handle_tool_search(
         .map_err(|e| AppError::Embedding(e.to_string()))?;
 
     let tool_scorer = state.scorer_config.read().await.clone();
+    let tool_base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let tool_adjusted = anima_core::search::adjust_vector_weights(query, &tool_base_weights);
+    let tool_vector_configs: Vec<(String, f64)> = tool_adjusted.into_iter().collect();
     let scored = state
         .store
         .search(
@@ -4083,7 +4098,7 @@ async fn handle_tool_search(
             &SearchMode::Hybrid,
             5,
             &tool_scorer,
-            &[("content".to_string(), 1.0)],
+            &tool_vector_configs,
         )
         .await?;
     record_retrieval_observations(state, ns, &scored, 0.15, "tool_memory_search").await;
@@ -5375,9 +5390,12 @@ pub async fn chat_stream(
     // Search anima for relevant memories
     let (embedding, query_sparse) = embed_query_cached(&state, &req.message)?;
     let chat_scorer = state.scorer_config.read().await.clone();
+    let chat_base_weights: HashMap<String, f64> = state.vector_configs.iter().cloned().collect();
+    let chat_adjusted = anima_core::search::adjust_vector_weights(&req.message, &chat_base_weights);
+    let chat_vector_configs: Vec<(String, f64)> = chat_adjusted.into_iter().collect();
     let scored = state
         .store
-        .search(&embedding, &query_sparse, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer, &[("content".to_string(), 1.0)])
+        .search(&embedding, &query_sparse, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer, &chat_vector_configs)
         .await?;
 
     // Gate: only include memories with meaningful relevance scores

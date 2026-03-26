@@ -42,6 +42,8 @@ pub struct AppState {
     /// Telemetry
     pub telemetry_enabled: AtomicBool,
     pub telemetry_feature_flags: tokio::sync::RwLock<FeatureFlags>,
+    /// Named vector configs for multi-vector search: [(name, weight)]
+    pub vector_configs: Vec<(String, f64)>,
     /// Vec index status — DimensionMismatch means re-embedding is needed.
     pub vec_status: tokio::sync::RwLock<anima_db::vector::VecTableStatus>,
 }

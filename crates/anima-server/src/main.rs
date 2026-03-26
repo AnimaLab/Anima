@@ -352,6 +352,12 @@ async fn start_server(
         }
     }
 
+    let vector_configs: Vec<(String, f64)> = config
+        .resolved_vectors()
+        .iter()
+        .map(|v| (v.name.clone(), v.weight))
+        .collect();
+
     let state = Arc::new(AppState {
         store,
         embedder,
@@ -365,6 +371,7 @@ async fn start_server(
         resolved_profiles,
         ingested_count: std::sync::atomic::AtomicU64::new(0),
         ingested_started_at: std::time::Instant::now(),
+        vector_configs,
         vec_status: tokio::sync::RwLock::new(vec_status),
     });
 
