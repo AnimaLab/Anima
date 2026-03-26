@@ -87,6 +87,44 @@ async fn main() -> anyhow::Result<()> {
         })?;
     let pool = open_result.0;
     let vec_status = open_result.1;
+    let dimension = config.embedding.dimension;
+
+    // Initialize named vec tables for multi-vector support
+    let vec_names: Vec<String> = config.resolved_vectors()
+        .iter()
+        .filter(|v| v.name != "content") // content uses vec_memories (legacy)
+        .map(|v| v.name.clone())
+        .collect();
+    if !vec_names.is_empty() {
+        let conn = pool.writer().await;
+        for name in &vec_names {
+            match anima_db::vector::initialize_named_vec_table(&conn, name, dimension) {
+                Ok(status) => tracing::info!("Named vec table vec_{name}: {status:?}"),
+                Err(e) => tracing::error!("Failed to init vec_{name}: {e}"),
+            }
+        }
+    }
+
+    // One-time migration: backfill memory_vectors from memories.embedding
+    {
+        let conn = pool.writer().await;
+        let mv_count: i64 = conn
+            .prepare("SELECT COUNT(*) FROM memory_vectors")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(0);
+        if mv_count == 0 {
+            let migrated = conn.execute(
+                "INSERT OR IGNORE INTO memory_vectors(memory_id, vector_name, embedding, namespace)
+                 SELECT id, 'content', embedding, namespace FROM memories
+                 WHERE embedding IS NOT NULL AND status = 'active'",
+                [],
+            ).unwrap_or(0);
+            if migrated > 0 {
+                tracing::info!("Migrated {migrated} embeddings to memory_vectors table");
+            }
+        }
+    }
+
     let store = MemoryStore::new(pool);
     store.ping().await.map_err(|e| {
         tracing::error!(domain = "db", "Startup check failed — database ping: {e}");
