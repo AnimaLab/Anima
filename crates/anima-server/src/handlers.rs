@@ -2903,9 +2903,28 @@ pub async fn reconsolidate_memories(
         return Err(AppError::Internal("background processor not available".into()));
     }
 
+    let recon_start = std::time::Instant::now();
     let result = crate::processor::reconsolidate_sync(&state.store, ns.as_str(), &req.memory_ids)
         .await
         .map_err(|e| AppError::Internal(format!("reconsolidation failed: {e}")))?;
+    let recon_elapsed_ms = recon_start.elapsed().as_secs_f64() * 1000.0;
+
+    let log_entry = anima_db::store::ProcessorLogEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        namespace: ns.as_str().to_string(),
+        pipeline: "reconsolidation".to_string(),
+        status: "completed".to_string(),
+        input_count: result.processed as i64,
+        output_count: result.superseded as i64,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        elapsed_ms: recon_elapsed_ms,
+        details: Some(serde_json::json!({"superseded": result.superseded})),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = state.store.insert_processor_log(&log_entry).await;
+
     Ok(Json(ReconsolidateResponse {
         status: "completed".to_string(),
         processed: result.processed,
@@ -2918,6 +2937,7 @@ pub async fn run_retention(
     ExtractNamespace(ns): ExtractNamespace,
     Json(req): Json<RetentionRunRequest>,
 ) -> Result<Json<RetentionRunResponse>, AppError> {
+    let retention_start = std::time::Instant::now();
     let result = crate::processor::run_retention_sync(
         &state.store,
         Some(ns.as_str()),
@@ -2925,6 +2945,23 @@ pub async fn run_retention(
     )
     .await
     .map_err(|e| AppError::Internal(format!("retention failed: {e}")))?;
+    let retention_elapsed_ms = retention_start.elapsed().as_secs_f64() * 1000.0;
+
+    let log_entry = anima_db::store::ProcessorLogEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        namespace: ns.as_str().to_string(),
+        pipeline: "retention".to_string(),
+        status: "completed".to_string(),
+        input_count: result.processed as i64,
+        output_count: result.softened as i64,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        elapsed_ms: retention_elapsed_ms,
+        details: Some(serde_json::json!({"softened": result.softened})),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = state.store.insert_processor_log(&log_entry).await;
 
     Ok(Json(RetentionRunResponse {
         processed: result.processed,
@@ -4295,11 +4332,32 @@ pub async fn reflect(
         }
     }
 
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let raw_processed = memory_ids.len();
+    let facts_extracted = reflected.len();
+
+    // Log the pipeline run
+    let log_entry = anima_db::store::ProcessorLogEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        namespace: ns.as_str().to_string(),
+        pipeline: "reflection".to_string(),
+        status: "completed".to_string(),
+        input_count: raw_processed as i64,
+        output_count: facts_extracted as i64,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        elapsed_ms,
+        details: Some(serde_json::json!({"facts": facts_extracted})),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = state.store.insert_processor_log(&log_entry).await;
+
     Ok(Json(ReflectResponse {
         status: "completed".into(),
-        raw_processed: Some(memory_ids.len()),
-        facts_extracted: Some(reflected.len()),
-        elapsed_ms: Some(start.elapsed().as_secs_f64() * 1000.0),
+        raw_processed: Some(raw_processed),
+        facts_extracted: Some(facts_extracted),
+        elapsed_ms: Some(elapsed_ms),
         reflected,
     }))
 }
@@ -5974,9 +6032,8 @@ pub async fn create_conversation(
 
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
-    ExtractNamespace(ns): ExtractNamespace,
 ) -> Result<Json<Vec<anima_db::store::ConversationSummary>>, AppError> {
-    let convs = state.store.list_conversations(&ns).await?;
+    let convs = state.store.list_all_conversations().await?;
     Ok(Json(convs))
 }
 
@@ -6269,4 +6326,14 @@ pub async fn import_backup_sqlite(
         "backup_path": backup_path,
         "message": "Database restored. Restart the server to load the new database."
     })))
+}
+
+pub async fn list_processor_log(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Vec<anima_db::store::ProcessorLogEntry>>, AppError> {
+    let limit = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50usize).min(200);
+    let offset = params.get("offset").and_then(|v| v.parse().ok()).unwrap_or(0usize);
+    let entries = state.store.list_processor_log(limit, offset).await?;
+    Ok(Json(entries))
 }

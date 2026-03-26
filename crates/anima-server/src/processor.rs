@@ -554,8 +554,11 @@ async fn run_worker(
                 namespace,
                 memory_ids,
             } => {
+                let reflect_start = std::time::Instant::now();
+                let input_count = memory_ids.len();
                 match process_reflection(&store, &embedder, &llm, &namespace, &memory_ids).await {
                     Ok(reflection) => {
+                        let reflect_elapsed = reflect_start.elapsed().as_secs_f64() * 1000.0;
                         apply_usage_metrics(
                             reflection.usage,
                             &llm_calls,
@@ -571,6 +574,20 @@ async fn run_worker(
                         );
                         let reflected_ids = reflection.reflected_ids;
                         reflected_created.fetch_add(reflected_ids.len(), Ordering::Relaxed);
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "reflection".to_string(),
+                            status: "completed".to_string(),
+                            input_count: input_count as i64,
+                            output_count: reflected_ids.len() as i64,
+                            prompt_tokens: reflection_prompt_tokens.load(Ordering::Relaxed) as i64,
+                            completion_tokens: reflection_completion_tokens.load(Ordering::Relaxed) as i64,
+                            total_tokens: reflection_total_tokens.load(Ordering::Relaxed) as i64,
+                            elapsed_ms: reflect_elapsed,
+                            details: Some(serde_json::json!({"facts": reflected_ids.len()})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                         if !reflected_ids.is_empty() {
                             match process_reconsolidation(&store, &namespace, &reflected_ids).await {
                                 Ok(recon) => {
@@ -629,6 +646,20 @@ async fn run_worker(
                     Err(e) => {
                         job_failed = true;
                         tracing::error!("Reflection failed for {namespace}: {e}");
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "reflection".to_string(),
+                            status: "failed".to_string(),
+                            input_count: input_count as i64,
+                            output_count: 0,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_ms: reflect_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"error": e.to_string()})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                 }
             }
@@ -636,6 +667,8 @@ async fn run_worker(
                 namespace,
                 reflected_ids,
             } => {
+                let deduce_start = std::time::Instant::now();
+                let deduce_input_count = reflected_ids.len();
                 match process_deduction(&store, &embedder, &llm, &namespace, &reflected_ids).await {
                     Ok(deduction) => {
                         apply_usage_metrics(
@@ -652,6 +685,20 @@ async fn run_worker(
                             &deduction_total_tokens,
                         );
                         let deduced_ids = deduction.deduced_ids;
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "deduction".to_string(),
+                            status: "completed".to_string(),
+                            input_count: deduce_input_count as i64,
+                            output_count: deduced_ids.len() as i64,
+                            prompt_tokens: deduction_prompt_tokens.load(Ordering::Relaxed) as i64,
+                            completion_tokens: deduction_completion_tokens.load(Ordering::Relaxed) as i64,
+                            total_tokens: deduction_total_tokens.load(Ordering::Relaxed) as i64,
+                            elapsed_ms: deduce_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"deductions": deduced_ids.len()})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                         if !deduced_ids.is_empty() {
                             deduced_created.fetch_add(deduced_ids.len(), Ordering::Relaxed);
                             match process_reconsolidation(&store, &namespace, &deduced_ids).await {
@@ -673,13 +720,29 @@ async fn run_worker(
                     Err(e) => {
                         job_failed = true;
                         tracing::error!("Deduction failed for {namespace}: {e}");
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "deduction".to_string(),
+                            status: "failed".to_string(),
+                            input_count: deduce_input_count as i64,
+                            output_count: 0,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_ms: deduce_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"error": e.to_string()})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                 }
             }
             ProcessingJob::Induce { namespace } => {
                 // Explicit induction request (e.g. from the API).
+                let induce_start = std::time::Instant::now();
                 match process_induction(&store, &embedder, &llm, &namespace).await {
                     Ok(induction) => {
+                        let induce_elapsed = induce_start.elapsed().as_secs_f64() * 1000.0;
                         apply_usage_metrics(
                             induction.usage,
                             &llm_calls,
@@ -693,10 +756,38 @@ async fn run_worker(
                             &induction_completion_tokens,
                             &induction_total_tokens,
                         );
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "induction".to_string(),
+                            status: "completed".to_string(),
+                            input_count: 0,
+                            output_count: 0,
+                            prompt_tokens: induction_prompt_tokens.load(Ordering::Relaxed) as i64,
+                            completion_tokens: induction_completion_tokens.load(Ordering::Relaxed) as i64,
+                            total_tokens: induction_total_tokens.load(Ordering::Relaxed) as i64,
+                            elapsed_ms: induce_elapsed,
+                            details: None,
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                     Err(e) => {
                         job_failed = true;
                         tracing::error!("Induction failed for {namespace}: {e}");
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "induction".to_string(),
+                            status: "failed".to_string(),
+                            input_count: 0,
+                            output_count: 0,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_ms: induce_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"error": e.to_string()})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                 }
                 pending_induction_counts.remove(&namespace);
@@ -825,10 +916,26 @@ async fn run_worker(
                 namespace,
                 memory_ids,
             } => {
+                let recon_start = std::time::Instant::now();
+                let recon_input = memory_ids.len();
                 match process_reconsolidation(&store, &namespace, &memory_ids).await {
                     Ok(recon) => {
                         recon_processed.fetch_add(recon.processed, Ordering::Relaxed);
                         recon_superseded.fetch_add(recon.superseded, Ordering::Relaxed);
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: namespace.clone(),
+                            pipeline: "reconsolidation".to_string(),
+                            status: "completed".to_string(),
+                            input_count: recon_input as i64,
+                            output_count: recon.superseded as i64,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_ms: recon_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"superseded": recon.superseded})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                     Err(e) => {
                         job_failed = true;
@@ -840,10 +947,26 @@ async fn run_worker(
                 namespace,
                 limit_per_namespace,
             } => {
+                let retain_start = std::time::Instant::now();
+                let retain_ns = namespace.clone().unwrap_or_else(|| "all".to_string());
                 match run_retention_sync(&store, namespace.as_deref(), limit_per_namespace).await {
                     Ok(ret) => {
                         retention_processed.fetch_add(ret.processed, Ordering::Relaxed);
                         retention_softened.fetch_add(ret.softened, Ordering::Relaxed);
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: retain_ns,
+                            pipeline: "retention".to_string(),
+                            status: "completed".to_string(),
+                            input_count: ret.processed as i64,
+                            output_count: ret.softened as i64,
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_ms: retain_start.elapsed().as_secs_f64() * 1000.0,
+                            details: Some(serde_json::json!({"softened": ret.softened})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                     }
                     Err(e) => {
                         job_failed = true;
@@ -879,8 +1002,10 @@ async fn run_worker(
                 tracing::info!(
                     "Queue drained — running induction for {ns} (new_deduced={count}, threshold={induction_threshold})"
                 );
+                let auto_induce_start = std::time::Instant::now();
                 match process_induction(&store, &embedder, &llm, &ns).await {
                     Ok(induction) => {
+                        let auto_induce_elapsed = auto_induce_start.elapsed().as_secs_f64() * 1000.0;
                         apply_usage_metrics(
                             induction.usage,
                             &llm_calls,
@@ -894,6 +1019,20 @@ async fn run_worker(
                             &induction_completion_tokens,
                             &induction_total_tokens,
                         );
+                        let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            namespace: ns.clone(),
+                            pipeline: "induction".to_string(),
+                            status: "completed".to_string(),
+                            input_count: count as i64,
+                            output_count: 0,
+                            prompt_tokens: induction_prompt_tokens.load(Ordering::Relaxed) as i64,
+                            completion_tokens: induction_completion_tokens.load(Ordering::Relaxed) as i64,
+                            total_tokens: induction_total_tokens.load(Ordering::Relaxed) as i64,
+                            elapsed_ms: auto_induce_elapsed,
+                            details: Some(serde_json::json!({"trigger": "queue_drained", "new_deduced": count})),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        }).await;
                         completed_jobs.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(e) => {

@@ -212,6 +212,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/ask", post(handlers::ask))
         .route("/api/v1/reflect", post(handlers::reflect))
         .route("/api/v1/processor/status", get(handlers::processor_status))
+        .route("/api/v1/processor/log", get(handlers::list_processor_log))
         .route(
             "/api/v1/processor/reconsolidate",
             post(handlers::reconsolidate_memories),

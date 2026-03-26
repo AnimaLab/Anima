@@ -206,6 +206,15 @@ export const api = {
   getMemoryHistory: (id: string) =>
     request<SupersessionLink[]>(`/api/v1/memories/${id}/history`),
 
+  // Processor log
+  getProcessorLog: (limit = 50, offset = 0) =>
+    request<Array<{
+      id: string; namespace: string; pipeline: string; status: string;
+      input_count: number; output_count: number;
+      prompt_tokens: number; completion_tokens: number; total_tokens: number;
+      elapsed_ms: number; details: unknown; created_at: string;
+    }>>(`/api/v1/processor/log?limit=${limit}&offset=${offset}`),
+
   // Telemetry
   getTelemetryConfig: () =>
     request<{ enabled: boolean }>('/api/v1/telemetry/config'),

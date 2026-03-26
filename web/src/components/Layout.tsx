@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box, GitCompareArrows } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box, GitCompareArrows, Activity } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { api } from '../api/client'
@@ -14,6 +14,7 @@ const navItems = [
   { path: '/graph', label: 'Graph', icon: Share2 },
   { path: '/graph3d', label: 'Embeddings', icon: Network },
   { path: '/conflicts', label: 'Conflicts', icon: GitCompareArrows },
+  { path: '/processor', label: 'Processor', icon: Activity },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
