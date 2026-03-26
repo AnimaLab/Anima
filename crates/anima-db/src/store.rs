@@ -875,6 +875,43 @@ impl MemoryStore {
         vector::force_reindex(&conn, dimension).map_err(DbError::Sqlite)
     }
 
+    /// Count of rows in the sparse_vectors table.
+    pub async fn sparse_count(&self) -> Result<usize, DbError> {
+        let conn = self.pool.writer().await;
+        let count: i64 = crate::sparse::sparse_count(&conn).map_err(DbError::Sqlite)?;
+        Ok(count as usize)
+    }
+
+    /// Count of active memories.
+    pub async fn active_memory_count(&self) -> Result<usize, DbError> {
+        let conn = self.pool.writer().await;
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status = 'active'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c as usize)
+        .map_err(DbError::Sqlite)
+    }
+
+    /// Clear all sparse data (both tables).
+    pub async fn force_rebuild_sparse(&self) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        crate::sparse::force_rebuild_sparse(&conn).map_err(DbError::Sqlite)
+    }
+
+    /// Insert or update sparse vector for a memory.
+    pub async fn upsert_sparse(
+        &self,
+        memory_id: &str,
+        namespace: &str,
+        sparse: &anima_embed::SparseVector,
+    ) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        crate::sparse::insert_sparse(&conn, memory_id, namespace, sparse)
+            .map_err(DbError::Sqlite)
+    }
+
     /// Delete an entire namespace and all its data across all tables.
     pub async fn delete_namespace(&self, namespace: &Namespace) -> Result<u64, DbError> {
         let conn = self.pool.writer().await;

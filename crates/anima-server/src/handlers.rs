@@ -2994,6 +2994,9 @@ pub async fn get_vec_status(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let status = state.vec_status.read().await;
+    let sparse_count = state.store.sparse_count().await.unwrap_or(0);
+    let memory_count = state.store.active_memory_count().await.unwrap_or(0);
+    let sparse_indexed = sparse_count >= memory_count && memory_count > 0;
     match &*status {
         anima_db::vector::VecTableStatus::DimensionMismatch { existing, requested } => {
             Ok(Json(serde_json::json!({
@@ -3001,12 +3004,18 @@ pub async fn get_vec_status(
                 "existing_dimension": existing,
                 "requested_dimension": requested,
                 "needs_reindex": true,
+                "sparse_indexed": sparse_indexed,
+                "sparse_count": sparse_count,
+                "memory_count": memory_count,
             })))
         }
         other => {
             Ok(Json(serde_json::json!({
                 "status": format!("{:?}", other).to_lowercase(),
                 "needs_reindex": false,
+                "sparse_indexed": sparse_indexed,
+                "sparse_count": sparse_count,
+                "memory_count": memory_count,
             })))
         }
     }
@@ -3016,6 +3025,10 @@ pub async fn reindex_embeddings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let dimension = state.config.embedding.dimension;
+
+    // Clear existing sparse data before re-indexing
+    state.store.force_rebuild_sparse().await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     // Re-embed all memories with the current model
     let namespaces = state.store.list_namespaces().await?;
@@ -3028,9 +3041,10 @@ pub async fn reindex_embeddings(
 
         for chunk in memories.chunks(50) {
             for m in chunk {
-                let embedding = state.embedder.embed(&m.content)
+                let (embedding, sparse) = state.embedder.embed_with_sparse(&m.content)
                     .map_err(|e| AppError::Embedding(e.to_string()))?;
                 state.store.update_embedding_blob(&m.id, &embedding).await?;
+                state.store.upsert_sparse(&m.id, &m.namespace, &sparse).await?;
                 total_reembedded += 1;
             }
         }
@@ -3046,6 +3060,7 @@ pub async fn reindex_embeddings(
     Ok(Json(serde_json::json!({
         "reindexed": total_reembedded,
         "dimension": dimension,
+        "sparse_indexed": total_reembedded,
     })))
 }
 
