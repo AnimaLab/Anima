@@ -28,3 +28,4 @@ benchmarks/locomo/finetune_data/
 data/locomo10.json
 benchmarks/locomo/data/locomo10.json
 docs/prd-*.md
+.worktrees/
