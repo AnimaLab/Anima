@@ -213,6 +213,36 @@ pub async fn get_hybrid_weights(
     }))
 }
 
+/// GET /api/v1/models — proxy the /models endpoint from the active chat profile.
+pub async fn list_models(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let profile = state.profile_for("chat")
+        .ok_or_else(|| AppError::Internal("no chat profile configured".into()))?;
+
+    let profile_name = state.resolved_profiles.routing.chat.as_deref().unwrap_or("default");
+    let api_key = profile.resolve_api_key(profile_name);
+
+    let url = format!("{}/models", profile.base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(key) = api_key {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = req.send().await
+        .map_err(|e| AppError::Internal(format!("failed to fetch models: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::Internal(format!("models endpoint returned {}", resp.status())));
+    }
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| AppError::Internal(format!("failed to parse models response: {e}")))?;
+
+    Ok(Json(body))
+}
+
 /// GET /api/v1/profiles — return resolved LLM provider profiles and routing (masks API keys).
 pub async fn get_profiles(
     State(state): State<Arc<AppState>>,

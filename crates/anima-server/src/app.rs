@@ -130,6 +130,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/calibration/metrics", get(handlers::calibration_metrics))
         .route("/api/v1/calibration/weights", get(handlers::get_hybrid_weights))
         .route("/api/v1/profiles", get(handlers::get_profiles))
+        .route("/api/v1/models", get(handlers::list_models))
         .route(
             "/api/v1/memories",
             get(handlers::list_memories).post(handlers::add_memory),

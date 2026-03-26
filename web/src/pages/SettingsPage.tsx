@@ -99,15 +99,10 @@ export function SettingsPage() {
   }
 
   const fetchModels = useCallback(async () => {
-    const baseUrl = config.base_url?.trim()
-    if (!baseUrl) return
     setLoadingModels(true)
     setModelError(null)
     try {
-      const url = `${baseUrl.replace(/\/+$/, '')}/models`
-      const headers: Record<string, string> = {}
-      if (config.api_key) headers['Authorization'] = `Bearer ${config.api_key}`
-      const res = await fetch(url, { headers })
+      const res = await fetch('/api/v1/models')
       if (!res.ok) throw new Error(`${res.status}`)
       const json = await res.json()
       const list: ModelInfo[] = (json.data || []).map((m: { id: string; owned_by?: string }) => ({
@@ -121,7 +116,7 @@ export function SettingsPage() {
     } finally {
       setLoadingModels(false)
     }
-  }, [config.base_url, config.api_key])
+  }, [])
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
