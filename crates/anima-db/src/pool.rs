@@ -27,7 +27,7 @@ pub struct DbPool {
 
 impl DbPool {
     /// Default embedding dimension for local test/in-memory stores.
-    pub const DEFAULT_DIMENSION: usize = 512;
+    pub const DEFAULT_DIMENSION: usize = 1024;
 
     /// Open (or create) a database at the given path.
     pub fn open(path: impl AsRef<Path>, dimension: usize) -> Result<Arc<Self>, DbError> {

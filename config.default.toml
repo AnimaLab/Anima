@@ -11,12 +11,18 @@ path = "./anima.db"
 # API key resolution: config value > EMBEDDING_API_KEY env > OPENAI_API_KEY env.
 [embedding]
 backend = "local"
-model_dir = "./models/qwen3-embedding-0.6b"
-model_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_int8.onnx"
-tokenizer_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json"
-dimension = 512
-pooling = "last_token"
-query_instruction = "Instruct: Given a question about someone's memories or past conversations, retrieve the most relevant memory excerpts\nQuery:"
+model_dir = "./models/bge-m3"
+model_url = "https://huggingface.co/aapot/bge-m3-onnx/resolve/main/model.onnx"
+tokenizer_url = "https://huggingface.co/aapot/bge-m3-onnx/resolve/main/tokenizer.json"
+dimension = 1024
+pooling = "mean"
+# To use Qwen3-Embedding-0.6B instead (512d, faster, slightly lower recall):
+#   model_dir = "./models/qwen3-embedding-0.6b"
+#   model_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/onnx/model_int8.onnx"
+#   tokenizer_url = "https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/resolve/main/tokenizer.json"
+#   dimension = 512
+#   pooling = "last_token"
+#   query_instruction = "Instruct: Given a question about someone's memories or past conversations, retrieve the most relevant memory excerpts\nQuery:"
 # To use OpenAI text-embedding-3-small:
 #   backend = "openai"
 #   api_base_url = "https://api.openai.com/v1"
