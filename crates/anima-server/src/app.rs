@@ -201,6 +201,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/memories/{id}/rollback", post(handlers::rollback_memory))
         .route("/api/v1/memories/{id}/revisions", get(handlers::list_claim_revisions))
         .route("/api/v1/memories/{id}/history", get(handlers::get_memory_history))
+        .route("/api/v1/memories/discover", post(handlers::discover_memories))
         .route("/api/v1/memories/purge", post(handlers::purge_deleted_memories))
         .route("/api/v1/stats", get(handlers::get_stats))
         .route("/api/v1/namespaces", get(handlers::list_namespaces).delete(handlers::delete_namespace))

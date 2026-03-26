@@ -99,6 +99,18 @@ pub struct SearchResponse {
     pub query_time_ms: f64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DiscoverRequest {
+    pub positive_ids: Vec<String>,
+    #[serde(default)]
+    pub negative_ids: Vec<String>,
+    pub query: Option<String>,
+    #[serde(default = "discover_default_limit")]
+    pub limit: usize,
+}
+
+fn discover_default_limit() -> usize { 10 }
+
 #[derive(Debug, Serialize)]
 pub struct SearchResultDto {
     pub id: String,

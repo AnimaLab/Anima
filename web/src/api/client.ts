@@ -75,6 +75,12 @@ export const api = {
       body: JSON.stringify(req),
     }),
 
+  discover: (params: { positive_ids: string[]; negative_ids?: string[]; query?: string; limit?: number }) =>
+    request<SearchResponse>('/api/v1/memories/discover', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
   getStats: () => request<NamespaceStats>('/api/v1/stats'),
   getVecStatus: () => request<{ status: string; needs_reindex: boolean; existing_dimension?: number; requested_dimension?: number }>('/api/v1/vec/status'),
   reindex: () => request<{ reindexed: number; dimension: number }>('/api/v1/vec/reindex', { method: 'POST' }),

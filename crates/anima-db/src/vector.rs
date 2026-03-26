@@ -497,6 +497,29 @@ pub fn delete_memory_vectors(conn: &Connection, memory_id: &str) -> rusqlite::Re
     Ok(())
 }
 
+/// Fetch f32 embeddings for a memory from memory_vectors.
+/// Returns a map of vector_name → f32 embedding.
+pub fn get_memory_embeddings(
+    conn: &Connection,
+    memory_id: &str,
+) -> rusqlite::Result<std::collections::HashMap<String, Vec<f32>>> {
+    let mut stmt = conn.prepare(
+        "SELECT vector_name, embedding FROM memory_vectors WHERE memory_id = ?1"
+    )?;
+    let mut map = std::collections::HashMap::new();
+    let mut rows = stmt.query(rusqlite::params![memory_id])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        let blob: Vec<u8> = row.get(1)?;
+        let floats: Vec<f32> = blob
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        map.insert(name, floats);
+    }
+    Ok(map)
+}
+
 /// Count how many memories have a given vector_name populated.
 pub fn count_named_vectors(
     conn: &Connection,

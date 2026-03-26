@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, getNamespace } from '../api/client'
 import type { SearchResponse, SearchResult, GraphData, AskResponse } from '../api/types'
 import { loadCognitiveConfig } from './SettingsPage'
-import { Search, Tag, Clock, Zap, BookOpen, ArrowUpDown, Shield, Link2, ChevronDown, ChevronRight, MessageSquare, SlidersHorizontal } from 'lucide-react'
+import { Search, Tag, Clock, Zap, BookOpen, ArrowUpDown, Shield, Link2, ChevronDown, ChevronRight, MessageSquare, SlidersHorizontal, Compass, X } from 'lucide-react'
 
 type SortField = 'score' | 'vector_score' | 'keyword_score' | 'temporal_score' | 'importance' | 'created_at'
 type SortDir = 'desc' | 'asc'
@@ -147,6 +147,20 @@ export function SearchPage() {
     onSuccess: (data) => {
       setAskResult(data)
       setResults(null)
+    },
+  })
+
+  // Discovery mode state
+  const [discoverSource, setDiscoverSource] = useState<{ id: string; content: string } | null>(null)
+
+  const discoverMut = useMutation({
+    mutationFn: (memoryId: string) => api.discover({ positive_ids: [memoryId], limit: 20 }),
+    onSuccess: (data) => {
+      setResults(data)
+      setAskResult(null)
+      setSortField('score')
+      setSortDir('desc')
+      setExpandedId(null)
     },
   })
 
@@ -430,6 +444,22 @@ export function SearchPage() {
         </div>
       )}
 
+      {/* Discovery mode header */}
+      {discoverSource && (
+        <div className="flex items-center gap-2 bg-accent/10 border border-accent/20 rounded-lg px-4 py-2.5">
+          <Compass size={14} className="text-accent shrink-0" />
+          <span className="text-xs text-accent">Similar to:</span>
+          <span className="text-xs text-ink truncate flex-1">{discoverSource.content}</span>
+          <button
+            onClick={() => { setDiscoverSource(null); setResults(null) }}
+            className="p-1 text-ink-muted hover:text-ink rounded transition-colors shrink-0"
+            title="Clear discovery"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Results */}
       {sortedResults.length > 0 && (
         <div className="space-y-3">
@@ -533,6 +563,18 @@ export function SearchPage() {
                               {neighbors.length + mutualLinks.length} linked
                             </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDiscoverSource({ id: r.id, content: r.content })
+                              discoverMut.mutate(r.id)
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded-full border border-accent/30 text-accent hover:bg-accent/10 transition-colors flex items-center gap-0.5"
+                            title="Find similar memories"
+                          >
+                            <Compass size={9} />similar
+                          </button>
                           <span className="text-[10px] text-ink-faint">{relativeDate(r.created_at)}</span>
                         </div>
                       </div>

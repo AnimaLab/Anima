@@ -57,6 +57,8 @@ part of the repo.
 | Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking with auto-tuned weights |
 | Multi-vector search       | Shipped | Named vectors per memory with query routing heuristics      |
 | Scalar quantization       | Shipped | Int8 quantized vec indexes with f32 source for reindexing   |
+| Discovery mode            | Shipped | "Find similar" — example-based search with pos/neg vectors  |
+| Result grouping           | Shipped | Deduplicate by episode, category, or source via `group_by`  |
 | Cross-encoder re-ranking  | Shipped | Optional bge-reranker-v2-m3 for better natural language     |
 | Confidence + source       | Shipped | Per-memory trust scoring and provenance tracking            |
 | Typed memory categories   | Shipped | Per-category decay rates and filtering                      |
@@ -327,6 +329,12 @@ curl -X POST "$BASE_URL/api/v1/memories/search" \
   -H "Content-Type: application/json" \
   -H "X-Anima-Namespace: default" \
   -d '{"query": "weekend hiking plans", "query_rewrite": true, "limit": 10}'
+
+# Discovery — find memories similar to examples (with optional negative examples)
+curl -X POST "$BASE_URL/api/v1/memories/discover" \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"positive_ids": ["mem-id-1"], "negative_ids": [], "query": "optional topic bias", "limit": 10}'
 ```
 
 ## Embedding Backend
@@ -364,6 +372,7 @@ Key routes:
 | `GET /health/ready`                   | Readiness probe — checks DB, embedder, processor; returns 503 if degraded |
 | `POST /api/v1/memories`               | Add a memory (supports `category` field)                                  |
 | `POST /api/v1/memories/search`        | Hybrid search (`ask_retrieval` mode, `query_rewrite` option)              |
+| `POST /api/v1/memories/discover`      | Example-based discovery with positive/negative IDs and optional query     |
 | `GET /api/v1/memories?category=X`     | List memories filtered by category                                        |
 | `GET /api/v1/memories/{id}/revisions` | Revision history                                                          |
 | `GET /api/v1/memories/{id}/history`   | Supersession chain (full conflict history for a memory)                   |

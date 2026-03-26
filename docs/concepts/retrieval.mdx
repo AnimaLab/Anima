@@ -57,6 +57,18 @@ The `search_mode` parameter on the search endpoint controls which strategies are
 - **keyword** — keyword matching only
 - **ask_retrieval** — runs the full `/ask` multi-stage pipeline (keyword expansion, entity resolution, temporal supplement, episode expansion, entity-linked retrieval) but returns ranked search results instead of an LLM-generated answer
 
+## Result Grouping
+
+Set `group_by` on a search request to deduplicate results by a memory field. Valid values: `episode_id`, `category`, `source`.
+
+```json
+{"query": "weekend plans", "limit": 10, "group_by": "episode_id"}
+```
+
+When grouping is active, only the highest-scoring result per group is returned. Each result includes `group_size` (how many memories were in that group) and `group_value` (the field value). Memories with null values in the grouped field form their own group.
+
+Grouping applies only to the search endpoint — `/ask` and `/chat` retrieve all relevant memories for context assembly.
+
 ## Query Rewriting
 
 Set `query_rewrite: true` on any search request to enable keyword expansion. This extracts content words from natural-language queries and runs additional searches, merging results with the original. It's the same zero-LLM keyword extraction used internally by `/ask`, now available on the basic search endpoint.

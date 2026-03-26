@@ -916,6 +916,12 @@ impl MemoryStore {
         vector::force_reindex_named(&conn, vector_name, dimension).map_err(DbError::Sqlite)
     }
 
+    /// Fetch f32 embeddings for a memory from memory_vectors.
+    pub async fn get_memory_embeddings(&self, memory_id: &str) -> Result<std::collections::HashMap<String, Vec<f32>>, DbError> {
+        let conn = self.pool.writer().await;
+        vector::get_memory_embeddings(&conn, memory_id).map_err(DbError::Sqlite)
+    }
+
     /// Count of rows in the sparse_vectors table.
     pub async fn sparse_count(&self) -> Result<usize, DbError> {
         let conn = self.pool.writer().await;

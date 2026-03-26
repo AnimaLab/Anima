@@ -49,6 +49,10 @@ description: 'Search memories using hybrid, vector, keyword, or ask-retrieval mo
   Filter results by semantic category (e.g. `preference`, `identity`, `routine`)
 </ParamField>
 
+<ParamField body="group_by" type="string">
+  Group results by a memory field, returning only the top-scoring result per group. Valid values: `episode_id`, `category`, `source`. Each result includes `group_size` (count in group) and `group_value` (field value).
+</ParamField>
+
 <ParamField body="vectors" type="string">
   Comma-separated list of named vectors to search (e.g. `content,summary`). Defaults to all configured vectors. Only useful when `[[vectors]]` is configured in `config.toml`.
 </ParamField>

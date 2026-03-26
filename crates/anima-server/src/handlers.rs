@@ -1793,6 +1793,131 @@ pub async fn search_memories(
     }))
 }
 
+pub async fn discover_memories(
+    State(state): State<Arc<AppState>>,
+    ExtractNamespace(ns): ExtractNamespace,
+    Json(req): Json<DiscoverRequest>,
+) -> Result<Json<SearchResponse>, AppError> {
+    if req.positive_ids.is_empty() {
+        return Err(AppError::BadRequest("positive_ids must contain at least one ID".into()));
+    }
+    let limit = req.limit.min(100).max(1);
+    let start = Instant::now();
+
+    // Collect f32 embeddings for positive and negative IDs.
+    // Use the "content" vector (primary) for discovery arithmetic.
+    let mut positive_embs: Vec<Vec<f32>> = Vec::new();
+    for id in &req.positive_ids {
+        let embs = state.store.get_memory_embeddings(id).await?;
+        if let Some(emb) = embs.get("content") {
+            positive_embs.push(emb.clone());
+        }
+    }
+    if positive_embs.is_empty() {
+        return Err(AppError::BadRequest("no embeddings found for positive IDs".into()));
+    }
+
+    let mut negative_embs: Vec<Vec<f32>> = Vec::new();
+    for id in &req.negative_ids {
+        let embs = state.store.get_memory_embeddings(id).await?;
+        if let Some(emb) = embs.get("content") {
+            negative_embs.push(emb.clone());
+        }
+    }
+
+    // Compute target vector: avg(positives) - avg(negatives)
+    let dim = positive_embs[0].len();
+    let mut target = vec![0.0f32; dim];
+
+    // Average positives
+    for emb in &positive_embs {
+        for (i, v) in emb.iter().enumerate() {
+            target[i] += v / positive_embs.len() as f32;
+        }
+    }
+
+    // Subtract average negatives
+    if !negative_embs.is_empty() {
+        for emb in &negative_embs {
+            for (i, v) in emb.iter().enumerate() {
+                target[i] -= v / negative_embs.len() as f32;
+            }
+        }
+    }
+
+    // Blend with query embedding if provided
+    if let Some(ref query_text) = req.query {
+        if !query_text.trim().is_empty() {
+            let (query_emb, _) = embed_query_cached(&state, query_text)?;
+            for (i, v) in query_emb.iter().enumerate() {
+                target[i] = 0.7 * target[i] + 0.3 * v;
+            }
+        }
+    }
+
+    // L2-normalize the target
+    let norm: f32 = target.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for v in &mut target {
+            *v /= norm;
+        }
+    }
+
+    // Search using existing multi-vector blend
+    let scorer_config = state.scorer_config.read().await.clone();
+    let vector_configs: Vec<(String, f64)> = state.vector_configs.iter().cloned().collect();
+    let empty_sparse = anima_embed::SparseVector::default();
+    let scored = state.store.search(
+        &target, &empty_sparse, "", &ns, &SearchMode::Vector, limit + req.positive_ids.len() + req.negative_ids.len(),
+        &scorer_config, &vector_configs,
+    ).await.map_err(|e| AppError::Database(e.to_string()))?;
+
+    // Exclude input IDs from results
+    let exclude: std::collections::HashSet<&str> = req.positive_ids.iter()
+        .chain(req.negative_ids.iter())
+        .map(|s| s.as_str())
+        .collect();
+
+    let mut results = Vec::with_capacity(limit);
+    for sr in &scored {
+        if exclude.contains(sr.memory_id.as_str()) {
+            continue;
+        }
+        if results.len() >= limit {
+            break;
+        }
+        if let Some(memory) = state.store.get(&sr.memory_id).await? {
+            let (content, metadata, _) = redact_content_and_metadata(&memory.content, memory.metadata);
+            results.push(SearchResultDto {
+                id: memory.id,
+                content,
+                metadata,
+                tags: memory.tags,
+                memory_type: memory.memory_type,
+                category: memory.category.clone(),
+                confidence: memory.confidence,
+                source: memory.source.clone(),
+                score: sr.score,
+                vector_score: sr.vector_score,
+                sparse_score: sr.sparse_score,
+                keyword_score: sr.keyword_score,
+                temporal_score: sr.temporal_score,
+                created_at: memory.created_at.to_rfc3339(),
+                updated_at: memory.updated_at.to_rfc3339(),
+                episode_id: memory.episode_id.clone(),
+                group_size: None,
+                group_value: None,
+            });
+        }
+    }
+
+    let elapsed = start.elapsed();
+    Ok(Json(SearchResponse {
+        results,
+        query_time_ms: elapsed.as_secs_f64() * 1000.0,
+    }))
+}
+
 pub async fn get_memory(
     State(state): State<Arc<AppState>>,
     ExtractNamespace(ns): ExtractNamespace,
