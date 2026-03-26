@@ -155,9 +155,12 @@ export function SettingsPage() {
   const [dbSize, setDbSize] = useState<number | null>(null)
   const [importModal, setImportModal] = useState<{ file: File; format: 'json' | 'sqlite' } | null>(null)
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge')
+  const [vecStatus, setVecStatus] = useState<{ needs_reindex: boolean; existing_dimension?: number; requested_dimension?: number } | null>(null)
+  const [reindexing, setReindexing] = useState(false)
 
   useEffect(() => {
     api.getStats().then(s => setDbSize(s.total)).catch(() => {})
+    api.getVecStatus().then(setVecStatus).catch(() => {})
   }, [])
 
   const downloadBackup = async (format: 'json' | 'sqlite') => {
@@ -220,6 +223,19 @@ export function SettingsPage() {
       setBackupError(e instanceof Error ? e.message : 'Import failed')
     } finally {
       setImportLoading(false)
+    }
+  }
+
+  const runReindex = async () => {
+    setReindexing(true)
+    try {
+      const result = await api.reindex()
+      setVecStatus({ needs_reindex: false })
+      showToast(`Re-indexed ${result.reindexed} memories (${result.dimension}d)`)
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Re-index failed', true)
+    } finally {
+      setReindexing(false)
     }
   }
 
@@ -548,6 +564,28 @@ export function SettingsPage() {
                 </div>
               </label>
             </div>
+
+            {/* Re-index — only show when dimension mismatch detected */}
+            {vecStatus?.needs_reindex && (
+              <div className="bg-amber-100 border border-amber-300 rounded-xl p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700" />
+                  <h3 className="text-sm font-medium text-amber-900">Embedding Model Changed</h3>
+                </div>
+                <p className="text-xs text-amber-800">
+                  The vector index uses {vecStatus.existing_dimension}d embeddings but the current model produces {vecStatus.requested_dimension}d.
+                  Search results may be degraded. Re-index to re-embed all memories with the new model.
+                </p>
+                <button
+                  onClick={runReindex}
+                  disabled={reindexing}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {reindexing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  {reindexing ? 'Re-indexing...' : 'Re-index All Memories'}
+                </button>
+              </div>
+            )}
 
             {/* Backup & Restore */}
             <div className="bg-card border border-warm-border rounded-xl p-5 space-y-4">

@@ -76,6 +76,8 @@ export const api = {
     }),
 
   getStats: () => request<NamespaceStats>('/api/v1/stats'),
+  getVecStatus: () => request<{ status: string; needs_reindex: boolean; existing_dimension?: number; requested_dimension?: number }>('/api/v1/vec/status'),
+  reindex: () => request<{ reindexed: number; dimension: number }>('/api/v1/vec/reindex', { method: 'POST' }),
   listNamespaces: () => request<NamespaceInfo[]>('/api/v1/namespaces'),
   deleteNamespace: (ns: string) =>
     request<{ namespace: string; deleted_memories: number }>('/api/v1/namespaces', {
