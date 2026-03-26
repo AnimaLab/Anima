@@ -1858,12 +1858,12 @@ pub async fn reflect_sync(
             }
 
             let mem_id = memory.id.clone();
-            let embedding = embedder
-                .embed(&fact.content)
+            let (embedding, sparse) = embedder
+                .embed_with_sparse(&fact.content)
                 .map_err(|e| anyhow::anyhow!("Embedding error: {e}"))?;
 
             store
-                .insert(&memory, &embedding)
+                .insert_with_sparse(&memory, &embedding, Some(&sparse))
                 .await
                 .map_err(|e| anyhow::anyhow!("DB insert error: {e}"))?;
             all_reflected_ids.push(mem_id);

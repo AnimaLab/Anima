@@ -5,7 +5,7 @@ fn main() {
     let model_path = Path::new("./models/bge-m3/model.onnx");
     let tokenizer_path = Path::new("./models/bge-m3/tokenizer.json");
 
-    let model = EmbeddingModel::load(model_path, tokenizer_path, 1024, PoolingStrategy::Mean, None)
+    let model = EmbeddingModel::load(model_path, tokenizer_path, 1024, PoolingStrategy::Mean, None, None)
         .expect("Failed to load model");
 
     let texts: Vec<&str> = vec![

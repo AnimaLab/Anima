@@ -1,5 +1,8 @@
 /target
-/models
+/models/*
+!/models/bge-m3/
+/models/bge-m3/*
+!/models/bge-m3/sparse_linear.bin
 /artifacts/
 *.db
 *.db-wal

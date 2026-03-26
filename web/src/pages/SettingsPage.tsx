@@ -150,7 +150,14 @@ export function SettingsPage() {
   const [dbSize, setDbSize] = useState<number | null>(null)
   const [importModal, setImportModal] = useState<{ file: File; format: 'json' | 'sqlite' } | null>(null)
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge')
-  const [vecStatus, setVecStatus] = useState<{ needs_reindex: boolean; existing_dimension?: number; requested_dimension?: number } | null>(null)
+  const [vecStatus, setVecStatus] = useState<{
+    needs_reindex: boolean;
+    existing_dimension?: number;
+    requested_dimension?: number;
+    sparse_indexed?: boolean;
+    sparse_count?: number;
+    memory_count?: number;
+  } | null>(null)
   const [reindexing, setReindexing] = useState(false)
 
   useEffect(() => {
@@ -577,6 +584,26 @@ export function SettingsPage() {
                   className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors disabled:opacity-50"
                 >
                   {reindexing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  {reindexing ? 'Re-indexing...' : 'Re-index All Memories'}
+                </button>
+              </div>
+            )}
+
+            {vecStatus && !vecStatus.needs_reindex && vecStatus.sparse_indexed === false && (
+              <div className="bg-amber-100 border border-amber-300 rounded-xl p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700" />
+                  <h3 className="text-sm font-medium text-amber-900">Sparse Vectors Not Indexed</h3>
+                </div>
+                <p className="text-xs text-amber-800">
+                  {vecStatus.sparse_count ?? 0} of {vecStatus.memory_count ?? 0} memories have sparse vectors.
+                  Re-index to enable improved keyword-semantic matching.
+                </p>
+                <button
+                  onClick={runReindex}
+                  disabled={reindexing}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors disabled:opacity-50"
+                >
                   {reindexing ? 'Re-indexing...' : 'Re-index All Memories'}
                 </button>
               </div>
