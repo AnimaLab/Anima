@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NamespaceContext } from './hooks/useNamespace'
-import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatFeatures } from './hooks/useChat'
+import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatFeatures, type ChatSegment } from './hooks/useChat'
 import { setNamespace as setApiNamespace, api } from './api/client'
 import type { LlmConfig, ConversationSummary, FileAttachment, ChatMessage, MemoryContext, StreamEvent } from './api/types'
 import { Layout } from './components/Layout'
@@ -82,6 +82,7 @@ export default function App() {
   const [loadingConvIds, setLoadingConvIds] = useState<Set<string>>(new Set())
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingMemories, setStreamingMemories] = useState<MemoryContext[]>([])
+  const [streamingSegments, setStreamingSegments] = useState<ChatSegment[]>([])
 
   // Track which conversation is currently streaming (for visible UI)
   const streamingConvIdRef = useRef<string | null>(null)
@@ -294,6 +295,7 @@ export default function App() {
       streamingConvIdRef.current = convId
       setStreamingContent('')
       setStreamingMemories([])
+      setStreamingSegments([])
     }
 
     // Use per-conversation API history
@@ -338,6 +340,7 @@ export default function App() {
       } else {
         // Streaming via SSE
         let memories: MemoryContext[] = []
+        let segments: ChatSegment[] = []
 
         await api.chatStream(
           text, history, mode, config, convId || undefined,
@@ -347,10 +350,36 @@ export default function App() {
                 memories = event.memories_used
                 if (isVisible()) setStreamingMemories(event.memories_used)
                 break
-              case 'token':
+              case 'token': {
                 fullReply += event.content
                 if (isVisible()) setStreamingContent(prev => prev + event.content)
+                // Append to last text segment or push a new one
+                const last = segments[segments.length - 1]
+                if (last && last.type === 'text') {
+                  last.content = (last.content || '') + event.content
+                } else {
+                  segments.push({ type: 'text', content: event.content })
+                }
+                if (isVisible()) setStreamingSegments([...segments])
                 break
+              }
+              case 'message_end':
+                // Signal end of one message bubble; next tokens start a new segment
+                segments.push({ type: 'text', content: '' })
+                if (isVisible()) setStreamingSegments([...segments])
+                break
+              case 'action': {
+                const actionSeg: ChatSegment = {
+                  type: 'action',
+                  tool: event.tool,
+                  query: event.query,
+                  summary: event.summary,
+                  details: event.details,
+                }
+                segments.push(actionSeg)
+                if (isVisible()) setStreamingSegments([...segments])
+                break
+              }
               case 'done':
                 break
               case 'error':
@@ -362,10 +391,18 @@ export default function App() {
           abort.signal,
         )
 
+        // Filter out trailing empty text segments
+        const finalSegments = segments.filter((s, i) =>
+          !(s.type === 'text' && !s.content && i === segments.length - 1)
+        )
+        // Only set segments if multi-bubble (more than 1 segment with content)
+        const meaningfulSegments = finalSegments.filter(s => s.type === 'action' || (s.type === 'text' && s.content))
+
         const assistantMsg: DisplayMessage = {
           role: 'assistant',
           content: fullReply,
           memoriesUsed: memories,
+          segments: meaningfulSegments.length > 1 ? meaningfulSegments : undefined,
         }
         if (isVisible()) {
           const saved = [...messagesRef.current, assistantMsg]
@@ -383,6 +420,7 @@ export default function App() {
         if (isVisible()) {
           setStreamingContent('')
           setStreamingMemories([])
+          setStreamingSegments([])
         }
       }
 
@@ -416,6 +454,7 @@ export default function App() {
         if (isVisible()) {
           setStreamingContent('')
           setStreamingMemories([])
+          setStreamingSegments([])
         }
       } else {
         if (isVisible()) {
@@ -427,6 +466,7 @@ export default function App() {
           messagesRef.current = updated
           setChatMessages(updated)
           setStreamingContent('')
+          setStreamingSegments([])
         }
       }
     } finally {
@@ -464,6 +504,7 @@ export default function App() {
   const isStreamingHere = streamingConvIdRef.current === conversationId
   const visibleStreamingContent = isStreamingHere ? streamingContent : ''
   const visibleStreamingMemories = isStreamingHere ? streamingMemories : []
+  const visibleStreamingSegments = isStreamingHere ? streamingSegments : []
 
   const chatContext = useMemo(() => ({
     messages: chatMessages,
@@ -484,9 +525,10 @@ export default function App() {
     loading: visibleLoading,
     streamingContent: visibleStreamingContent,
     streamingMemories: visibleStreamingMemories,
+    streamingSegments: visibleStreamingSegments,
     sendMessage,
     stopGeneration,
-  }), [chatMessages, chatMode, chatFeatures, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, sendMessage, stopGeneration])
+  }), [chatMessages, chatMode, chatFeatures, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, visibleStreamingSegments, sendMessage, stopGeneration])
 
   return (
     <QueryClientProvider client={queryClient}>

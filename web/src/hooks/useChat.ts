@@ -53,6 +53,7 @@ export interface ChatState {
   loading: boolean
   streamingContent: string
   streamingMemories: MemoryContext[]
+  streamingSegments: ChatSegment[]
 
   // Send a message — runs in context, survives page changes
   sendMessage: (params: SendMessageParams) => Promise<void>
