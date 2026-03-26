@@ -168,6 +168,14 @@ pub fn delete_embedding(conn: &Connection, memory_id: &str) -> rusqlite::Result<
     Ok(())
 }
 
+/// Scale factor for int8 L2 distances.
+/// sqlite-vec computes L2 distance on raw int8 values (range [-127, 127]).
+/// Since we quantize by multiplying by 127, int8 distances are 127x larger
+/// than the equivalent float distances. Dividing by this factor normalizes
+/// distances back to the [0, 2] range expected for unit vectors, preserving
+/// the `similarity = 1.0 - (distance / 2.0)` conversion used by callers.
+const INT8_DISTANCE_SCALE: f64 = 127.0;
+
 /// Search for nearest neighbors by vector similarity, filtered by namespace.
 pub fn search_vectors_filtered(
     conn: &Connection,
@@ -186,7 +194,7 @@ pub fn search_vectors_filtered(
     )?;
 
     let rows = stmt.query_map(rusqlite::params![blob, limit as i64, namespace], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)? / INT8_DISTANCE_SCALE))
     })?;
 
     let mut results = Vec::new();
@@ -212,7 +220,7 @@ pub fn search_vectors(
     )?;
 
     let rows = stmt.query_map(rusqlite::params![blob, limit as i64], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)? / INT8_DISTANCE_SCALE))
     })?;
 
     let mut results = Vec::new();
