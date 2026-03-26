@@ -5315,6 +5315,11 @@ pub async fn chat_stream(
               Do NOT store: questions, greetings, general knowledge, AI instructions, or ephemeral info.\n\n\
             - memory_update: Correct or update an existing memory. Search first to find the memory ID, then update its content.\n\
               Use when the user corrects information (\"actually I have 3 cats, not 2\").\n\n\
+            - send_message: Send a visible message to the user before continuing to work.\n\
+              Use to acknowledge their question, share partial results, or ask a clarifying question.\n\
+              Keep messages short and conversational.\n\n\
+            Your tool usage is visible to the user as brief action summaries.\n\
+            You can send multiple messages — short conversational messages are better than one long wall of text.\n\
             When in doubt, search first — it's better to check memories than to miss relevant context.\n\
             Be natural and helpful."
         )
@@ -5394,6 +5399,23 @@ pub async fn chat_stream(
                     }
                 }
             }),
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "send_message",
+                    "description": "Send a visible message to the user before continuing to work. Use to acknowledge their question, share partial results, or ask a clarifying question mid-thought. Keep messages short and conversational.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The message text to show the user"
+                            }
+                        },
+                        "required": ["content"]
+                    }
+                }
+            }),
         ];
         Some(serde_json::Value::Array(tools_vec))
     } else {
@@ -5442,8 +5464,8 @@ pub async fn chat_stream(
         let url = format!("{}/chat/completions", llm_config.base_url.trim_end_matches('/'));
         let mut full_reply = String::new();
 
-        // Tool-call loop (max 5 rounds)
-        let max_rounds = if is_tool_mode { 5 } else { 1 };
+        // Tool-call loop (max 8 rounds)
+        let max_rounds = if is_tool_mode { 8 } else { 1 };
         for _round in 0..max_rounds {
             let mut body = serde_json::json!({
                 "model": llm_config.model,
@@ -5584,6 +5606,12 @@ pub async fn chat_stream(
                 break;
             }
 
+            // If there was text before tool calls, close that bubble
+            if !round_content.is_empty() {
+                let end_event = serde_json::json!({"type": "message_end"});
+                yield Ok(Event::default().data(end_event.to_string()));
+            }
+
             // Process tool calls
             // Build the assistant message with tool_calls for the conversation
             let tc_array: Vec<serde_json::Value> = tool_calls_acc.iter().map(|(_, (id, name, args))| {
@@ -5604,6 +5632,34 @@ pub async fn chat_stream(
             for (_, (tc_id, fn_name, args_str)) in &tool_calls_acc {
                 let args: serde_json::Value =
                     serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+
+                // Emit visible action event (except for send_message which shows its own content)
+                if fn_name != "send_message" {
+                    let action_summary = match fn_name.as_str() {
+                        "memory_search" => {
+                            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                            format!("Searching for \"{}\"", query)
+                        }
+                        "memory_add" => {
+                            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                            let preview = if content.len() > 60 { format!("{}...", &content[..60]) } else { content.to_string() };
+                            format!("Saving: \"{}\"", preview)
+                        }
+                        "memory_update" => {
+                            let mem_id = args.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                            format!("Updating memory {}", mem_id)
+                        }
+                        _ => format!("Running {}", fn_name),
+                    };
+                    let action_event = serde_json::json!({
+                        "type": "action",
+                        "tool": fn_name,
+                        "query": args.get("query").and_then(|v| v.as_str()),
+                        "summary": action_summary,
+                    });
+                    yield Ok(Event::default().data(action_event.to_string()));
+                }
+
                 let raw_conf = procedure_confidence_hint(fn_name, &args);
                 let calibrated_conf = state_clone
                     .store
@@ -5615,7 +5671,18 @@ pub async fn chat_stream(
                     "memory_search" => {
                         let query = args["query"].as_str().unwrap_or("");
                         match handle_tool_search(&state_clone, &ns_clone, query).await {
-                            Ok((text, _contexts)) => text,
+                            Ok((text, _contexts)) => {
+                                // Emit updated action with result count
+                                let n_results = text.lines().filter(|l| !l.is_empty()).count();
+                                let result_action = serde_json::json!({
+                                    "type": "action",
+                                    "tool": "memory_search",
+                                    "query": query,
+                                    "summary": format!("Searched \"{}\" — found {} results", query, n_results),
+                                });
+                                yield Ok(Event::default().data(result_action.to_string()));
+                                text
+                            }
                             Err(e) => format!("Error searching memories: {e}"),
                         }
                     }
@@ -5633,6 +5700,20 @@ pub async fn chat_stream(
                             Ok(()) => format!("Memory {mem_id} updated successfully"),
                             Err(e) => format!("Error updating memory: {e}"),
                         }
+                    }
+                    "send_message" => {
+                        let content = args["content"].as_str().unwrap_or("");
+                        // Emit the message as tokens so the frontend renders it
+                        if !content.is_empty() {
+                            let token_event = serde_json::json!({"type": "token", "content": content});
+                            yield Ok(Event::default().data(token_event.to_string()));
+                            // Close this message bubble
+                            let end_event = serde_json::json!({"type": "message_end"});
+                            yield Ok(Event::default().data(end_event.to_string()));
+                            full_reply.push_str(content);
+                            full_reply.push_str("\n\n");
+                        }
+                        format!("Message sent to user")
                     }
                     _ => format!("Unknown tool: {fn_name}"),
                 };
