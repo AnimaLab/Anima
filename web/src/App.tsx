@@ -249,6 +249,8 @@ export default function App() {
           queuesRef.current.delete('__new__')
         }
         convKey = conv.id
+        // Update URL to include conversation ID
+        window.history.replaceState(null, '', `/chat/${conv.id}`)
       } catch {
         // continue without persistence
       }
@@ -543,6 +545,7 @@ export default function App() {
                 <Route path="/graph" element={<GraphPage />} />
                 <Route path="/graph3d" element={<Graph3DPage />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/chat/:id" element={<ChatPage />} />
                 <Route path="/conflicts" element={<ConflictsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>

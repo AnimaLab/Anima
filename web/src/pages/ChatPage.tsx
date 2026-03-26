@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -31,6 +32,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString()
 
 export function ChatPage() {
+  const { id: urlConvId } = useParams<{ id?: string }>()
+  const navigate = useNavigate()
   const {
     messages, setMessages, features, setFeatures, config, setConfig,
     conversationId, setConversationId, conversations, setConversations,
@@ -40,6 +43,23 @@ export function ChatPage() {
   } = useChat()
   const [regenningTitle, setRegenningTitle] = useState(false)
   const [input, setInput] = useState('')
+
+  // Load conversation from URL param on mount
+  useEffect(() => {
+    if (urlConvId && urlConvId !== conversationId) {
+      api.getConversation(urlConvId).then(conv => {
+        setConversationId(conv.id)
+        try {
+          const parsed: DisplayMessage[] = JSON.parse(conv.messages)
+          if (parsed.length > 0) setMessages(parsed)
+        } catch { /* ignore */ }
+      }).catch(() => {
+        // Invalid ID — redirect to new chat
+        navigate('/chat', { replace: true })
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlConvId])
 
   // Reset title regen state when switching conversations
   useEffect(() => { setRegenningTitle(false) }, [conversationId])

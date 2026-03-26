@@ -35,7 +35,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     api.listNamespaces().then(setNamespaces).catch(() => {})
   }, [])
 
-  const isOnChat = location.pathname === '/chat'
+  const isOnChat = location.pathname === '/chat' || location.pathname.startsWith('/chat/')
 
   // Close mobile sidebar on navigation
   useEffect(() => {
@@ -50,8 +50,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const startNewChat = useCallback(() => {
     setConversationId(null)
     setMessages([])
-    if (location.pathname !== '/chat') navigate('/chat')
-  }, [setConversationId, setMessages, location.pathname, navigate])
+    navigate('/chat')
+  }, [setConversationId, setMessages, navigate])
 
   const loadConversation = useCallback(async (id: string) => {
     try {
@@ -60,11 +60,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       const parsed: DisplayMessage[] = JSON.parse(conv.messages)
       setMessages(parsed)
       setMode(conv.mode as 'rag' | 'tool')
-      if (location.pathname !== '/chat') navigate('/chat')
+      navigate(`/chat/${conv.id}`)
     } catch {
       // ignore
     }
-  }, [setConversationId, setMessages, setMode, location.pathname, navigate])
+  }, [setConversationId, setMessages, setMode, navigate])
 
   const deleteConv = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
