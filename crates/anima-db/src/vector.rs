@@ -30,7 +30,7 @@ pub fn initialize_vec_table(conn: &Connection, dimension: usize) -> rusqlite::Re
         let sql = format!(
             "CREATE VIRTUAL TABLE vec_memories USING vec0(
                 memory_id TEXT PRIMARY KEY,
-                embedding float[{dimension}],
+                embedding int8[{dimension}],
                 namespace TEXT
             );"
         );
@@ -50,7 +50,7 @@ pub fn initialize_vec_table(conn: &Connection, dimension: usize) -> rusqlite::Re
         let sql = format!(
             "CREATE VIRTUAL TABLE vec_memories USING vec0(
                 memory_id TEXT PRIMARY KEY,
-                embedding float[{dimension}],
+                embedding int8[{dimension}],
                 namespace TEXT
             );"
         );
@@ -60,10 +60,10 @@ pub fn initialize_vec_table(conn: &Connection, dimension: usize) -> rusqlite::Re
     }
 
     // Verify dimension compatibility.
-    let test_blob: Vec<u8> = vec![0u8; dimension * 4];
+    let test_blob: Vec<u8> = vec![0u8; dimension];
     let dim_ok = conn
         .execute(
-            "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES ('__dim_check__', ?1, '__test__')",
+            "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES ('__dim_check__', vec_int8(?1), '__test__')",
             rusqlite::params![test_blob],
         )
         .is_ok();
@@ -104,7 +104,7 @@ pub fn force_reindex(conn: &Connection, dimension: usize) -> rusqlite::Result<us
     let sql = format!(
         "CREATE VIRTUAL TABLE vec_memories USING vec0(
             memory_id TEXT PRIMARY KEY,
-            embedding float[{dimension}],
+            embedding int8[{dimension}],
             namespace TEXT
         );"
     );
@@ -115,7 +115,7 @@ pub fn force_reindex(conn: &Connection, dimension: usize) -> rusqlite::Result<us
 /// Repopulate vec_memories from the memories table.
 /// Only includes active memories whose embedding size matches the expected dimension.
 fn rebuild_vec_index(conn: &Connection, dimension: usize) -> rusqlite::Result<usize> {
-    let expected_bytes = dimension * 4;
+    let expected_bytes = dimension * 4; // memories stores f32
     let mut stmt = conn.prepare(
         "SELECT id, embedding, namespace FROM memories WHERE status = 'active' AND length(embedding) = ?1",
     )?;
@@ -123,18 +123,24 @@ fn rebuild_vec_index(conn: &Connection, dimension: usize) -> rusqlite::Result<us
     let mut rows = stmt.query(rusqlite::params![expected_bytes as i64])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
-        let blob: Vec<u8> = row.get(1)?;
+        let f32_blob: Vec<u8> = row.get(1)?;
         let namespace: String = row.get(2)?;
+        // Decode f32 blob → quantize → int8 blob
+        let floats: Vec<f32> = f32_blob
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let int8_blob = crate::quantize::embedding_to_int8_blob(&floats);
         if let Err(e) = conn.execute(
-            "INSERT OR IGNORE INTO vec_memories(memory_id, embedding, namespace) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, blob, namespace],
+            "INSERT OR IGNORE INTO vec_memories(memory_id, embedding, namespace) VALUES (?1, vec_int8(?2), ?3)",
+            rusqlite::params![id, int8_blob, namespace],
         ) {
             tracing::warn!("Failed to rebuild vec for {}: {}", id, e);
         } else {
             count += 1;
         }
     }
-    tracing::info!("Rebuilt vec_memories index: {count} vectors inserted (dim={dimension})");
+    tracing::info!("Rebuilt vec_memories index: {count} vectors inserted (dim={dimension}, int8)");
     Ok(count)
 }
 
@@ -145,9 +151,9 @@ pub fn insert_embedding(
     embedding: &[f32],
     namespace: &str,
 ) -> rusqlite::Result<()> {
-    let blob = embedding_to_blob(embedding);
+    let blob = crate::quantize::embedding_to_int8_blob(embedding);
     conn.execute(
-        "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES (?1, ?2, ?3)",
+        "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES (?1, vec_int8(?2), ?3)",
         rusqlite::params![memory_id, blob, namespace],
     )?;
     Ok(())
@@ -169,11 +175,11 @@ pub fn search_vectors_filtered(
     namespace: &str,
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, f64)>> {
-    let blob = embedding_to_blob(query_embedding);
+    let blob = crate::quantize::embedding_to_int8_blob(query_embedding);
     let mut stmt = conn.prepare(
         "SELECT memory_id, distance
          FROM vec_memories
-         WHERE embedding MATCH ?1
+         WHERE embedding MATCH vec_int8(?1)
            AND k = ?2
            AND namespace = ?3
          ORDER BY distance",
@@ -196,11 +202,11 @@ pub fn search_vectors(
     query_embedding: &[f32],
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, f64)>> {
-    let blob = embedding_to_blob(query_embedding);
+    let blob = crate::quantize::embedding_to_int8_blob(query_embedding);
     let mut stmt = conn.prepare(
         "SELECT memory_id, distance
          FROM vec_memories
-         WHERE embedding MATCH ?1
+         WHERE embedding MATCH vec_int8(?1)
            AND k = ?2
          ORDER BY distance",
     )?;
@@ -226,14 +232,6 @@ pub fn update_embedding(
     delete_embedding(conn, memory_id)?;
     insert_embedding(conn, memory_id, embedding, namespace)?;
     Ok(())
-}
-
-/// Convert f32 slice to raw byte blob for sqlite-vec.
-fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
-    embedding
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect()
 }
 
 #[cfg(test)]
