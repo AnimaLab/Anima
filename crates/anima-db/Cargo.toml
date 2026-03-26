@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anima-core = { workspace = true }
+anima-embed = { workspace = true }
 rusqlite = { workspace = true }
 sqlite-vec = { workspace = true }
 tokio = { workspace = true }

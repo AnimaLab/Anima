@@ -65,6 +65,7 @@ name = "anima-db"
 version = "0.2.0"
 dependencies = [
  "anima-core",
+ "anima-embed",
  "chrono",
  "rusqlite",
  "serde",

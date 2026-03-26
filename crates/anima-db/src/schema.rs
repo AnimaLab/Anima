@@ -423,6 +423,27 @@ pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
         ",
     )?;
 
+    // Sparse vector storage for hybrid search (BGE-M3 sparse head)
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sparse_vectors (
+            memory_id TEXT PRIMARY KEY REFERENCES memories(id),
+            vector    BLOB NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sparse_postings (
+            namespace  TEXT NOT NULL,
+            token_id   INTEGER NOT NULL,
+            memory_id  TEXT NOT NULL,
+            weight     REAL NOT NULL,
+            PRIMARY KEY (namespace, token_id, memory_id)
+        ) WITHOUT ROWID;
+
+        CREATE INDEX IF NOT EXISTS idx_sparse_postings_mem
+            ON sparse_postings(memory_id);
+        ",
+    )?;
+
     Ok(())
 }
 
