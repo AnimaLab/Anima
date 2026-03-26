@@ -5752,6 +5752,73 @@ pub async fn chat_stream(
             &user_message, &full_reply, &history_clone,
         ).await;
 
+        // Follow-up pass: ask LLM if there's anything else useful to share
+        if is_tool_mode && !full_reply.is_empty() {
+            let followup_system = "Based on what you just discussed and found in the user's memories, \
+                is there anything else the user should know? A related memory, a contradiction, or a useful \
+                connection? Reply only if genuinely useful. Otherwise respond with exactly NONE.";
+
+            let mut followup_messages = messages.clone();
+            followup_messages.push(serde_json::json!({
+                "role": "system",
+                "content": followup_system
+            }));
+
+            let followup_body = serde_json::json!({
+                "model": llm_config.model,
+                "messages": followup_messages,
+                "stream": true,
+                "max_tokens": 200,
+            });
+
+            let mut followup_req = client.post(&url).json(&followup_body);
+            if let Some(key) = &llm_config.api_key {
+                if !key.is_empty() {
+                    followup_req = followup_req.bearer_auth(key);
+                }
+            }
+
+            if let Ok(followup_resp) = followup_req.send().await {
+                if followup_resp.status().is_success() {
+                    let mut followup_content = String::new();
+                    let mut followup_stream = followup_resp.bytes_stream();
+                    let mut followup_buffer = String::new();
+
+                    while let Some(chunk) = followup_stream.next().await {
+                        if let Ok(bytes) = chunk {
+                            followup_buffer.push_str(&String::from_utf8_lossy(&bytes));
+                            while let Some(pos) = followup_buffer.find('\n') {
+                                let line = followup_buffer[..pos].trim().to_string();
+                                followup_buffer = followup_buffer[pos + 1..].to_string();
+                                if line.is_empty() || line == "data: [DONE]" { continue; }
+                                if let Some(data) = line.strip_prefix("data: ") {
+                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                                        if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
+                                            followup_content.push_str(content);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let trimmed = followup_content.trim();
+                    if !trimmed.is_empty() && !trimmed.starts_with("NONE") && trimmed != "NONE" && trimmed.len() > 10 {
+                        // Emit message_end to separate from main response
+                        let end_event = serde_json::json!({"type": "message_end"});
+                        yield Ok(Event::default().data(end_event.to_string()));
+
+                        // Stream follow-up as tokens
+                        let token_event = serde_json::json!({"type": "token", "content": trimmed});
+                        yield Ok(Event::default().data(token_event.to_string()));
+
+                        full_reply.push_str("\n\n");
+                        full_reply.push_str(trimmed);
+                    }
+                }
+            }
+        }
+
         let done_event = serde_json::json!({
             "type": "done",
             "full_reply": full_reply,
