@@ -1327,7 +1327,8 @@ async fn run_ask_retrieval_pipeline(
     let (embedding, query_sparse) = embed_query_cached(state, query)?;
 
     // 1. Initial hybrid search
-    let results = state.store.search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, limit, scorer_config)
+    let default_vc = vec![("content".to_string(), 1.0)];
+    let results = state.store.search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, limit, scorer_config, &default_vc)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, "ask_retrieval_hybrid").await;
@@ -1339,7 +1340,7 @@ async fn run_ask_retrieval_pipeline(
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, limit, scorer_config)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, limit, scorer_config, &default_vc)
             .await
         {
             expanded_results.extend(kw_results);
@@ -1404,7 +1405,7 @@ async fn run_ask_retrieval_pipeline(
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state
             .store
-            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, limit / 2, scorer_config, &default_vc)
             .await
         {
             record_retrieval_observations(state, ns, &kw_results, 0.15, "ask_retrieval_entity_kw").await;
@@ -1414,7 +1415,7 @@ async fn run_ask_retrieval_pipeline(
             let combined = format!("{entity} {topic}");
             if let Ok(kw_results) = state
                 .store
-                .search(&embedding, &query_sparse, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config)
+                .search(&embedding, &query_sparse, &combined, ns, &SearchMode::Keyword, limit / 3, scorer_config, &default_vc)
                 .await
             {
                 entity_results.extend(kw_results);
@@ -1538,11 +1539,12 @@ async fn run_query_rewrite(
         best_scores.insert(sr.memory_id.clone(), sr.clone());
     }
 
+    let default_vc = vec![("content".to_string(), 1.0)];
     for kq in &keyword_queries {
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state
             .store
-            .search(&kq_embedding, &kq_sparse, kq, ns, mode, limit, scorer_config)
+            .search(&kq_embedding, &kq_sparse, kq, ns, mode, limit, scorer_config, &default_vc)
             .await
         {
             for sr in kw_results {
@@ -1635,7 +1637,7 @@ pub async fn search_memories(
     let fetch_limit = if state.reranker.is_some() { limit.max(reranker_top_n) } else { limit };
     let mut scored = state
         .store
-        .search(&embedding, &query_sparse, &req.query, &ns, &mode, fetch_limit, &scorer_config)
+        .search(&embedding, &query_sparse, &req.query, &ns, &mode, fetch_limit, &scorer_config, &[("content".to_string(), 1.0)])
         .await?;
 
     // Feature 2: Query rewriting — expand with keyword extraction if enabled
@@ -2553,6 +2555,7 @@ pub async fn simulate_counterfactual(
                 &SearchMode::Hybrid,
                 8,
                 &cf_scorer_config,
+                &[("content".to_string(), 1.0)],
             )
             .await?;
         for sr in scored {
@@ -3353,16 +3356,6 @@ pub async fn chat(
     if req.message.trim().is_empty() {
         return Err(AppError::BadRequest("message cannot be empty".into()));
     }
-    if is_likely_noisy_or_adversarial_input(&req.message) {
-        return Ok(Json(make_chat_response(
-            &ns,
-            "Input looks noisy or adversarial. Please rewrite your message with a clear, specific request.".to_string(),
-            vec![],
-            vec![],
-            req.mode.clone(),
-            false,
-        )));
-    }
 
     let resolved_llm = resolve_llm_config(req.llm.take(), &state, "chat");
     req.llm = Some(resolved_llm);
@@ -3545,7 +3538,7 @@ fn is_likely_noisy_or_adversarial_input(text: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    if s.len() > 4096 {
+    if s.len() > 16384 {
         return true;
     }
 
@@ -3555,7 +3548,7 @@ fn is_likely_noisy_or_adversarial_input(text: &str) -> bool {
     for ch in s.chars() {
         if ch == prev {
             run += 1;
-            if run >= 14 {
+            if run >= 30 {
                 return true;
             }
         } else {
@@ -3567,15 +3560,15 @@ fn is_likely_noisy_or_adversarial_input(text: &str) -> bool {
     let total_chars = s.chars().count().max(1);
     let alnum_chars = s.chars().filter(|c| c.is_alphanumeric()).count();
     let alnum_ratio = alnum_chars as f64 / total_chars as f64;
-    if total_chars >= 24 && alnum_ratio < 0.20 {
+    if total_chars >= 40 && alnum_ratio < 0.10 {
         return true;
     }
 
     let tokens: Vec<&str> = s.split_whitespace().collect();
-    if tokens.len() >= 8 {
+    if tokens.len() >= 12 {
         let unique = tokens.iter().collect::<std::collections::HashSet<_>>().len();
         let unique_ratio = unique as f64 / tokens.len() as f64;
-        if unique_ratio < 0.25 {
+        if unique_ratio < 0.15 {
             return true;
         }
     }
@@ -3605,7 +3598,7 @@ async fn enriched_retrieval(
 
     // 1. Primary hybrid search
     let results = state.store
-        .search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+        .search(&embedding, &query_sparse, query, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &[("content".to_string(), 1.0)])
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
     record_retrieval_observations(state, ns, &results, 0.15, label).await;
@@ -3613,10 +3606,11 @@ async fn enriched_retrieval(
     // 2. Keyword expansion (zero-latency, pure DB queries)
     let keyword_queries = extract_keyword_queries(query);
     let mut expanded_results = Vec::new();
+    let default_vc = vec![("content".to_string(), 1.0)];
     for kq in &keyword_queries {
         let (kq_embedding, kq_sparse) = embed_query_cached(state, kq)?;
         if let Ok(kw_results) = state.store
-            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg)
+            .search(&kq_embedding, &kq_sparse, kq, ns, &SearchMode::Hybrid, search_limit, &scorer_cfg, &default_vc)
             .await
         {
             expanded_results.extend(kw_results);
@@ -3659,7 +3653,7 @@ async fn enriched_retrieval(
     let mut entity_results = Vec::new();
     for entity in &resolved_entity_queries {
         if let Ok(kw_results) = state.store
-            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg)
+            .search(&embedding, &query_sparse, entity, ns, &SearchMode::Keyword, search_limit / 2, &scorer_cfg, &default_vc)
             .await
         {
             entity_results.extend(kw_results);
@@ -4089,6 +4083,7 @@ async fn handle_tool_search(
             &SearchMode::Hybrid,
             5,
             &tool_scorer,
+            &[("content".to_string(), 1.0)],
         )
         .await?;
     record_retrieval_observations(state, ns, &scored, 0.15, "tool_memory_search").await;
@@ -5373,11 +5368,6 @@ pub async fn chat_stream(
     if req.message.trim().is_empty() {
         return Err(AppError::BadRequest("message cannot be empty".into()));
     }
-    if is_likely_noisy_or_adversarial_input(&req.message) {
-        return Err(AppError::BadRequest(
-            "input looks noisy or adversarial; please rewrite clearly".into(),
-        ));
-    }
 
     let resolved_llm = resolve_llm_config(req.llm.take(), &state, "chat");
     req.llm = Some(resolved_llm);
@@ -5387,7 +5377,7 @@ pub async fn chat_stream(
     let chat_scorer = state.scorer_config.read().await.clone();
     let scored = state
         .store
-        .search(&embedding, &query_sparse, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer)
+        .search(&embedding, &query_sparse, &req.message, &ns, &SearchMode::Hybrid, 5, &chat_scorer, &[("content".to_string(), 1.0)])
         .await?;
 
     // Gate: only include memories with meaningful relevance scores

@@ -370,7 +370,7 @@ pub fn search_named_vectors_filtered(
     let mut stmt = conn.prepare(&format!(
         "SELECT memory_id, distance
          FROM \"{table_name}\"
-         WHERE embedding MATCH ?1
+         WHERE embedding MATCH vec_int8(?1)
            AND k = ?2
            AND namespace = ?3
          ORDER BY distance"
@@ -398,7 +398,7 @@ pub fn search_named_vectors(
     let mut stmt = conn.prepare(&format!(
         "SELECT memory_id, distance
          FROM \"{table_name}\"
-         WHERE embedding MATCH ?1
+         WHERE embedding MATCH vec_int8(?1)
            AND k = ?2
          ORDER BY distance"
     ))?;

@@ -566,6 +566,7 @@ impl MemoryStore {
         mode: &SearchMode,
         limit: usize,
         scorer_config: &ScorerConfig,
+        vector_configs: &[(String, f64)],
     ) -> Result<Vec<ScoredResult>, DbError> {
         if self.pool.db_path() == ":memory:" {
             let conn = self.pool.writer().await;
@@ -578,6 +579,7 @@ impl MemoryStore {
                 mode,
                 limit,
                 scorer_config,
+                vector_configs,
             )
         } else {
             let conn = self.pool.reader()?;
@@ -590,6 +592,7 @@ impl MemoryStore {
                 mode,
                 limit,
                 scorer_config,
+                vector_configs,
             )
         }
     }
@@ -2189,6 +2192,7 @@ fn search_sync(
     mode: &SearchMode,
     limit: usize,
     scorer_config: &ScorerConfig,
+    vector_configs: &[(String, f64)],
 ) -> Result<Vec<ScoredResult>, DbError> {
     let candidate_limit = limit * 5;
     let ns_pattern = namespace.like_pattern();
@@ -2196,6 +2200,7 @@ fn search_sync(
 
     let mut vector_scored: Vec<(String, f64)> = vec![];
     let mut keyword_scored: Vec<(String, f64)> = vec![];
+    let mut per_vector_map: std::collections::HashMap<String, std::collections::HashMap<String, f64>> = std::collections::HashMap::new();
 
     // Vector search — filter out low-similarity results.
     // Configurable via search.min_vector_similarity (default 0.35).
@@ -2208,62 +2213,85 @@ fn search_sync(
     let ns_str = namespace.as_str();
     let is_exact_ns = !ns_str.contains('/');
 
+    // Named vector search — query each configured vec table
+    let mut per_vector_results: Vec<(&str, f64, Vec<(String, f64)>)> = Vec::new();
+
     match mode {
         SearchMode::Hybrid | SearchMode::Vector | SearchMode::AskRetrieval => {
-            let raw = if is_exact_ns {
-                // Pre-filtered: sqlite-vec filters by namespace during ANN search.
-                // Only vectors in this namespace are considered — no wasted comparisons.
-                vector::search_vectors_filtered(conn, query_embedding, ns_str, candidate_limit)?
-            } else {
-                // Hierarchical namespace — global search, post-filter below.
-                vector::search_vectors(conn, query_embedding, candidate_limit)?
-            };
+            for (vec_name, weight) in vector_configs {
+                // Determine table name: "content" uses vec_memories (legacy), others use vec_{name}
+                let table = if vec_name == "content" {
+                    let has_legacy: bool = conn
+                        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_memories'")
+                        .and_then(|mut s| s.exists([]))
+                        .unwrap_or(false);
+                    if has_legacy { "vec_memories".to_string() } else { format!("vec_{vec_name}") }
+                } else {
+                    format!("vec_{vec_name}")
+                };
 
-            // Score spread check on RAW results (before any post-filter).
-            let mut spread_ok = true;
-            if raw.len() >= 3 && scorer_config.min_score_spread > 0.0 {
-                let best_sim = 1.0 - (raw.first().unwrap().1 / 2.0);
-                let worst_sim = 1.0 - (raw.last().unwrap().1 / 2.0);
+                // Check if table exists before querying
+                let table_exists: bool = conn
+                    .prepare(&format!("SELECT 1 FROM sqlite_master WHERE type='table' AND name='{}'", table))
+                    .and_then(|mut s| s.exists([]))
+                    .unwrap_or(false);
+                if !table_exists {
+                    continue;
+                }
+
+                let raw = if is_exact_ns {
+                    vector::search_named_vectors_filtered(conn, &table, query_embedding, ns_str, candidate_limit)?
+                } else {
+                    vector::search_named_vectors(conn, &table, query_embedding, candidate_limit)?
+                };
+
+                // Convert distances to similarities (using INT8 scaling)
+                let mut scored: Vec<(String, f64)> = Vec::new();
+                for (id, dist) in &raw {
+                    let similarity = 1.0 - (dist / (2.0 * vector::INT8_DISTANCE_SCALE));
+                    if similarity < min_sim {
+                        continue;
+                    }
+                    if is_exact_ns {
+                        let mut stmt = conn.prepare_cached(
+                            "SELECT 1 FROM memories WHERE id = ?1 AND status = 'active'",
+                        )?;
+                        if stmt.exists(params![id])? {
+                            scored.push((id.clone(), similarity));
+                        }
+                    } else {
+                        let mut stmt = conn.prepare_cached(
+                            "SELECT 1 FROM memories WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
+                        )?;
+                        if stmt.exists(params![id, ns_pattern])? {
+                            scored.push((id.clone(), similarity));
+                        }
+                    }
+                }
+
+                per_vector_results.push((vec_name.as_str(), *weight, scored));
+            }
+
+            // Blend named vectors into single vector_scored list
+            let blended = anima_core::search::blend_named_vectors(&per_vector_results);
+            vector_scored = blended.iter().map(|(id, sim, _)| (id.clone(), *sim)).collect();
+            per_vector_map = blended
+                .into_iter()
+                .map(|(id, _, scores)| (id, scores))
+                .collect();
+
+            // Score spread check on blended results (before short-query filter).
+            if vector_scored.len() >= 3 && scorer_config.min_score_spread > 0.0 {
+                let best_sim = vector_scored.first().unwrap().1;
+                let worst_sim = vector_scored.last().unwrap().1;
                 let spread = best_sim - worst_sim;
                 if spread < scorer_config.min_score_spread {
                     tracing::debug!(
                         "Vector score spread too narrow ({:.4}), likely noise query — skipping vector",
                         spread
                     );
-                    spread_ok = false;
-                }
-            }
-
-            if spread_ok {
-                if is_exact_ns {
-                    // Pre-filtered results: only need similarity threshold + active status check.
-                    // Namespace already matched by sqlite-vec.
-                    for (id, dist) in &raw {
-                        let similarity = 1.0 - (dist / 2.0);
-                        if similarity < min_sim {
-                            continue;
-                        }
-                        let mut stmt = conn.prepare_cached(
-                            "SELECT 1 FROM memories WHERE id = ?1 AND status = 'active'",
-                        )?;
-                        if stmt.exists(params![id])? {
-                            vector_scored.push((id.clone(), similarity));
-                        }
-                    }
-                } else {
-                    // Global results: post-filter by namespace (LIKE) and active status.
-                    for (id, dist) in &raw {
-                        let similarity = 1.0 - (dist / 2.0);
-                        if similarity < min_sim {
-                            continue;
-                        }
-                        let mut stmt = conn.prepare_cached(
-                            "SELECT 1 FROM memories WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
-                        )?;
-                        if stmt.exists(params![id, ns_pattern])? {
-                            vector_scored.push((id.clone(), similarity));
-                        }
-                    }
+                    vector_scored.clear();
+                    per_vector_map.clear();
                 }
             }
 
@@ -2389,6 +2417,11 @@ fn search_sync(
 
     // Apply access frequency, importance, and tier boosts
     scorer.apply_boosts(&mut results, &access_counts, &importances, &tiers);
+
+    // Set per-vector scores on results
+    for r in &mut results {
+        r.vector_scores = per_vector_map.get(&r.memory_id).cloned();
+    }
 
     // Confidence boost: high-confidence memories get a small additive bonus,
     // low-confidence memories get a penalty. Centered at 0.7 so typical user
@@ -6270,7 +6303,7 @@ mod tests {
 
             let results = search_sync(
                 &conn, &query_emb, &anima_embed::SparseVector::default(), "Memory about topic", &namespace,
-                &SearchMode::Vector, 10, &config,
+                &SearchMode::Vector, 10, &config, &[("content".to_string(), 1.0)],
             ).unwrap();
 
             assert!(!results.is_empty(), "Vector search should return results in dense namespace");
@@ -6335,7 +6368,7 @@ mod tests {
 
             let results = search_sync(
                 &conn, &query_emb, &anima_embed::SparseVector::default(), "camping", &namespace,
-                &SearchMode::Hybrid, 10, &config,
+                &SearchMode::Hybrid, 10, &config, &[("content".to_string(), 1.0)],
             ).unwrap();
 
             assert!(!results.is_empty(), "Hybrid search should return results");
@@ -6375,7 +6408,7 @@ mod tests {
 
             let results = search_sync(
                 &conn, &query_emb, &anima_embed::SparseVector::default(), "content", &namespace,
-                &SearchMode::Vector, 10, &config_with_spread,
+                &SearchMode::Vector, 10, &config_with_spread, &[("content".to_string(), 1.0)],
             ).unwrap();
 
             // With diverse enough embeddings, the raw candidate pool should have
@@ -6390,7 +6423,7 @@ mod tests {
                 };
                 let results_no_spread = search_sync(
                     &conn, &query_emb, &anima_embed::SparseVector::default(), "content", &namespace,
-                    &SearchMode::Vector, 10, &config_no_spread,
+                    &SearchMode::Vector, 10, &config_no_spread, &[("content".to_string(), 1.0)],
                 ).unwrap();
                 assert!(results_no_spread.is_empty(),
                     "If spread filter cleared results, disabling it should recover them. \
@@ -6419,7 +6452,7 @@ mod tests {
 
             let results = search_sync(
                 &conn, &query_emb, &anima_embed::SparseVector::default(), "camping", &namespace,
-                &SearchMode::Keyword, 5, &config,
+                &SearchMode::Keyword, 5, &config, &[("content".to_string(), 1.0)],
             ).unwrap();
 
             assert!(!results.is_empty(), "Keyword search should find 'camping'");
@@ -6504,6 +6537,7 @@ mod tests {
                 &SearchMode::Vector,
                 5,
                 &cfg,
+                &[("content".to_string(), 1.0)],
             )
             .unwrap();
             assert!(!results.is_empty());
