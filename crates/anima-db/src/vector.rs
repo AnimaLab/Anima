@@ -9,6 +9,8 @@ pub enum VecTableStatus {
     Created,
     /// Schema was upgraded (e.g. namespace column added) and rebuilt from existing embeddings.
     Upgraded,
+    /// Vec table was rebuilt with int8 quantization (previously float).
+    QuantizationUpgraded,
     /// Dimension mismatch detected. Vec index is stale — memories need re-embedding.
     /// The old table is kept intact so existing search still works (at old dimension).
     DimensionMismatch { existing: usize, requested: usize },
@@ -74,6 +76,33 @@ pub fn initialize_vec_table(conn: &Connection, dimension: usize) -> rusqlite::Re
             [],
         )?;
         return Ok(VecTableStatus::Ready);
+    }
+
+    // int8 probe failed — check if the table is still float-format (pre-quantization).
+    let float_probe: Vec<u8> = vec![0u8; dimension * 4];
+    let is_float_format = conn
+        .execute(
+            "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES ('__dim_check__', ?1, '__test__')",
+            rusqlite::params![float_probe],
+        )
+        .is_ok();
+
+    if is_float_format {
+        // Clean up probe row
+        conn.execute("DELETE FROM vec_memories WHERE memory_id = '__dim_check__'", [])?;
+        // Upgrade: drop float table, recreate as int8, rebuild from f32 source
+        tracing::info!("Upgrading vec_memories from float to int8 quantization");
+        conn.execute_batch("DROP TABLE vec_memories;")?;
+        let sql = format!(
+            "CREATE VIRTUAL TABLE vec_memories USING vec0(
+                memory_id TEXT PRIMARY KEY,
+                embedding int8[{dimension}],
+                namespace TEXT
+            );"
+        );
+        conn.execute_batch(&sql)?;
+        rebuild_vec_index(conn, dimension)?;
+        return Ok(VecTableStatus::QuantizationUpgraded);
     }
 
     // Dimension mismatch — figure out the existing dimension.
@@ -306,6 +335,55 @@ mod tests {
             let beta = search_vectors_filtered(&w, &emb1, "beta", 10).unwrap();
             assert_eq!(beta.len(), 1);
             assert_eq!(beta[0].0, "mem-b");
+        });
+    }
+
+    #[test]
+    fn test_float_to_int8_migration() {
+        // Simulate an old float-format database, then verify migration
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let w = pool.writer().await;
+            let dim = DbPool::DEFAULT_DIMENSION;
+
+            // Insert a memory with f32 embedding into the memories table
+            let emb: Vec<f32> = (0..dim).map(|i| i as f32 / dim as f32).collect();
+            let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let emb: Vec<f32> = emb.iter().map(|x| x / norm).collect();
+            let f32_blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+
+            w.execute(
+                "INSERT INTO memories(id, namespace, content, embedding, status, created_at, updated_at, accessed_at, hash)
+                 VALUES ('m1', 'default', 'test', ?1, 'active', '2026-01-01', '2026-01-01', '2026-01-01', 'h1')",
+                rusqlite::params![f32_blob],
+            ).unwrap();
+
+            // Drop int8 table, recreate as float to simulate old schema
+            w.execute_batch("DROP TABLE vec_memories;").unwrap();
+            let sql = format!(
+                "CREATE VIRTUAL TABLE vec_memories USING vec0(
+                    memory_id TEXT PRIMARY KEY,
+                    embedding float[{dim}],
+                    namespace TEXT
+                );"
+            );
+            w.execute_batch(&sql).unwrap();
+
+            // Insert into float table
+            w.execute(
+                "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES ('m1', ?1, 'default')",
+                rusqlite::params![f32_blob],
+            ).unwrap();
+
+            // Now run initialize_vec_table — should detect float and upgrade
+            let status = initialize_vec_table(&w, dim).unwrap();
+            assert_eq!(status, VecTableStatus::QuantizationUpgraded);
+
+            // Verify search works with int8 table
+            let results = search_vectors(&w, &emb, 5).unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].0, "m1");
         });
     }
 
