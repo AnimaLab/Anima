@@ -32,6 +32,8 @@ pub struct ScorerConfig {
     pub weight_vector: f64,
     /// Weight for keyword results in RRF (default: 0.4)
     pub weight_keyword: f64,
+    /// Weight for sparse results in hybrid fusion (default: 0.0 = disabled)
+    pub weight_sparse: f64,
     /// How much temporal decay influences the final score (0.0-1.0, default: 0.2)
     pub temporal_weight: f64,
     /// Exponential decay rate (default: 0.001, half-life ~29 days)
@@ -70,6 +72,7 @@ impl Default for ScorerConfig {
             rrf_k: 10.0,
             weight_vector: 0.6,
             weight_keyword: 0.4,
+            weight_sparse: 0.0,
             temporal_weight: 0.2,
             lambda: 0.001,
             access_weight: 0.02,
@@ -98,6 +101,7 @@ pub struct ScoredResult {
     pub memory_id: String,
     pub score: f64,
     pub vector_score: Option<f64>,
+    pub sparse_score: Option<f64>,
     pub keyword_score: Option<f64>,
     pub temporal_score: Option<f64>,
 }
@@ -112,61 +116,81 @@ impl HybridScorer {
         Self { config }
     }
 
-    /// Fuse vector and keyword results using RRF + temporal decay.
+    /// Fuse vector, sparse, and keyword results using weighted score combination + temporal decay.
     ///
     /// - `vector_results`: (memory_id, raw_similarity) ordered by similarity (best first)
+    /// - `sparse_results`: (memory_id, raw_sparse_score) ordered by score (best first)
     /// - `keyword_results`: (memory_id, raw_bm25_score) ordered by score (best first)
     /// - `timestamps`: updated_at timestamps for temporal decay
     /// - `now`: current time
     ///
-    /// In hybrid mode, uses RRF to fuse both ranked lists.
-    /// In single-source modes (vector-only or keyword-only), uses raw scores
-    /// directly to preserve the actual similarity information.
+    /// When sparse weight is 0.0 or sparse results are empty, vector and keyword
+    /// weights are renormalized to sum to 1.0, preserving backward compatibility.
     pub fn fuse(
         &self,
         vector_results: &[(String, f64)],
+        sparse_results: &[(String, f64)],
         keyword_results: &[(String, f64)],
         timestamps: &HashMap<String, DateTime<Utc>>,
         now: DateTime<Utc>,
     ) -> Vec<ScoredResult> {
         let has_vec = !vector_results.is_empty();
+        let has_sparse = !sparse_results.is_empty();
         let has_kw = !keyword_results.is_empty();
 
-        // Single-source mode: use raw scores directly (no RRF)
-        if has_vec && !has_kw {
+        // Single-source mode: use raw scores directly (no fusion)
+        if has_vec && !has_kw && !has_sparse {
             return self.score_single_source(vector_results, timestamps, now, true);
         }
-        if has_kw && !has_vec {
+        if has_kw && !has_vec && !has_sparse {
             return self.score_single_source(keyword_results, timestamps, now, false);
         }
-        if !has_vec && !has_kw {
+        if !has_vec && !has_kw && !has_sparse {
             return vec![];
         }
 
-        // Hybrid mode: weighted raw-score combination.
-        // Vector scores are cosine similarity [0,1]. BM25 scores are unbounded
-        // so we normalize them to [0,1] using the max BM25 score in this batch.
+        // Multi-signal fusion: weighted raw-score combination.
+        // Vector scores are cosine similarity [0,1]. BM25 and sparse scores are
+        // unbounded, so we normalize them to [0,1] using their max in this batch.
         let vec_raw: HashMap<String, f64> = vector_results.iter().cloned().collect();
+        let sparse_raw: HashMap<String, f64> = sparse_results.iter().cloned().collect();
         let kw_raw: HashMap<String, f64> = keyword_results.iter().cloned().collect();
 
         let max_bm25 = keyword_results.iter().map(|(_, s)| *s).fold(0.0f64, f64::max);
         let norm_bm25 = if max_bm25 > 0.0 { max_bm25 } else { 1.0 };
 
+        let max_sparse = sparse_results.iter().map(|(_, s)| *s).fold(0.0f64, f64::max);
+        let norm_sparse = if max_sparse > 0.0 { max_sparse } else { 1.0 };
+
         // Collect all unique memory IDs
         let mut all_ids: HashMap<String, ()> = HashMap::new();
-        for (id, _) in vector_results.iter().chain(keyword_results.iter()) {
+        for (id, _) in vector_results.iter().chain(sparse_results.iter()).chain(keyword_results.iter()) {
             all_ids.entry(id.clone()).or_default();
         }
 
-        let wv = self.config.weight_vector;
-        let wk = self.config.weight_keyword;
+        // Compute effective weights: when sparse is disabled or empty, renormalize
+        // vector and keyword weights to sum to 1.0.
+        let (wv, ws, wk) = {
+            let ws_raw = self.config.weight_sparse;
+            if ws_raw == 0.0 || !has_sparse {
+                let sum = self.config.weight_vector + self.config.weight_keyword;
+                if sum > 0.0 {
+                    (self.config.weight_vector / sum, 0.0, self.config.weight_keyword / sum)
+                } else {
+                    (0.5, 0.0, 0.5)
+                }
+            } else {
+                (self.config.weight_vector, ws_raw, self.config.weight_keyword)
+            }
+        };
 
         let mut results: Vec<ScoredResult> = all_ids
             .into_keys()
             .map(|id| {
                 let vs = vec_raw.get(&id).copied().unwrap_or(0.0);
+                let ss_norm = sparse_raw.get(&id).copied().unwrap_or(0.0) / norm_sparse;
                 let ks_norm = kw_raw.get(&id).copied().unwrap_or(0.0) / norm_bm25;
-                let raw = wv * vs + wk * ks_norm;
+                let raw = wv * vs + ws * ss_norm + wk * ks_norm;
                 let decay = self.compute_decay(&id, timestamps, now);
                 let final_score = apply_temporal_weight(raw, decay, self.config.temporal_weight);
 
@@ -174,6 +198,7 @@ impl HybridScorer {
                     memory_id: id.clone(),
                     score: final_score,
                     vector_score: vec_raw.get(&id).copied(),
+                    sparse_score: sparse_raw.get(&id).copied(),
                     keyword_score: kw_raw.get(&id).copied(),
                     temporal_score: Some(decay),
                 }
@@ -218,6 +243,7 @@ impl HybridScorer {
                     memory_id: id.clone(),
                     score: final_score.min(1.0),
                     vector_score: if is_vector { Some(normalized) } else { None },
+                    sparse_score: None,
                     keyword_score: if !is_vector { Some(normalized) } else { None },
                     temporal_score: Some(decay),
                 }
@@ -332,7 +358,7 @@ mod tests {
         let vector = scored(&["a", "b", "c"]);
         let keyword = scored(&["b", "c", "a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].memory_id, "b", "b should rank first (vec2+kw1)");
@@ -346,7 +372,7 @@ mod tests {
         let vector = scored(&["a", "b", "c", "d", "e"]);
         let keyword = scored(&["e", "d", "c", "b", "a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         for r in &results {
             assert!(r.score >= 0.0 && r.score <= 1.0,
@@ -370,7 +396,7 @@ mod tests {
         let vector = scored(&["a", "b"]);
         let keyword = scored(&["a", "b"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results[0].memory_id, "a");
         assert!(results[0].score > 0.90,
@@ -384,7 +410,7 @@ mod tests {
         let vector = scored(&["a", "b", "c", "d"]);
         let keyword = scored(&["d", "c", "b", "a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         for w in results.windows(2) {
             assert!(w[0].score >= w[1].score,
@@ -400,7 +426,7 @@ mod tests {
         let vector = scored(&["a", "b", "c"]);
         let keyword = scored(&["b", "a", "c"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         let ids: Vec<&str> = results.iter().map(|r| r.memory_id.as_str()).collect();
         let mut unique = ids.clone();
@@ -420,7 +446,7 @@ mod tests {
         let vector = scored(&["v1", "v2"]);
         let keyword = scored(&["k1", "k2"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results.len(), 4, "should contain union of both result sets");
         let v1 = results.iter().find(|r| r.memory_id == "v1").unwrap();
@@ -442,7 +468,7 @@ mod tests {
         let vector = scored(&["a", "b", "c"]);
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].memory_id, "a");
@@ -457,7 +483,7 @@ mod tests {
         let vector = scored(&["a", "b"]);
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         for r in &results {
             assert!(r.vector_score.is_some(), "{} missing vector_score", r.memory_id);
@@ -472,7 +498,7 @@ mod tests {
         let vector = vec![("a".to_string(), 0.9)];
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         // Raw cosine sim 0.9 used directly, with minimal temporal decay
         assert!((results[0].score - 0.9).abs() < 0.01,
@@ -491,7 +517,7 @@ mod tests {
         let empty: Vec<(String, f64)> = vec![];
         let keyword = scored(&["a", "b", "c"]);
 
-        let results = scorer.fuse(&empty, &keyword, &ts, now);
+        let results = scorer.fuse(&empty, &[], &keyword, &ts, now);
 
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].memory_id, "a");
@@ -506,7 +532,7 @@ mod tests {
         let empty: Vec<(String, f64)> = vec![];
         let keyword = scored(&["a", "b"]);
 
-        let results = scorer.fuse(&empty, &keyword, &ts, now);
+        let results = scorer.fuse(&empty, &[], &keyword, &ts, now);
 
         for r in &results {
             assert!(r.keyword_score.is_some(), "{} missing keyword_score", r.memory_id);
@@ -521,7 +547,7 @@ mod tests {
         let empty: Vec<(String, f64)> = vec![];
         let keyword = vec![("a".to_string(), 5.0)];
 
-        let results = scorer.fuse(&empty, &keyword, &ts, now);
+        let results = scorer.fuse(&empty, &[], &keyword, &ts, now);
 
         assert!(results[0].score > 0.99,
             "keyword-only rank-1 should score ~1.0, got {:.4}", results[0].score);
@@ -539,7 +565,7 @@ mod tests {
         let vector = scored(&["a"]);
         let keyword = scored(&["a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results[0].temporal_score, Some(1.0));
         assert!(results[0].score > 0.90, "fresh result should score high, got {}", results[0].score);
@@ -557,7 +583,7 @@ mod tests {
         let vector = scored(&["old", "new"]);
         let keyword = scored(&["old", "new"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         let old = results.iter().find(|r| r.memory_id == "old").unwrap();
         let new = results.iter().find(|r| r.memory_id == "new").unwrap();
@@ -584,7 +610,7 @@ mod tests {
         let vector = vec![("old".to_string(), 0.9), ("new".to_string(), 0.85)];
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         assert_eq!(results[0].memory_id, "new",
             "recency should flip ranking: new={:.4} vs old={:.4}",
@@ -604,7 +630,7 @@ mod tests {
         let vector = vec![("old".to_string(), 0.9), ("new".to_string(), 0.85)];
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         assert_eq!(results[0].memory_id, "old");
     }
@@ -619,7 +645,7 @@ mod tests {
         let vector = vec![("a".to_string(), 0.9)];
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         assert_eq!(results[0].temporal_score, Some(1.0),
             "missing timestamp should default to decay=1.0");
@@ -642,7 +668,7 @@ mod tests {
         let vector = scored(&["a", "b"]);
         let keyword = scored(&["b", "a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results[0].memory_id, "a",
             "with heavy vector weight, vec-rank1 should dominate");
@@ -663,8 +689,8 @@ mod tests {
         let vector = vec![("a".to_string(), 0.95), ("b".to_string(), 0.5)];
         let keyword = vec![("b".to_string(), 10.0), ("a".to_string(), 2.0)];
 
-        let results_vec = scorer_vec.fuse(&vector, &keyword, &ts, now);
-        let results_kw = scorer_kw.fuse(&vector, &keyword, &ts, now);
+        let results_vec = scorer_vec.fuse(&vector, &[], &keyword, &ts, now);
+        let results_kw = scorer_kw.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results_vec[0].memory_id, "a", "vector-heavy should rank 'a' first");
         assert_eq!(results_kw[0].memory_id, "b", "keyword-heavy should rank 'b' first");
@@ -681,7 +707,7 @@ mod tests {
         let vector = vec![("a".to_string(), 0.85)];
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&vector, &empty, &ts, now);
+        let results = scorer.fuse(&vector, &[], &empty, &ts, now);
 
         // Vector scores use raw cosine similarity directly (already [0,1])
         assert!((results[0].vector_score.unwrap() - 0.85).abs() < 0.01,
@@ -695,7 +721,7 @@ mod tests {
         let empty: Vec<(String, f64)> = vec![];
         let keyword = vec![("a".to_string(), 5.0)];
 
-        let results = scorer.fuse(&empty, &keyword, &ts, now);
+        let results = scorer.fuse(&empty, &[], &keyword, &ts, now);
 
         assert!((results[0].keyword_score.unwrap() - 1.0).abs() < 0.01,
             "keyword rank-1 should normalize to 1.0, got {}", results[0].keyword_score.unwrap());
@@ -709,7 +735,7 @@ mod tests {
         let vector = scored(&["a"]);
         let keyword = scored(&["a"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         // With weighted raw scores: 0.6 * 0.9 (vector) + 0.4 * 1.0 (normalized BM25) = 0.94
         assert!(results[0].score > 0.90,
@@ -724,12 +750,12 @@ mod tests {
         let empty: Vec<(String, f64)> = vec![];
 
         // Vector: raw cosine sim used directly
-        let results = scorer.fuse(&vec![("a".to_string(), 0.8)], &empty, &ts, now);
+        let results = scorer.fuse(&vec![("a".to_string(), 0.8)], &[], &empty, &ts, now);
         assert!((results[0].score - 0.8).abs() < 0.01,
             "vector-only should use raw similarity, got {:.4}", results[0].score);
 
         // Keyword: BM25 normalized by max → rank-1 = 1.0
-        let results = scorer.fuse(&empty, &vec![("a".to_string(), 5.0)], &ts, now);
+        let results = scorer.fuse(&empty, &[], &vec![("a".to_string(), 5.0)], &ts, now);
         assert!(results[0].score > 0.99,
             "keyword-only rank-1 should be ~1.0, got {:.4}", results[0].score);
     }
@@ -745,7 +771,7 @@ mod tests {
         let ts: HashMap<String, DateTime<Utc>> = HashMap::new();
         let empty: Vec<(String, f64)> = vec![];
 
-        let results = scorer.fuse(&empty, &empty, &ts, now);
+        let results = scorer.fuse(&empty, &[], &empty, &ts, now);
         assert!(results.is_empty());
     }
 
@@ -756,7 +782,7 @@ mod tests {
         let vector = scored(&["only"]);
         let keyword = scored(&["only"]);
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, "only");
@@ -778,7 +804,7 @@ mod tests {
             .map(|(i, id)| (id.clone(), 0.9 - i as f64 * 0.005))
             .collect();
 
-        let results = scorer.fuse(&vector, &keyword, &ts, now);
+        let results = scorer.fuse(&vector, &[], &keyword, &ts, now);
 
         assert_eq!(results.len(), 100);
         for r in &results {
@@ -787,5 +813,55 @@ mod tests {
         for w in results.windows(2) {
             assert!(w[0].score >= w[1].score);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // THREE-WAY FUSION TESTS
+    // ═══════════════════════════════════════════════════════════
+
+    #[test]
+    fn hybrid_three_way_fusion() {
+        let cfg = ScorerConfig {
+            weight_vector: 0.5,
+            weight_sparse: 0.25,
+            weight_keyword: 0.25,
+            temporal_weight: 0.0,
+            ..Default::default()
+        };
+        let scorer = HybridScorer::new(cfg);
+        let (ts, now) = timestamps_now(&["a", "b"]);
+        let vector = scored(&["a", "b"]);
+        let sparse = scored(&["b", "a"]);
+        let keyword = scored(&["a", "b"]);
+
+        let results = scorer.fuse(&vector, &sparse, &keyword, &ts, now);
+
+        assert_eq!(results.len(), 2);
+        for r in &results {
+            assert!(r.vector_score.is_some());
+            assert!(r.sparse_score.is_some());
+            assert!(r.keyword_score.is_some());
+        }
+    }
+
+    #[test]
+    fn sparse_zero_weight_falls_back_to_two_signal() {
+        let cfg = ScorerConfig {
+            weight_vector: 0.6,
+            weight_sparse: 0.0,
+            weight_keyword: 0.4,
+            temporal_weight: 0.0,
+            ..Default::default()
+        };
+        let scorer = HybridScorer::new(cfg);
+        let (ts, now) = timestamps_now(&["a"]);
+        let vector = scored(&["a"]);
+        let sparse: Vec<(String, f64)> = vec![];
+        let keyword = scored(&["a"]);
+
+        let results = scorer.fuse(&vector, &sparse, &keyword, &ts, now);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].score > 0.80);
     }
 }

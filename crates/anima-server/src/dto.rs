@@ -107,6 +107,7 @@ pub struct SearchResultDto {
     pub source: String,
     pub score: f64,
     pub vector_score: Option<f64>,
+    pub sparse_score: Option<f64>,
     pub keyword_score: Option<f64>,
     pub temporal_score: Option<f64>,
     pub created_at: String,

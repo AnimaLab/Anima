@@ -236,6 +236,7 @@ async fn start_server(
         rrf_k: config.search.rrf_k,
         weight_vector: config.search.weight_vector,
         weight_keyword: config.search.weight_keyword,
+        weight_sparse: 0.0,
         temporal_weight: config.search.temporal_weight,
         lambda: config.search.temporal_lambda,
         access_weight: config.search.access_weight,

@@ -2193,7 +2193,7 @@ fn search_sync(
 
     // Fuse with RRF + temporal decay
     let scorer = HybridScorer::new(scorer_config.clone());
-    let mut results = scorer.fuse(&vector_scored, &keyword_scored, &timestamps, now);
+    let mut results = scorer.fuse(&vector_scored, &[], &keyword_scored, &timestamps, now);
 
     // Apply access frequency, importance, and tier boosts
     scorer.apply_boosts(&mut results, &access_counts, &importances, &tiers);
