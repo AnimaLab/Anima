@@ -153,6 +153,7 @@ async fn main() -> anyhow::Result<()> {
                 config.embedding.dimension,
                 pooling,
                 query_instruction.clone(),
+                None,
             )
             .map_err(|e| {
                 tracing::error!(domain = "embedding", "Startup check failed — model load: {e}");

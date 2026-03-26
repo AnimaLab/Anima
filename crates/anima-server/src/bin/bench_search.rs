@@ -344,7 +344,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Loading embedding model from {}...", model_dir.display());
     println!("Embedding config: dim={}, pooling={}", dimension, pooling.as_str());
-    let embedder = EmbeddingModel::load(&model_path, &tokenizer_path, dimension, pooling, None)?;
+    let embedder = EmbeddingModel::load(&model_path, &tokenizer_path, dimension, pooling, None, None)?;
 
     // Create in-memory store
     let (pool, _) = DbPool::open(":memory:", dimension)?;

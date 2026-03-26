@@ -62,6 +62,37 @@ where ort::Error<()>: From<ort::Error<R>> {
 const _DEFAULT_QUERY_INSTRUCTION: &str =
     "Instruct: Given a question about someone's memories or past conversations, retrieve the most relevant memory excerpts\nQuery:";
 
+/// BGE-M3 sparse linear projection weights: nn.Linear(1024, 1)
+struct SparseLinearWeights {
+    weight: Vec<f32>,  // [hidden_size]
+    bias: f32,
+}
+
+impl SparseLinearWeights {
+    fn load(path: &Path) -> Result<Self, EmbedError> {
+        let data = std::fs::read(path)?;
+        if data.len() < 4 {
+            return Err(EmbedError::Config("sparse weights file too short".into()));
+        }
+        let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let expected = 4 + count * 4 + 4; // count + weights + bias
+        if data.len() < expected {
+            return Err(EmbedError::Config(format!(
+                "sparse weights file: expected {expected} bytes, got {}",
+                data.len()
+            )));
+        }
+        let mut weight = Vec::with_capacity(count);
+        for i in 0..count {
+            let off = 4 + i * 4;
+            weight.push(f32::from_le_bytes(data[off..off + 4].try_into().unwrap()));
+        }
+        let bias_off = 4 + count * 4;
+        let bias = f32::from_le_bytes(data[bias_off..bias_off + 4].try_into().unwrap());
+        Ok(Self { weight, bias })
+    }
+}
+
 /// ONNX-based sentence embedding model.
 /// Thread-safe via internal Mutex on the session.
 pub struct EmbeddingModel {
@@ -71,6 +102,7 @@ pub struct EmbeddingModel {
     pooling: PoolingStrategy,
     /// Optional instruction prefix prepended to queries (not documents).
     query_instruction: Option<String>,
+    sparse_weights: Option<SparseLinearWeights>,
 }
 
 impl EmbeddingModel {
@@ -80,6 +112,7 @@ impl EmbeddingModel {
         dimension: usize,
         pooling: PoolingStrategy,
         query_instruction: Option<String>,
+        sparse_weights_path: Option<&Path>,
     ) -> Result<Self, EmbedError> {
         let session = Session::builder()
             .map_err(ort::Error::from)?
@@ -93,27 +126,43 @@ impl EmbeddingModel {
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| EmbedError::Tokenizer(e.to_string()))?;
 
+        let sparse_weights = if let Some(sp) = sparse_weights_path {
+            match SparseLinearWeights::load(sp) {
+                Ok(w) => {
+                    tracing::info!("Loaded sparse linear weights ({} dims)", w.weight.len());
+                    Some(w)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load sparse weights: {e}; sparse disabled");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             session: Mutex::new(session),
             tokenizer,
             dimension,
             pooling,
             query_instruction,
+            sparse_weights,
         })
     }
 
     /// Embed a document (no instruction prefix).
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
-        let results = self.embed_single(text)?;
-        Ok(results)
+        let (dense, _) = self.embed_single(text)?;
+        Ok(dense)
     }
 
     /// Embed a search query (with instruction prefix if configured).
     pub fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
         if let Some(ref instruction) = self.query_instruction {
             let prefixed = format!("{}{}", instruction, text);
-            let results = self.embed_batch(&[&prefixed])?;
-            Ok(results.into_iter().next().unwrap())
+            let (dense, _) = self.embed_single(&prefixed)?;
+            Ok(dense)
         } else {
             self.embed(text)
         }
@@ -132,13 +181,27 @@ impl EmbeddingModel {
         // so the marginal latency is negligible.
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
-            results.push(self.embed_single(text)?);
+            let (dense, _) = self.embed_single(text)?;
+            results.push(dense);
         }
         Ok(results)
     }
 
+    pub fn embed_with_sparse(&self, text: &str) -> Result<(Vec<f32>, crate::SparseVector), EmbedError> {
+        self.embed_single(text)
+    }
+
+    pub fn embed_query_with_sparse(&self, text: &str) -> Result<(Vec<f32>, crate::SparseVector), EmbedError> {
+        if let Some(ref instruction) = self.query_instruction {
+            let prefixed = format!("{}{}", instruction, text);
+            self.embed_single(&prefixed)
+        } else {
+            self.embed_single(text)
+        }
+    }
+
     /// Core single-text ONNX inference. Both embed() and embed_batch() use this.
-    fn embed_single(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+    fn embed_single(&self, text: &str) -> Result<(Vec<f32>, crate::SparseVector), EmbedError> {
         let texts = &[text];
         let encodings = self
             .tokenizer
@@ -241,6 +304,9 @@ impl EmbeddingModel {
         let token_embeddings = Array3::from_shape_vec((bs, seq_len, hidden), out_data.to_vec())
             .map_err(|e| EmbedError::Shape(format!("reshape: {e}")))?;
 
+        // Compute sparse vector before attn_mask_vec is moved
+        let sparse = self.compute_sparse(&token_embeddings, &encodings[0], &attn_mask_vec);
+
         let attention_mask = Array2::from_shape_vec(
             (batch_size, max_len),
             attn_mask_vec,
@@ -255,7 +321,60 @@ impl EmbeddingModel {
         let normalized = l2_normalize(&projected);
 
         let all: Vec<Vec<f32>> = normalized.outer_iter().map(|row| row.to_vec()).collect();
-        Ok(all.into_iter().next().unwrap())
+        Ok((all.into_iter().next().unwrap(), sparse))
+    }
+
+    /// Compute sparse vector from per-token hidden states.
+    /// BGE-M3 formula: weight = ReLU(dot(hidden[token], W) + bias)
+    /// Special tokens (IDs 0-3: CLS, PAD, EOS, UNK) are excluded.
+    fn compute_sparse(
+        &self,
+        token_embeddings: &ndarray::Array3<f32>,
+        encoding: &tokenizers::Encoding,
+        attention_mask: &[i64],
+    ) -> crate::SparseVector {
+        let sw = match &self.sparse_weights {
+            Some(w) => w,
+            None => return crate::SparseVector::default(),
+        };
+
+        let seq_len = token_embeddings.shape()[1];
+        let hidden = token_embeddings.shape()[2];
+        let weight_len = sw.weight.len().min(hidden);
+
+        let mut token_weights: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+
+        for s in 0..seq_len {
+            if attention_mask[s] == 0 {
+                continue;
+            }
+
+            let token_id = encoding.get_ids()[s];
+
+            // Skip special tokens: CLS=0, PAD=1, EOS/SEP=2, UNK=3
+            if token_id <= 3 {
+                continue;
+            }
+
+            // dot(hidden[0, s, :], W) + bias
+            let mut dot = sw.bias;
+            for d in 0..weight_len {
+                dot += token_embeddings[[0, s, d]] * sw.weight[d];
+            }
+
+            // ReLU
+            let w = dot.max(0.0);
+            if w > 0.0 {
+                let entry = token_weights.entry(token_id).or_insert(0.0);
+                if w > *entry {
+                    *entry = w; // max pooling
+                }
+            }
+        }
+
+        let mut entries: Vec<(u32, f32)> = token_weights.into_iter().collect();
+        entries.sort_by_key(|(tid, _)| *tid);
+        crate::SparseVector(entries)
     }
 
     pub fn dimension(&self) -> usize {
