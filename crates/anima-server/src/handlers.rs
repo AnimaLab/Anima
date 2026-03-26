@@ -3202,9 +3202,15 @@ fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState, operation: &str)
     match llm {
         Some(mut client_llm) => {
             let server_url = profile.map(|p| &p.base_url).unwrap_or(&state.config.llm.base_url);
+            // If the client points at localhost but the server profile points elsewhere,
+            // override URL, model, and API key — the server profile takes priority.
             if client_llm.base_url.contains("localhost") || client_llm.base_url.contains("127.0.0.1") {
                 if !server_url.contains("localhost") && !server_url.contains("127.0.0.1") {
                     client_llm.base_url = server_url.clone();
+                    // Also override model since the local model name won't exist on the remote provider
+                    if let Some(p) = profile {
+                        client_llm.model = p.model.clone();
+                    }
                 }
             }
             if client_llm.api_key.as_ref().map_or(true, |k| k.is_empty()) {
