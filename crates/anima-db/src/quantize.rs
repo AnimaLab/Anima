@@ -68,6 +68,15 @@ mod tests {
     }
 
     #[test]
+    fn test_quantize_zero_vector() {
+        let input = vec![0.0_f32; 8];
+        let quantized = quantize_embedding(&input);
+        assert!(quantized.iter().all(|&v| v == 0));
+        let blob = embedding_to_int8_blob(&input);
+        assert!(blob.iter().all(|&v| v == 0));
+    }
+
+    #[test]
     fn test_int8_blob_byte_representation() {
         let input = vec![1.0_f32, -1.0, 0.0];
         let blob = embedding_to_int8_blob(&input);
