@@ -905,6 +905,12 @@ impl MemoryStore {
         vector::force_reindex(&conn, dimension).map_err(DbError::Sqlite)
     }
 
+    /// Force rebuild a named vec table from memory_vectors.
+    pub async fn force_reindex_named(&self, vector_name: &str, dimension: usize) -> Result<usize, DbError> {
+        let conn = self.pool.writer().await;
+        vector::force_reindex_named(&conn, vector_name, dimension).map_err(DbError::Sqlite)
+    }
+
     /// Count of rows in the sparse_vectors table.
     pub async fn sparse_count(&self) -> Result<usize, DbError> {
         let conn = self.pool.writer().await;

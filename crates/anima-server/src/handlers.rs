@@ -3134,6 +3134,21 @@ pub async fn reindex_embeddings(
     let indexed = state.store.force_reindex(dimension).await?;
     tracing::info!("Re-index complete: {indexed} vectors indexed at {dimension}d");
 
+    // Reindex named vec tables from memory_vectors
+    for (vec_name, _) in &state.vector_configs {
+        if vec_name == "content" {
+            continue; // content uses vec_memories, already handled above
+        }
+        match state.store.force_reindex_named(vec_name, dimension).await {
+            Ok(count) => {
+                tracing::info!("Reindexed vec_{vec_name}: {count} vectors");
+            }
+            Err(e) => {
+                tracing::error!("Failed to reindex vec_{vec_name}: {e}");
+            }
+        }
+    }
+
     // Update status
     *state.vec_status.write().await = anima_db::vector::VecTableStatus::Ready;
 
