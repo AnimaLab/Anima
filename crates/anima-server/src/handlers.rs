@@ -2987,6 +2987,65 @@ pub async fn rename_namespace(
     })))
 }
 
+pub async fn get_vec_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let status = state.vec_status.read().await;
+    match &*status {
+        anima_db::vector::VecTableStatus::DimensionMismatch { existing, requested } => {
+            Ok(Json(serde_json::json!({
+                "status": "dimension_mismatch",
+                "existing_dimension": existing,
+                "requested_dimension": requested,
+                "needs_reindex": true,
+            })))
+        }
+        other => {
+            Ok(Json(serde_json::json!({
+                "status": format!("{:?}", other).to_lowercase(),
+                "needs_reindex": false,
+            })))
+        }
+    }
+}
+
+pub async fn reindex_embeddings(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let dimension = state.config.embedding.dimension;
+
+    // Re-embed all memories with the current model
+    let namespaces = state.store.list_namespaces().await?;
+    let mut total_reembedded = 0usize;
+
+    for ns_info in &namespaces {
+        let ns = anima_core::namespace::Namespace::parse(&ns_info.namespace)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let memories = state.store.export_all(&ns).await?;
+
+        for chunk in memories.chunks(50) {
+            for m in chunk {
+                let embedding = state.embedder.embed(&m.content)
+                    .map_err(|e| AppError::Embedding(e.to_string()))?;
+                state.store.update_embedding_blob(&m.id, &embedding).await?;
+                total_reembedded += 1;
+            }
+        }
+    }
+
+    // Force rebuild the vec index from the newly embedded data
+    let indexed = state.store.force_reindex(dimension).await?;
+    tracing::info!("Re-index complete: {indexed} vectors indexed at {dimension}d");
+
+    // Update status
+    *state.vec_status.write().await = anima_db::vector::VecTableStatus::Ready;
+
+    Ok(Json(serde_json::json!({
+        "reindexed": total_reembedded,
+        "dimension": dimension,
+    })))
+}
+
 pub async fn get_graph(
     State(state): State<Arc<AppState>>,
     ExtractNamespace(ns): ExtractNamespace,

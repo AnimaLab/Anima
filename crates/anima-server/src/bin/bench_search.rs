@@ -347,7 +347,7 @@ async fn main() -> anyhow::Result<()> {
     let embedder = EmbeddingModel::load(&model_path, &tokenizer_path, dimension, pooling, None)?;
 
     // Create in-memory store
-    let pool = DbPool::open(":memory:", dimension)?;
+    let (pool, _) = DbPool::open(":memory:", dimension)?;
     let store = MemoryStore::new(pool);
 
     // Generate corpus

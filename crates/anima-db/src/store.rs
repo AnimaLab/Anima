@@ -844,6 +844,23 @@ impl MemoryStore {
         list_namespaces_sync(&conn)
     }
 
+    /// Update just the embedding blob for a memory (for re-indexing).
+    pub async fn update_embedding_blob(&self, id: &str, embedding: &[f32]) -> Result<(), DbError> {
+        let conn = self.pool.writer().await;
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+        conn.execute(
+            "UPDATE memories SET embedding = ?1 WHERE id = ?2",
+            params![blob, id],
+        )?;
+        Ok(())
+    }
+
+    /// Force rebuild the vec index with a new dimension.
+    pub async fn force_reindex(&self, dimension: usize) -> Result<usize, DbError> {
+        let conn = self.pool.writer().await;
+        vector::force_reindex(&conn, dimension).map_err(DbError::Sqlite)
+    }
+
     /// Delete an entire namespace and all its data across all tables.
     pub async fn delete_namespace(&self, namespace: &Namespace) -> Result<u64, DbError> {
         let conn = self.pool.writer().await;

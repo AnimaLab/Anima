@@ -30,19 +30,20 @@ impl DbPool {
     pub const DEFAULT_DIMENSION: usize = 1024;
 
     /// Open (or create) a database at the given path.
-    pub fn open(path: impl AsRef<Path>, dimension: usize) -> Result<Arc<Self>, DbError> {
+    /// Returns the pool and the vec table initialization status.
+    pub fn open(path: impl AsRef<Path>, dimension: usize) -> Result<(Arc<Self>, crate::vector::VecTableStatus), DbError> {
         register_sqlite_vec();
 
         let path_str = path.as_ref().to_string_lossy().to_string();
 
         let writer = Connection::open(&path_str).map_err(DbError::Sqlite)?;
         schema::initialize(&writer).map_err(DbError::Sqlite)?;
-        crate::vector::initialize_vec_table(&writer, dimension).map_err(DbError::Sqlite)?;
+        let vec_status = crate::vector::initialize_vec_table(&writer, dimension).map_err(DbError::Sqlite)?;
 
-        Ok(Arc::new(Self {
+        Ok((Arc::new(Self {
             writer: Mutex::new(writer),
             db_path: path_str,
-        }))
+        }), vec_status))
     }
 
     /// Open an in-memory database (for testing).
@@ -51,7 +52,7 @@ impl DbPool {
 
         let writer = Connection::open_in_memory().map_err(DbError::Sqlite)?;
         schema::initialize(&writer).map_err(DbError::Sqlite)?;
-        crate::vector::initialize_vec_table(&writer, Self::DEFAULT_DIMENSION)
+        let _ = crate::vector::initialize_vec_table(&writer, Self::DEFAULT_DIMENSION)
             .map_err(DbError::Sqlite)?;
 
         Ok(Arc::new(Self {

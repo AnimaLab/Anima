@@ -80,16 +80,25 @@ async fn main() -> anyhow::Result<()> {
     // --- Startup self-test: validate dependencies before serving ---
 
     // 1. Database
-    let pool = DbPool::open(&config.database.path, config.embedding.dimension)
+    let open_result = DbPool::open(&config.database.path, config.embedding.dimension)
         .map_err(|e| {
             tracing::error!(domain = "db", "Startup check failed — database: {e}");
             e
         })?;
+    let pool = open_result.0;
+    let vec_status = open_result.1;
     let store = MemoryStore::new(pool);
     store.ping().await.map_err(|e| {
         tracing::error!(domain = "db", "Startup check failed — database ping: {e}");
         anyhow::anyhow!("database unreachable: {e}")
     })?;
+    if let anima_db::vector::VecTableStatus::DimensionMismatch { existing, requested } = &vec_status {
+        tracing::warn!(
+            domain = "db",
+            "Vector index needs re-embedding: index is {existing}d but model produces {requested}d. \
+             Go to Settings > Advanced > Re-index to fix."
+        );
+    }
     tracing::info!(domain = "db", "Startup check passed — database OK");
 
     // 2. Embedding model
@@ -187,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 other => {
                     tracing::warn!(domain = "llm", "Unknown consolidation backend '{other}', disabling");
-                    return Ok(start_server(store, embedder, None, &config, resolved_profiles).await?);
+                    return Ok(start_server(store, embedder, None, &config, resolved_profiles, vec_status).await?);
                 }
             };
         tracing::info!(domain = "llm", "Startup check passed — consolidation LLM configured");
@@ -200,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    start_server(store, embedder, consolidator, &config, resolved_profiles).await
+    start_server(store, embedder, consolidator, &config, resolved_profiles, vec_status).await
 }
 
 async fn start_server(
@@ -209,6 +218,7 @@ async fn start_server(
     consolidator: Option<Arc<Consolidator>>,
     config: &AppConfig,
     resolved_profiles: crate::config::ResolvedProfiles,
+    vec_status: anima_db::vector::VecTableStatus,
 ) -> anyhow::Result<()> {
     // Build category lambda map: built-in defaults + user overrides from config.
     let mut category_lambdas = std::collections::HashMap::new();
@@ -334,6 +344,7 @@ async fn start_server(
         resolved_profiles,
         ingested_count: std::sync::atomic::AtomicU64::new(0),
         ingested_started_at: std::time::Instant::now(),
+        vec_status: tokio::sync::RwLock::new(vec_status),
     });
 
     // Spawn telemetry loop

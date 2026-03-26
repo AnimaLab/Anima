@@ -42,6 +42,8 @@ pub struct AppState {
     /// Telemetry
     pub telemetry_enabled: AtomicBool,
     pub telemetry_feature_flags: tokio::sync::RwLock<FeatureFlags>,
+    /// Vec index status — DimensionMismatch means re-embedding is needed.
+    pub vec_status: tokio::sync::RwLock<anima_db::vector::VecTableStatus>,
 }
 
 impl AppState {
@@ -200,6 +202,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/stats", get(handlers::get_stats))
         .route("/api/v1/namespaces", get(handlers::list_namespaces).delete(handlers::delete_namespace))
         .route("/api/v1/namespaces/rename", post(handlers::rename_namespace))
+        .route("/api/v1/vec/status", get(handlers::get_vec_status))
+        .route("/api/v1/vec/reindex", post(handlers::reindex_embeddings))
         .route("/api/v1/graph", get(handlers::get_graph))
         .route("/api/v1/embeddings", get(handlers::get_embeddings))
         .route("/api/v1/chat", post(handlers::chat))
