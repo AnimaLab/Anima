@@ -881,6 +881,22 @@ impl MemoryStore {
         list_sync(&conn, namespace, status, memory_type, category, offset, limit)
     }
 
+    /// List memories using cursor-based (keyset) pagination.
+    /// Cursor format: `{created_at_rfc3339}:{id}`.
+    /// Returns (memories, total_count).
+    pub async fn list_with_cursor(
+        &self,
+        namespace: &Namespace,
+        status: Option<&str>,
+        memory_type: Option<&str>,
+        category: Option<&str>,
+        cursor: &str,
+        limit: usize,
+    ) -> Result<(Vec<Memory>, u64), DbError> {
+        let conn = self.pool.writer().await;
+        list_with_cursor_sync(&conn, namespace, status, memory_type, category, cursor, limit)
+    }
+
     /// Get namespace stats.
     pub async fn stats(&self, namespace: &Namespace) -> Result<NamespaceStats, DbError> {
         let conn = self.pool.writer().await;
@@ -2211,7 +2227,9 @@ fn search_sync(
     scorer_config: &ScorerConfig,
     vector_configs: &[(String, f64)],
 ) -> Result<Vec<ScoredResult>, DbError> {
-    let candidate_limit = limit * 5;
+    // Oversampling: fetch more candidates from cheap int8 search,
+    // then rescore with full-precision f32 to narrow down before scoring.
+    let candidate_limit = limit * 10;
     let ns_pattern = namespace.like_pattern();
     let now = Utc::now();
 
@@ -2296,6 +2314,38 @@ fn search_sync(
                 .into_iter()
                 .map(|(id, _, scores)| (id, scores))
                 .collect();
+
+            // Stage 2: Full-precision f32 rescore.
+            // Re-rank the top int8 candidates using exact cosine similarity
+            // from the original f32 embeddings stored in memory_vectors.
+            // This narrows the oversampled set before the expensive cross-encoder.
+            let rescore_limit = (limit * 5).min(vector_scored.len());
+            if vector_scored.len() > rescore_limit {
+                let primary_vec = vector_configs.first().map(|(n, _)| n.as_str()).unwrap_or("content");
+                let query_norm: f32 = query_embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
+                let mut rescored: Vec<(String, f64)> = Vec::with_capacity(vector_scored.len());
+                for (id, int8_sim) in &vector_scored {
+                    if let Ok(Some(f32_emb)) = vector::get_f32_embedding(conn, id, primary_vec) {
+                        let emb_norm: f32 = f32_emb.iter().map(|v| v * v).sum::<f32>().sqrt();
+                        if emb_norm > 0.0 && query_norm > 0.0 {
+                            let dot: f32 = query_embedding.iter().zip(&f32_emb).map(|(a, b)| a * b).sum();
+                            let cosine = (dot / (query_norm * emb_norm)) as f64;
+                            rescored.push((id.clone(), cosine));
+                        } else {
+                            rescored.push((id.clone(), *int8_sim));
+                        }
+                    } else {
+                        // No f32 embedding available, keep int8 score
+                        rescored.push((id.clone(), *int8_sim));
+                    }
+                }
+                rescored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                rescored.truncate(rescore_limit);
+                // Update per_vector_map to only keep rescored IDs
+                let rescored_ids: HashSet<&str> = rescored.iter().map(|(id, _)| id.as_str()).collect();
+                per_vector_map.retain(|id, _| rescored_ids.contains(id.as_str()));
+                vector_scored = rescored;
+            }
 
             // Score spread check on blended results (before short-query filter).
             if vector_scored.len() >= 3 && scorer_config.min_score_spread > 0.0 {
@@ -2720,6 +2770,84 @@ fn list_sync(
     let mut data_params = count_params;
     data_params.push(Box::new(limit as i64));
     data_params.push(Box::new(offset as i64));
+    let data_refs: Vec<&dyn rusqlite::types::ToSql> = data_params.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&data_sql)?;
+    let rows = stmt.query_map(data_refs.as_slice(), row_to_memory)?;
+    let memories: Vec<Memory> = rows.filter_map(|r| r.ok()).collect();
+
+    Ok((memories, total))
+}
+
+fn list_with_cursor_sync(
+    conn: &Connection,
+    namespace: &Namespace,
+    status: Option<&str>,
+    memory_type: Option<&str>,
+    category: Option<&str>,
+    cursor: &str,
+    limit: usize,
+) -> Result<(Vec<Memory>, u64), DbError> {
+    let ns_pattern = namespace.like_pattern();
+
+    // Parse cursor: "created_at:id" — split on first colon only since RFC3339 contains colons
+    let (cursor_ts, cursor_id) = cursor.split_once(':')
+        .and_then(|(first, rest)| {
+            // The timestamp contains colons, so we need to find the last colon
+            // which separates the timestamp from the id.
+            // Cursor format: {rfc3339_timestamp}:{uuid}
+            // We'll rejoin and split on the last colon instead.
+            let _ = (first, rest);
+            let full = cursor;
+            full.rfind(':').map(|pos| (&full[..pos], &full[pos + 1..]))
+        })
+        .ok_or_else(|| DbError::Sqlite(rusqlite::Error::InvalidParameterName("invalid cursor format".into())))?;
+
+    // Build WHERE clause for filters (used in both count and data queries)
+    let mut conditions = vec!["namespace LIKE ?1".to_string()];
+    let mut filter_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_pattern.clone())];
+
+    if let Some(st) = status {
+        conditions.push(format!("status = ?{}", filter_params.len() + 1));
+        filter_params.push(Box::new(st.to_string()));
+    }
+    if let Some(mt) = memory_type {
+        conditions.push(format!("memory_type = ?{}", filter_params.len() + 1));
+        filter_params.push(Box::new(mt.to_string()));
+    }
+    if let Some(cat) = category {
+        conditions.push(format!("category = ?{}", filter_params.len() + 1));
+        filter_params.push(Box::new(cat.to_string()));
+    }
+
+    // Count total (without cursor filter, same as regular list)
+    let filter_where = conditions.join(" AND ");
+    let count_sql = format!("SELECT COUNT(*) FROM memories WHERE {filter_where}");
+    let count_refs: Vec<&dyn rusqlite::types::ToSql> = filter_params.iter().map(|b| b.as_ref()).collect();
+    let total: u64 = conn
+        .prepare(&count_sql)?
+        .query_row(count_refs.as_slice(), |row| row.get(0))?;
+
+    // Add cursor condition for data query: (created_at, id) < (cursor_ts, cursor_id) for DESC order
+    let cursor_ts_param = filter_params.len() + 1;
+    let cursor_id_param = filter_params.len() + 2;
+    conditions.push(format!(
+        "(created_at < ?{} OR (created_at = ?{} AND id < ?{}))",
+        cursor_ts_param, cursor_ts_param, cursor_id_param
+    ));
+    let mut data_params = filter_params;
+    data_params.push(Box::new(cursor_ts.to_string()));
+    data_params.push(Box::new(cursor_id.to_string()));
+
+    let where_clause = conditions.join(" AND ");
+    let limit_param = data_params.len() + 1;
+    let data_sql = format!(
+        "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
+         FROM memories WHERE {where_clause}
+         ORDER BY created_at DESC, id DESC LIMIT ?{limit_param}"
+    );
+
+    data_params.push(Box::new(limit as i64));
     let data_refs: Vec<&dyn rusqlite::types::ToSql> = data_params.iter().map(|b| b.as_ref()).collect();
 
     let mut stmt = conn.prepare(&data_sql)?;

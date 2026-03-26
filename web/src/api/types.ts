@@ -61,6 +61,7 @@ export interface ListMemoriesResponse {
   total: number
   offset: number
   limit: number
+  next_cursor?: string | null
 }
 
 export interface NamespaceStats {

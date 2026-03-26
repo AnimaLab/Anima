@@ -460,6 +460,11 @@ pub struct ListParams {
     pub status: Option<String>,
     pub memory_type: Option<String>,
     pub category: Option<String>,
+    /// Cursor for keyset pagination. Format: `{created_at}:{id}`.
+    /// When present, returns memories created before this cursor.
+    /// Mutually exclusive with offset — cursor takes precedence.
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -468,6 +473,10 @@ pub struct ListMemoriesResponse {
     pub total: u64,
     pub offset: usize,
     pub limit: usize,
+    /// Cursor for the next page. Pass this as `cursor` to get the next page.
+    /// Null when there are no more results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 // --- Working Memory ---

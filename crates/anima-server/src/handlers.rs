@@ -3177,13 +3177,26 @@ pub async fn list_memories(
     ExtractNamespace(ns): ExtractNamespace,
     Query(params): Query<ListParams>,
 ) -> Result<Json<ListMemoriesResponse>, AppError> {
-    let offset = params.offset.unwrap_or(0);
     let limit = params.limit.unwrap_or(50).min(200);
     let status_filter = params.status.as_deref();
     let type_filter = params.memory_type.as_deref();
     let category_filter = params.category.as_deref();
 
-    let (memories, total) = state.store.list(&ns, status_filter, type_filter, category_filter, offset, limit).await?;
+    let (memories, total) = if let Some(ref cursor) = params.cursor {
+        // Cursor-based pagination
+        state.store.list_with_cursor(&ns, status_filter, type_filter, category_filter, cursor, limit).await?
+    } else {
+        // Legacy offset-based pagination
+        let offset = params.offset.unwrap_or(0);
+        state.store.list(&ns, status_filter, type_filter, category_filter, offset, limit).await?
+    };
+
+    // Build next_cursor from the last result
+    let next_cursor = if memories.len() == limit {
+        memories.last().map(|m| format!("{}:{}", m.created_at.to_rfc3339(), m.id))
+    } else {
+        None
+    };
 
     let memory_responses: Vec<MemoryResponse> = memories
         .into_iter()
@@ -3208,11 +3221,13 @@ pub async fn list_memories(
         })
         .collect();
 
+    let offset = params.offset.unwrap_or(0);
     Ok(Json(ListMemoriesResponse {
         memories: memory_responses,
         total,
         offset,
         limit,
+        next_cursor,
     }))
 }
 
