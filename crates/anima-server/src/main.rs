@@ -352,18 +352,30 @@ async fn start_server(
                 config.processor.model,
                 config.processor.base_url
             );
+            let async_vecs: Vec<String> = config.resolved_vectors()
+                .iter()
+                .filter(|v| v.populate == crate::config::PopulateStrategy::Async)
+                .map(|v| v.name.clone())
+                .collect();
             Some(processor::BackgroundProcessor::spawn(
                 store.clone(),
                 embedder.clone(),
                 llm,
+                async_vecs,
             ))
         } else if let Some(ref consolidator) = consolidator {
             tracing::info!("Processor LLM: falling back to consolidation LLM");
             let llm = consolidator.llm_client();
+            let async_vecs: Vec<String> = config.resolved_vectors()
+                .iter()
+                .filter(|v| v.populate == crate::config::PopulateStrategy::Async)
+                .map(|v| v.name.clone())
+                .collect();
             Some(processor::BackgroundProcessor::spawn(
                 store.clone(),
                 embedder.clone(),
                 llm,
+                async_vecs,
             ))
         } else {
             tracing::info!("Background processor disabled (no API key configured)");

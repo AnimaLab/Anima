@@ -54,6 +54,7 @@ part of the repo.
 | Capability                | Status  | Notes                                                       |
 | ------------------------- | ------- | ----------------------------------------------------------- |
 | Persistent memory API     | Shipped | Add, search, list, update, merge, and delete memories       |
+| Cursor pagination         | Shipped | Keyset pagination via `cursor` for constant-time scrolling  |
 | Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking with auto-tuned weights |
 | Multi-vector search       | Shipped | Named vectors per memory with query routing heuristics      |
 | Scalar quantization       | Shipped | Int8 quantized vec indexes with f32 source for reindexing   |

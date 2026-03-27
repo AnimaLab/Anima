@@ -497,6 +497,31 @@ pub fn delete_memory_vectors(conn: &Connection, memory_id: &str) -> rusqlite::Re
     Ok(())
 }
 
+/// Fetch a single f32 embedding for a (memory, vector_name) pair from memory_vectors.
+/// Returns None if the embedding doesn't exist.
+pub fn get_f32_embedding(
+    conn: &Connection,
+    memory_id: &str,
+    vector_name: &str,
+) -> rusqlite::Result<Option<Vec<f32>>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT embedding FROM memory_vectors WHERE memory_id = ?1 AND vector_name = ?2"
+    )?;
+    let result = stmt.query_row(rusqlite::params![memory_id, vector_name], |row| {
+        let blob: Vec<u8> = row.get(0)?;
+        let floats: Vec<f32> = blob
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        Ok(floats)
+    });
+    match result {
+        Ok(emb) => Ok(Some(emb)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Fetch f32 embeddings for a memory from memory_vectors.
 /// Returns a map of vector_name → f32 embedding.
 pub fn get_memory_embeddings(

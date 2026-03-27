@@ -201,6 +201,7 @@ impl BackgroundProcessor {
         store: MemoryStore,
         embedder: Arc<dyn Embedder>,
         llm: Arc<dyn LlmClient>,
+        async_vector_names: Vec<String>,
     ) -> Self {
         let capacity = std::env::var("ANIMA_PROCESSOR_QUEUE_CAPACITY")
             .ok()
@@ -282,6 +283,7 @@ impl BackgroundProcessor {
             let induction_prompt_tokens_worker = induction_prompt_tokens.clone();
             let induction_completion_tokens_worker = induction_completion_tokens.clone();
             let induction_total_tokens_worker = induction_total_tokens.clone();
+            let async_vector_names_worker = async_vector_names.clone();
             tokio::spawn(async move {
                 tracing::info!("Background processor worker {worker_id} started");
                 run_worker(
@@ -321,6 +323,7 @@ impl BackgroundProcessor {
                     induction_prompt_tokens_worker,
                     induction_completion_tokens_worker,
                     induction_total_tokens_worker,
+                    async_vector_names_worker,
                 )
                 .await;
             });
@@ -532,6 +535,7 @@ async fn run_worker(
     induction_prompt_tokens: Arc<AtomicUsize>,
     induction_completion_tokens: Arc<AtomicUsize>,
     induction_total_tokens: Arc<AtomicUsize>,
+    async_vector_names: Vec<String>,
 ) {
     // Track newly deduced facts per namespace and trigger induction only once
     // enough net-new deductions have accumulated.
@@ -598,6 +602,14 @@ async fn run_worker(
                                     job_failed = true;
                                     tracing::error!("Reconsolidation failed for {namespace}: {e}");
                                 }
+                            }
+                        }
+                        // Generate async summary vectors for the original raw memories
+                        for vec_name in &async_vector_names {
+                            if let Err(e) = generate_summary_vectors(
+                                &store, &embedder, &llm, &memory_ids, vec_name,
+                            ).await {
+                                tracing::warn!("Summary vector generation failed for {vec_name}: {e}");
                             }
                         }
                         if reflected_ids.len() >= 2 {
@@ -1447,6 +1459,103 @@ pub async fn run_retention_sync(
     }
 
     Ok(RetentionResult { processed, softened })
+}
+
+/// Generate summary vectors for memories that don't have them yet.
+/// Calls LLM to produce a one-sentence summary, embeds it, and stores
+/// as a named vector in memory_vectors + the vec0 table.
+async fn generate_summary_vectors(
+    store: &MemoryStore,
+    embedder: &Arc<dyn Embedder>,
+    llm: &Arc<dyn LlmClient>,
+    memory_ids: &[String],
+    vector_name: &str,
+) -> anyhow::Result<usize> {
+    // Filter to memories that don't already have this vector
+    let mut needs_summary: Vec<(String, String)> = Vec::new(); // (id, content)
+    for id in memory_ids {
+        if let Ok(Some(mem)) = store.get(id).await {
+            if mem.status != anima_core::memory::MemoryStatus::Active {
+                continue;
+            }
+            // Check if this memory already has the summary vector
+            let conn = store.writer_conn().await;
+            let has_vec: bool = conn
+                .prepare_cached("SELECT 1 FROM memory_vectors WHERE memory_id = ?1 AND vector_name = ?2")
+                .and_then(|mut s| s.query_row([id.as_str(), vector_name], |_| Ok(true)))
+                .unwrap_or(false);
+            drop(conn);
+            if !has_vec {
+                needs_summary.push((id.clone(), mem.content.clone()));
+            }
+        }
+    }
+
+    if needs_summary.is_empty() {
+        return Ok(0);
+    }
+
+    tracing::info!("Generating {} summary vectors for '{}'", needs_summary.len(), vector_name);
+
+    // Generate summaries via LLM
+    let mut summaries: Vec<(String, String, String)> = Vec::new(); // (id, summary, namespace)
+    for (id, content) in &needs_summary {
+        let prompt = format!(
+            "Summarize this memory in one concise sentence (max 30 words). Output ONLY the summary, no quotes or preamble.\n\nMemory: {}",
+            content
+        );
+        match llm.complete(&prompt).await {
+            Ok(summary) => {
+                let summary = summary.trim().to_string();
+                if !summary.is_empty() {
+                    if let Ok(Some(mem)) = store.get(id).await {
+                        summaries.push((id.clone(), summary, mem.namespace.clone()));
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Summary generation failed for {id}: {e}");
+            }
+        }
+    }
+
+    if summaries.is_empty() {
+        return Ok(0);
+    }
+
+    // Batch embed all summaries
+    let texts: Vec<&str> = summaries.iter().map(|(_, s, _)| s.as_str()).collect();
+    let embeddings = match embedder.embed_batch(&texts) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("Batch embedding failed for {} summaries: {e}", texts.len());
+            return Ok(0);
+        }
+    };
+
+    // Store each summary vector
+    let conn = store.writer_conn().await;
+    let mut count = 0usize;
+    for (i, (id, _summary, namespace)) in summaries.iter().enumerate() {
+        if let Some(embedding) = embeddings.get(i) {
+            // Insert into memory_vectors (f32 source of truth)
+            if let Err(e) = anima_db::vector::insert_memory_vector(&conn, id, vector_name, embedding, namespace) {
+                tracing::warn!("Failed to insert memory_vector for {id}/{vector_name}: {e}");
+                continue;
+            }
+            // Insert into vec_{name} table (int8 quantized)
+            let table = format!("vec_{vector_name}");
+            if let Err(e) = anima_db::vector::insert_named_embedding(&conn, &table, id, embedding, namespace) {
+                tracing::warn!("Failed to insert vec_{vector_name} for {id}: {e}");
+                continue;
+            }
+            count += 1;
+        }
+    }
+    drop(conn);
+
+    tracing::info!("Generated {count} summary vectors for '{vector_name}'");
+    Ok(count)
 }
 
 /// Process reflection for a batch of raw memory IDs.

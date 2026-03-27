@@ -31,6 +31,10 @@ description: 'Retrieve memories with pagination and filtering'
   Filter by semantic category (e.g. `preference`, `identity`, `routine`)
 </ParamField>
 
+<ParamField query="cursor" type="string">
+  Cursor for keyset pagination. Pass the `next_cursor` value from a previous response to get the next page. When present, `offset` is ignored. Provides constant-time page fetches regardless of depth.
+</ParamField>
+
 ## Response
 
-Returns a paginated list of memory objects.
+Returns a paginated list of memory objects. When using cursor pagination, the response includes `next_cursor` (null when there are no more results).
