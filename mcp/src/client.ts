@@ -22,15 +22,28 @@ export async function searchMemories(
   limit?: number,
   searchMode?: string,
   temporalWeight?: number,
+  dateStart?: string,
+  dateEnd?: string,
+  category?: string,
+  maxTier?: number,
+  groupBy?: string,
+  queryRewrite?: boolean,
 ) {
+  const body: Record<string, unknown> = {
+    query,
+    limit: limit ?? 10,
+    search_mode: searchMode ?? "hybrid",
+  };
+  if (temporalWeight !== undefined) body.temporal_weight = temporalWeight;
+  if (dateStart !== undefined) body.date_start = dateStart;
+  if (dateEnd !== undefined) body.date_end = dateEnd;
+  if (category !== undefined) body.category = category;
+  if (maxTier !== undefined) body.max_tier = maxTier;
+  if (groupBy !== undefined) body.group_by = groupBy;
+  if (queryRewrite) body.query_rewrite = true;
   return request(`${BASE_URL}/api/v1/memories/search`, {
     method: "POST",
-    body: JSON.stringify({
-      query,
-      limit: limit ?? 10,
-      search_mode: searchMode ?? "hybrid",
-      temporal_weight: temporalWeight,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -113,6 +126,11 @@ export async function ask(
   },
   searchLimit?: number,
   maxResults?: number,
+  skipLlm?: boolean,
+  memoryTypes?: string[],
+  maxTier?: number,
+  dateStart?: string,
+  dateEnd?: string,
 ) {
   const body: Record<string, unknown> = {
     question,
@@ -122,8 +140,44 @@ export async function ask(
   if (llm) {
     body.llm = { ...llm, streaming: false, vision: false, tool_use: false };
   }
+  if (skipLlm) body.skip_llm = true;
+  if (memoryTypes && memoryTypes.length > 0) body.memory_types = memoryTypes;
+  if (maxTier !== undefined) body.max_tier = maxTier;
+  if (dateStart !== undefined) body.date_start = dateStart;
+  if (dateEnd !== undefined) body.date_end = dateEnd;
   return request(`${BASE_URL}/api/v1/ask`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export async function discover(
+  positive: string,
+  negative?: string,
+  limit?: number,
+) {
+  // Resolve positive text to IDs
+  const posResults = await searchMemories(positive, 3);
+  const positiveIds: string[] = (posResults.results ?? []).map((r: { id: string }) => r.id);
+
+  if (positiveIds.length === 0) {
+    return { results: [], message: "No memories matched the positive query" };
+  }
+
+  // Resolve negative text to IDs if provided
+  let negativeIds: string[] = [];
+  if (negative) {
+    const negResults = await searchMemories(negative, 3);
+    negativeIds = (negResults.results ?? []).map((r: { id: string }) => r.id);
+  }
+
+  return request(`${BASE_URL}/api/v1/memories/discover`, {
+    method: "POST",
+    body: JSON.stringify({
+      positive_ids: positiveIds,
+      negative_ids: negativeIds,
+      query: positive,
+      limit: limit ?? 10,
+    }),
   });
 }
