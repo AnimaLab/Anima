@@ -18,9 +18,15 @@ server.tool(
     limit: z.number().optional().describe("Max results to return (default 10)"),
     search_mode: z.enum(["hybrid", "vector", "keyword"]).optional().describe("Search mode (default: hybrid)"),
     temporal_weight: z.number().min(0).max(1).optional().describe("Recency weight 0-1 (default 0.2, higher = prefer recent)"),
+    date_start: z.string().optional().describe("ISO 8601 date filter, inclusive start (e.g. '2024-01-01')"),
+    date_end: z.string().optional().describe("ISO 8601 date filter, inclusive end (e.g. '2024-12-31')"),
+    category: z.string().optional().describe("Filter by semantic category (e.g. 'identity', 'preference', 'environment', 'routine', 'task')"),
+    max_tier: z.number().min(1).max(4).optional().describe("Max memory tier: 1=raw, 2=reflected, 3=deduced, 4=induced"),
+    group_by: z.enum(["episode_id", "category", "source"]).optional().describe("Deduplicate results by field, returning top result per group"),
+    query_rewrite: z.boolean().optional().describe("Expand query with extracted keywords before searching (default: false)"),
   },
-  async ({ query, limit, search_mode, temporal_weight }) => {
-    const result = await client.searchMemories(query, limit, search_mode, temporal_weight);
+  async ({ query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite }) => {
+    const result = await client.searchMemories(query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );
@@ -99,9 +105,14 @@ server.tool(
     question: z.string().describe("Natural language question about the user's memories"),
     search_limit: z.number().optional().describe("Max search results (default 20)"),
     max_results: z.number().optional().describe("Max memories sent to LLM (default 20)"),
+    skip_llm: z.boolean().optional().describe("Return top memories only, skip LLM synthesis (default: false)"),
+    memory_types: z.array(z.string()).optional().describe("Filter by memory type (e.g. ['event', 'reflected', 'deduced'])"),
+    max_tier: z.number().min(1).max(4).optional().describe("Max memory tier: 1=raw, 2=reflected, 3=deduced, 4=induced"),
+    date_start: z.string().optional().describe("ISO 8601 date filter, inclusive start (e.g. '2024-01-01')"),
+    date_end: z.string().optional().describe("ISO 8601 date filter, inclusive end (e.g. '2024-12-31')"),
   },
-  async ({ question, search_limit, max_results }) => {
-    const result = await client.ask(question, undefined, search_limit, max_results);
+  async ({ question, search_limit, max_results, skip_llm, memory_types, max_tier, date_start, date_end }) => {
+    const result = await client.ask(question, undefined, search_limit, max_results, skip_llm, memory_types, max_tier, date_start, date_end);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );
@@ -116,6 +127,20 @@ server.tool(
   },
   async ({ memory_ids, limit, async: asyncMode }) => {
     const result = await client.reflect(memory_ids, limit, asyncMode);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "memory_discover",
+  "Discover memories similar to a concept while avoiding another. Uses semantic vector arithmetic to find results that match the positive concept but diverge from the negative one. Best for exploratory queries like 'find memories about travel but not work trips'.",
+  {
+    positive: z.string().describe("Text describing what to find (e.g. 'favorite restaurants')"),
+    negative: z.string().optional().describe("Text describing what to avoid (e.g. 'fast food, chains')"),
+    limit: z.number().optional().describe("Max results to return (default 10)"),
+  },
+  async ({ positive, negative, limit }) => {
+    const result = await client.discover(positive, negative, limit);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );
