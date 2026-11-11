@@ -78,7 +78,7 @@ Skip OAuth adapters — proxy/bridge approach works fine for non-standard provid
 - **Health endpoints.** `GET /health` (liveness), `GET /health/ready` (checks DB, embedder, processor — returns 503 if degraded).
 - **Startup self-test.** DB ping, embedding smoke test, LLM config validation — fails fast with clear diagnostics before serving.
 - **Graceful shutdown.** SIGINT/SIGTERM handler, 30s drain timeout for in-flight processor jobs.
-- **Cross-platform service install.** `--install`/`--uninstall`/`--service-status` for systemd (Linux), launchd (macOS), NSSM/schtasks (Windows).
+- **Cross-platform service install.** `--install`/`--uninstall`/`--service-status` for systemd (Linux), launchd (macOS), Task Scheduler (Windows).
 - **Service templates.** Shipped in `service/` (systemd unit + launchd plist).
 - **Telemetry opt-out notice.** Startup log explains what's collected and how to disable.
 

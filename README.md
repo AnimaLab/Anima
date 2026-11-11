@@ -475,6 +475,7 @@ anima-server --uninstall
 | -------- | ------- | ------------------------------------------------------------------------- |
 | Linux    | systemd | Unit at `/etc/systemd/system/anima-server.service`, logs via `journalctl` |
 | macOS    | launchd | Plist at `~/Library/LaunchAgents/dev.anima.server.plist`, starts on login |
+| Windows  | Task Scheduler | Per-user task "Anima Server", starts on logon, no administrator rights; logs in `anima-server.log` |
 
 Run `--install` from the directory that holds your `config.toml` and
 `anima.db`: the service uses the current working directory and binary path.
