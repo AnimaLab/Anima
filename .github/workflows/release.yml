@@ -58,6 +58,20 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target ${{ matrix.target }} --bin anima-server
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The server serves the web UI from web/dist next to its working directory.
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Package
         shell: bash
         env:
@@ -76,6 +90,8 @@ jobs:
           cp LICENSE "${ARCHIVE_NAME}/"
           cp README.md "${ARCHIVE_NAME}/"
           cp -r service/ "${ARCHIVE_NAME}/service/"
+          mkdir -p "${ARCHIVE_NAME}/web"
+          cp -r web/dist "${ARCHIVE_NAME}/web/dist"
 
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
             7z a "${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}"
