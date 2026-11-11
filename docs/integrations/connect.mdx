@@ -1,0 +1,75 @@
+---
+title: 'Connect a harness'
+description: 'Give Claude Code, Codex, Cursor, Hermes and other harnesses the same memory'
+---
+
+`anima-server connect` registers Anima with an AI harness so the model can read and write your memory. Run it once per machine; every harness you connect shares the same memories.
+
+```bash
+anima-server connect claude
+anima-server connect all        # every supported harness found on this machine
+```
+
+## What it writes
+
+| Harness | MCP server | Instructions | Automatic recall |
+|---------|------------|--------------|------------------|
+| `claude` (Claude Code) | `~/.claude.json` | `~/.claude/CLAUDE.md` | hooks in `~/.claude/settings.json` |
+| `claude-desktop` | `claude_desktop_config.json` | | |
+| `codex` | `~/.codex/config.toml` | `~/.codex/AGENTS.md` | |
+| `cursor` | `~/.cursor/mcp.json` | | |
+| `hermes` | `~/.hermes/config.yaml` | | |
+
+- **MCP server**: an entry named `anima` that runs `anima-server mcp`.
+- **Instructions**: a block between `<!-- anima:start -->` and `<!-- anima:end -->` telling the model to search memory before a task and save durable facts.
+- **Automatic recall**: at session start the harness receives your identity and preference memories; on each prompt it receives the memories that match it. If the server is unreachable the hooks print nothing and never block the harness.
+
+Each edit keeps the rest of the file, is safe to repeat, and leaves a `.before-anima` copy of the original the first time. Restart the harness to load Anima.
+
+## Options
+
+| Option | Effect |
+|--------|--------|
+| `--dry-run` | Show what would change without writing |
+| `--no-hooks` | Skip the automatic recall hooks |
+| `--no-instructions` | Skip the instruction block |
+| `--url <url>` | Address of the Anima server (default `http://127.0.0.1:3000`) |
+| `--api-key <key>` | API key, when the server requires one |
+| `--namespace <name>` | Memory namespace (default `default`) |
+
+The address, key and namespace are saved to `~/.anima/client.json` and read by `mcp`, `recall`, `export` and `import`. They are never written into the harness files. `ANIMA_BASE_URL`, `ANIMA_API_KEY` and `ANIMA_NAMESPACE` override the file.
+
+## Other harnesses
+
+```bash
+anima-server connect print
+```
+
+prints the MCP entry and the instruction text to paste into any client that speaks MCP over stdio.
+
+## Disconnect
+
+```bash
+anima-server disconnect claude
+```
+
+removes the MCP entry, the instruction block and the hooks, and leaves everything else in place.
+
+## Move to another machine
+
+```bash
+anima-server export memories.json    # old machine
+anima-server import memories.json    # new machine
+anima-server connect all
+```
+
+The export is JSON with every namespace, original IDs, dates, categories and confidence. It holds no embeddings, so the two machines can use different embedding models. Importing the same file twice skips what is already there.
+
+| Command | Result |
+|---------|--------|
+| `export [file]` | Portable JSON, all namespaces |
+| `export --only-namespace` | Only the selected namespace |
+| `export --full` | SQLite snapshot, including conversations, plans and history |
+| `import <file>` | Merge into the server, keeping namespaces |
+| `import <file> --into-namespace` | Put everything in the selected namespace |
+| `import <file> --replace` | Replace existing memories; required for a full snapshot |

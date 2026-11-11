@@ -32,6 +32,7 @@
           {
             "group": "Integrations",
             "pages": [
+              "integrations/connect",
               "integrations/mcp",
               "integrations/web-ui"
             ]
@@ -110,7 +111,7 @@
       },
       {
         "label": "Support",
-        "href": "mailto:contact@runanima.com"
+        "href": "https://github.com/AnimaLab/Anima/issues"
       }
     ]
   },
