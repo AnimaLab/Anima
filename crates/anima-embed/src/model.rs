@@ -300,8 +300,36 @@ impl EmbeddingModel {
             .map_err(|e| EmbedError::Shape(format!("extract output '{}' failed: {e}", output_names.get(hidden_idx).unwrap_or(&"?".to_string()))))?;
 
         let dims: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
+
+        // Some exports (e.g. BGE-M3 with a pooling head) return an already
+        // pooled [batch, hidden] sentence embedding instead of per-token
+        // hidden states. Use it directly; pooling does not apply.
+        if dims.len() == 2 {
+            let pooled = Array2::from_shape_vec((dims[0], dims[1]), out_data.to_vec())
+                .map_err(|e| EmbedError::Shape(format!("reshape: {e}")))?;
+            let projected = project_dimension(&pooled, self.dimension)?;
+            let normalized = l2_normalize(&projected);
+            let dense = normalized
+                .outer_iter()
+                .next()
+                .map(|row| row.to_vec())
+                .ok_or_else(|| EmbedError::Shape("empty embedding batch".into()))?;
+
+            // Such exports provide per-token lexical weights as `sparse_vecs`.
+            let sparse = match output_names.iter().position(|n| n == "sparse_vecs") {
+                Some(idx) if self.sparse_weights.is_some() => {
+                    let (_, weights) = outputs[idx]
+                        .try_extract_tensor::<f32>()
+                        .map_err(|e| EmbedError::Shape(format!("extract output 'sparse_vecs' failed: {e}")))?;
+                    sparse_from_token_weights(weights, encodings[0].get_ids(), &attn_mask_vec)
+                }
+                _ => crate::SparseVector::default(),
+            };
+            return Ok((dense, sparse));
+        }
+
         if dims.len() != 3 {
-            return Err(EmbedError::Shape(format!("expected 3D output, got {:?} for '{}'", dims, output_names.get(hidden_idx).unwrap_or(&"?".to_string()))));
+            return Err(EmbedError::Shape(format!("expected 2D or 3D output, got {:?} for '{}'", dims, output_names.get(hidden_idx).unwrap_or(&"?".to_string()))));
         }
 
         let (bs, seq_len, hidden) = (dims[0], dims[1], dims[2]);
@@ -391,6 +419,29 @@ impl EmbeddingModel {
     }
 }
 
+/// Build a sparse vector from model-provided per-token weights for the first
+/// batch item (`weights` is [batch, seq, 1] flattened, so the first `seq`
+/// values belong to it). Max-pools duplicates and skips special tokens
+/// (CLS=0, PAD=1, EOS/SEP=2, UNK=3), matching `compute_sparse`.
+fn sparse_from_token_weights(weights: &[f32], token_ids: &[u32], attention_mask: &[i64]) -> crate::SparseVector {
+    let mut token_weights: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    for (s, &token_id) in token_ids.iter().enumerate() {
+        let (Some(&w), Some(&mask)) = (weights.get(s), attention_mask.get(s)) else {
+            break;
+        };
+        if mask == 0 || token_id <= 3 || w <= 0.0 {
+            continue;
+        }
+        let entry = token_weights.entry(token_id).or_insert(0.0);
+        if w > *entry {
+            *entry = w;
+        }
+    }
+    let mut entries: Vec<(u32, f32)> = token_weights.into_iter().collect();
+    entries.sort_by_key(|(tid, _)| *tid);
+    crate::SparseVector(entries)
+}
+
 fn mean_pool(token_embeddings: &Array3<f32>, attention_mask: &Array2<i64>) -> Array2<f32> {
     let batch_size = token_embeddings.shape()[0];
     let hidden_dim = token_embeddings.shape()[2];
@@ -478,3 +529,18 @@ fn l2_normalize(embeddings: &Array2<f32>) -> Array2<f32> {
 
 unsafe impl Send for EmbeddingModel {}
 unsafe impl Sync for EmbeddingModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sparse_from_token_weights_skips_special_and_max_pools() {
+        // ids: CLS, 10, 11, 10, EOS, PAD(masked)
+        let ids = [0u32, 10, 11, 10, 2, 1];
+        let mask = [1i64, 1, 1, 1, 1, 0];
+        let weights = [0.9f32, 0.2, 0.0, 0.5, 0.8, 0.7];
+        let sparse = sparse_from_token_weights(&weights, &ids, &mask);
+        assert_eq!(sparse.0, vec![(10, 0.5)]);
+    }
+}
