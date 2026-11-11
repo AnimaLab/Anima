@@ -1789,6 +1789,20 @@ impl MemoryStore {
         Ok(memories)
     }
 
+    /// Every memory in every namespace, oldest first.
+    pub async fn export_everything(&self) -> Result<Vec<Memory>, DbError> {
+        let conn = self.pool.writer().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, namespace, content, metadata, status, created_at, updated_at,              accessed_at, access_count, hash, tags, memory_type, importance, episode_id,              event_date, category, confidence, source              FROM memories ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_memory)?;
+        let mut memories = Vec::new();
+        for row in rows {
+            memories.push(row?);
+        }
+        Ok(memories)
+    }
+
     /// Return the database file size in bytes. Returns 0 for in-memory DBs.
     pub fn db_size_bytes(&self) -> u64 {
         if self.pool.db_path() == ":memory:" {
@@ -2862,9 +2876,9 @@ fn stats_sync(conn: &Connection, namespace: &Namespace) -> Result<NamespaceStats
     let mut stmt = conn.prepare(
         "SELECT
             COUNT(*) as total,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) as superseded,
-            SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END) as deleted,
+            COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) as active,
+            COALESCE(SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END), 0) as superseded,
+            COALESCE(SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END), 0) as deleted,
             COALESCE(AVG(access_count), 0.0) as avg_access,
             COALESCE(MAX(access_count), 0) as max_access,
             MIN(created_at) as oldest,

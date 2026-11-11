@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo.svg" alt="Anima" width="320">
+</p>
+
 # Anima
 
 [License: Apache 2.0](LICENSE) · [Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks) · [Contributing](CONTRIBUTING.md)
@@ -6,17 +10,22 @@
 preferences, decisions, and prior context across sessions, in a single SQLite
 file you control. No hosted backend required.
 
-One Rust binary gives you a REST API, a web UI, hybrid retrieval with local
-embeddings, and a full audit trail. A TypeScript bridge exposes it to any MCP
-client.
+One Rust binary gives you a REST API, a web UI, an MCP server, hybrid retrieval
+with local embeddings, and a full audit trail. One command connects it to
+Claude Code, Codex, Cursor, Hermes and other harnesses, so every assistant you
+use shares the same memory.
 
 Your memories belong to you, not your LLM provider.
+
+![Anima dashboard](docs/images/dashboard.png)
 
 ## Contents
 
 - [Why Anima](#why-anima)
 - [Quickstart](#quickstart)
 - [LLM setup](#llm-setup)
+- [Connect your tools](#connect-your-tools)
+- [Move to another machine](#move-to-another-machine)
 - [Integrations](#integrations)
 - [Concepts](#concepts)
 - [Security](#security)
@@ -35,6 +44,9 @@ Your memories belong to you, not your LLM provider.
   together, with an optional cross-encoder re-ranker.
 - **Auditable**: every memory has revisions, rollback, provenance, a
   confidence score, and a contradiction ledger showing what replaced what.
+- **One memory for every assistant**: `anima-server connect` registers Anima
+  with your harnesses, and `export` / `import` move it to a new machine in one
+  file.
 - **Easy to integrate**: REST API, MCP server, and web UI ship in this repo.
 
 Anima is text-first today. Audio, image, and video ingestion are on the
@@ -148,12 +160,69 @@ Profile names are arbitrary. Key resolution per profile is: config value, then
 `[llm]`, `[processor]`, and `[consolidation]` sections apply. A per-request
 `llm` override on `/chat` and `/ask` always wins.
 
+## Connect your tools
+
+`connect` gives a harness access to your memory. It registers the MCP server,
+adds a short instruction block telling the model when to read and write
+memory, and, where the harness supports hooks, injects relevant memories
+automatically.
+
+```bash
+anima-server connect claude          # Claude Code
+anima-server connect codex           # Codex CLI
+anima-server connect all             # every supported harness found on this machine
+```
+
+| Harness          | MCP server | Instructions            | Automatic recall |
+| ---------------- | ---------- | ----------------------- | ---------------- |
+| `claude`         | yes        | `~/.claude/CLAUDE.md`   | hooks            |
+| `claude-desktop` | yes        |                         |                  |
+| `codex`          | yes        | `~/.codex/AGENTS.md`    |                  |
+| `cursor`         | yes        |                         |                  |
+| `hermes`         | yes        |                         |                  |
+
+`anima-server connect print` prints the MCP entry and instructions for any
+other MCP client.
+
+Every edit is idempotent, keeps the rest of the file, and leaves a
+`.before-anima` copy of the original. `disconnect <harness>` removes it again,
+and `--dry-run` shows what would change. Restart the harness afterwards.
+
+If the server is on another machine or needs a key, say so once:
+
+```bash
+anima-server connect all --url https://memory.example.org --api-key "$ANIMA_API_KEY"
+```
+
+The address and key are saved to `~/.anima/client.json`, not to the harness
+files.
+
+## Move to another machine
+
+```bash
+anima-server export memories.json    # on the old machine
+anima-server import memories.json    # on the new one
+anima-server connect all
+```
+
+The export is plain JSON holding every namespace, with original IDs, dates,
+categories and confidence. It carries no embeddings, so it does not depend on
+the embedding model: the receiving server re-embeds on import. Importing twice
+is safe; memories already present are skipped, and deleted ones stay deleted.
+
+`export --full` takes a SQLite snapshot instead, which also carries
+conversations, plans and revision history. Restoring one replaces the whole
+database and needs `import --replace`.
+
 ## Integrations
 
 ### MCP
 
-The MCP bridge exposes Anima to Claude Code, Claude Desktop, and other MCP
-clients. Build it once:
+`anima-server mcp` serves the tools over MCP stdio; `connect` sets it up for
+you. To configure a client by hand, run `anima-server connect print`.
+
+A standalone TypeScript bridge with the same tools lives in `mcp/`, for
+setups without the server binary on the client machine:
 
 ```bash
 cd mcp && npm install && npm run build
@@ -185,7 +254,11 @@ Tools: `memory_search`, `memory_add`, `memory_update`, `memory_delete`,
 
 Open `http://localhost:3000` to browse and edit memories, run searches, chat,
 explore the memory graph, inspect conflicts and embeddings, and change
-settings.
+settings. Light and dark themes are included.
+
+| Memories | Settings |
+| -------- | -------- |
+| ![Memories page](docs/images/memories.png) | ![Settings page](docs/images/settings.png) |
 
 ### REST API
 
@@ -418,11 +491,6 @@ enabled = false
 
 The Settings page in the web UI can also switch it off, but only until the
 next restart.
-
-## Contact
-
-Partnerships, pilots, or product questions:
-[contact@runanima.com](mailto:contact@runanima.com)
 
 ## License
 

@@ -945,6 +945,9 @@ pub struct ExportQuery {
     /// "sqlite" or "json" (default: "json")
     #[serde(default = "default_json")]
     pub format: String,
+    /// Export every namespace instead of the one in the request header.
+    #[serde(default)]
+    pub all: bool,
 }
 
 fn default_json() -> String {
@@ -957,6 +960,10 @@ pub struct ImportRequest {
     /// "merge" (skip duplicates by content hash) or "replace" (wipe namespace first).
     #[serde(default = "default_merge")]
     pub mode: String,
+    /// Restore each memory into the namespace it was exported from instead
+    /// of the namespace in the request header.
+    #[serde(default)]
+    pub preserve_namespaces: bool,
     /// The backup envelope.
     pub backup: BackupEnvelope,
 }

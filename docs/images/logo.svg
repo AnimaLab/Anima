@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 140" width="420" height="140" role="img" aria-label="Anima">
+  <rect width="420" height="140" rx="12" fill="#0B0B0C"/>
+  <g transform="translate(30 30) scale(3.3333)" fill="#FCEE0A">
+    <path d="M12 2 22 21h-5.2L12 11.6 7.2 21H2L12 2Z"/>
+    <rect x="10" y="16" width="4" height="4"/>
+  </g>
+  <g transform="translate(150 48)" fill="none" stroke="#F2F2EE" stroke-width="7" stroke-linecap="square" stroke-linejoin="bevel">
+    <path d="M0 44 17 0 34 44M8 30h18"/>
+    <path d="M56 44V0l30 44V0"/>
+    <path d="M110 0v44"/>
+    <path d="M134 44V0l19 26 19-26v44"/>
+    <path d="M194 44 211 0l17 44M202 30h18"/>
+  </g>
+</svg>

@@ -1,5 +1,6 @@
 mod app;
 mod auth;
+mod cli;
 mod config;
 mod dto;
 mod handlers;
@@ -31,6 +32,10 @@ use crate::config::AppConfig;
 async fn main() -> anyhow::Result<()> {
     // Handle service management commands before anything else.
     let args: Vec<String> = std::env::args().collect();
+    // Client subcommands (connect, export, import, mcp, recall) never start the server.
+    if let Some(result) = cli::dispatch(&args[1..]).await {
+        return result;
+    }
     if args.iter().any(|a| a == "--install") {
         return service::run(service::ServiceAction::Install);
     }

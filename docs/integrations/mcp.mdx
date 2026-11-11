@@ -5,6 +5,12 @@ description: 'Connect AI assistants to Anima via the Model Context Protocol'
 
 The MCP server wraps Anima as a set of tools that any MCP-compatible assistant can call. Available tools include `memory_search`, `memory_add`, `memory_update`, `memory_delete`, `memory_stats`, `memory_ask`, and `memory_reflect`.
 
+<Note>
+The server binary has the same tools built in: `anima-server mcp`. Use
+[`anima-server connect`](/integrations/connect) to set it up; the TypeScript
+bridge below is for clients that do not have the binary.
+</Note>
+
 ## Setup
 
 ```bash
