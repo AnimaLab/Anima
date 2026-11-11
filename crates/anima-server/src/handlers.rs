@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use tokio_stream::StreamExt;
 
 use anima_consolidate::actions::ConsolidationActionType;
-use anima_core::memory::{content_hash, Memory};
+use anima_core::memory::{content_hash, Memory, MemoryStatus};
 use anima_core::search::SearchMode;
 use anima_db::store::{MemoryPatch, PredictionKind};
 use tracing::warn;
@@ -6468,7 +6468,7 @@ pub async fn export_backup(
 ) -> Result<Response, AppError> {
     match params.format.as_str() {
         "sqlite" => export_sqlite(&state).await,
-        _ => export_json(&state, &ns).await,
+        _ => export_json(&state, &ns, params.all).await,
     }
 }
 
@@ -6505,8 +6505,16 @@ async fn export_sqlite(state: &AppState) -> Result<Response, AppError> {
         .into_response())
 }
 
-async fn export_json(state: &AppState, ns: &anima_core::namespace::Namespace) -> Result<Response, AppError> {
-    let memories = state.store.export_all(ns).await?;
+async fn export_json(
+    state: &AppState,
+    ns: &anima_core::namespace::Namespace,
+    all: bool,
+) -> Result<Response, AppError> {
+    let memories = if all {
+        state.store.export_everything().await?
+    } else {
+        state.store.export_all(ns).await?
+    };
 
     let backup_memories: Vec<BackupMemory> = memories
         .iter()
@@ -6530,9 +6538,9 @@ async fn export_json(state: &AppState, ns: &anima_core::namespace::Namespace) ->
         .collect();
 
     let envelope = BackupEnvelope {
-        version: "1.0".into(),
+        version: "1.1".into(),
         exported_at: chrono::Utc::now().to_rfc3339(),
-        namespace: ns.as_str().to_string(),
+        namespace: if all { "*".into() } else { ns.as_str().to_string() },
         memory_count: backup_memories.len(),
         memories: backup_memories,
     };
@@ -6564,7 +6572,7 @@ pub async fn import_backup(
     let start = std::time::Instant::now();
     let backup = req.backup;
 
-    if backup.version != "1.0" {
+    if !matches!(backup.version.as_str(), "1.0" | "1.1") {
         return Err(AppError::BadRequest(format!(
             "unsupported backup version: {}",
             backup.version
@@ -6573,9 +6581,20 @@ pub async fn import_backup(
 
     // In replace mode, soft-delete all existing memories in the target namespace first
     if req.mode == "replace" {
-        let (existing, _) = state.store.list(&ns, Some("active"), None, None, 0, 100_000).await?;
-        for m in &existing {
-            state.store.soft_delete(&m.id).await?;
+        // With preserved namespaces, every namespace the backup restores into is replaced.
+        let mut targets = vec![ns.clone()];
+        if req.preserve_namespaces {
+            let names: HashSet<&str> = backup.memories.iter().map(|m| m.namespace.as_str()).collect();
+            targets = names
+                .into_iter()
+                .filter_map(|n| anima_core::namespace::Namespace::parse(n).ok())
+                .collect();
+        }
+        for target in &targets {
+            let (existing, _) = state.store.list(target, Some("active"), None, None, 0, 100_000).await?;
+            for m in &existing {
+                state.store.soft_delete(&m.id).await?;
+            }
         }
     }
 
@@ -6588,10 +6607,25 @@ pub async fn import_backup(
         let mut entries: Vec<(Memory, Vec<f32>)> = Vec::with_capacity(chunk.len());
 
         for bm in chunk {
+            // Deleted memories stay deleted: a restore must not resurrect them.
+            let Some(status) = MemoryStatus::from_str(&bm.status)
+                .filter(|s| *s != MemoryStatus::Deleted)
+            else {
+                skipped += 1;
+                continue;
+            };
+
+            let target = if req.preserve_namespaces {
+                anima_core::namespace::Namespace::parse(&bm.namespace)
+                    .map_err(|e| AppError::BadRequest(format!("invalid namespace in backup: {e}")))?
+            } else {
+                ns.clone()
+            };
+
             // In merge mode, skip if content hash already exists
             if req.mode == "merge" {
                 let hash = content_hash(&bm.content);
-                if state.store.find_by_hash(&ns, &hash).await?.is_some() {
+                if state.store.find_by_hash(&target, &hash).await?.is_some() {
                     skipped += 1;
                     continue;
                 }
@@ -6602,7 +6636,7 @@ pub async fn import_backup(
                 .embed(&bm.content)
                 .map_err(|e| AppError::Embedding(e.to_string()))?;
 
-            let target_ns = ns.as_str().to_string();
+            let target_ns = target.as_str().to_string();
 
             let mut memory = Memory::new(
                 target_ns,
@@ -6617,6 +6651,19 @@ pub async fn import_backup(
             memory.importance = bm.importance;
             memory.episode_id = bm.episode_id.clone();
             memory.event_date = bm.event_date.clone();
+            memory.status = status;
+            // Keep the original identity and timeline so a restored store
+            // ranks and dates memories as the source did.
+            if state.store.get(&bm.id).await?.is_none() && !bm.id.trim().is_empty() {
+                memory.id = bm.id.clone();
+            }
+            if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&bm.created_at) {
+                memory.created_at = t.with_timezone(&chrono::Utc);
+                memory.accessed_at = memory.created_at;
+            }
+            if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&bm.updated_at) {
+                memory.updated_at = t.with_timezone(&chrono::Utc);
+            }
 
             entries.push((memory, embedding));
         }
