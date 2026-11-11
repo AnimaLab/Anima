@@ -187,3 +187,31 @@ export async function discover(
     }),
   });
 }
+
+export async function briefing(project?: string) {
+  return request(`${BASE_URL}/api/v1/briefing`, {
+    method: "POST",
+    body: JSON.stringify({ mode: "session", project }),
+  });
+}
+
+export async function listSkills() {
+  return request(`${BASE_URL}/api/v1/skills`);
+}
+
+export async function getSkill(name: string) {
+  return request(`${BASE_URL}/api/v1/skills/${encodeURIComponent(name)}`);
+}
+
+export async function saveSkill(name: string, description: string, content: string) {
+  return request(`${BASE_URL}/api/v1/skills/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify({ description, content }),
+  });
+}
+
+export async function deleteSkill(name: string) {
+  return request(`${BASE_URL}/api/v1/skills/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
