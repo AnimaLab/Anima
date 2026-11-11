@@ -1,6 +1,16 @@
 [server]
 host = "127.0.0.1"
 port = 3000
+# API key required on every /api/* request ("Authorization: Bearer <key>").
+# Empty = use the ANIMA_API_KEY env var. With no key at all the API is
+# unauthenticated, which is only allowed when host is a loopback address.
+api_key = ""
+# Browser origins allowed to call the API cross-origin. Empty = same-origin
+# only (the bundled web UI needs nothing here).
+cors_allowed_origins = []
+# Set true to bind a non-loopback host without an API key (e.g. behind an
+# authenticating reverse proxy). Not recommended.
+allow_unauthenticated = false
 
 [database]
 path = "./anima.db"
@@ -116,7 +126,7 @@ api_key = ""
 
 # Cross-encoder re-ranker for improved retrieval quality.
 # Downloads bge-reranker-v2-m3 INT8 (571MB) on first use.
-# Disabled by default — enable for better natural language query results.
+# Enabled by default — set enabled = false to skip the download and save latency.
 [reranker]
 enabled = true
 model_dir = "./models/bge-reranker-v2-m3"

@@ -1,11 +1,17 @@
-const BASE_URL = process.env.ANIMA_URL || "http://127.0.0.1:3000";
+// ANIMA_BASE_URL is the documented name; ANIMA_URL is kept for compatibility.
+const BASE_URL = (
+  process.env.ANIMA_BASE_URL || process.env.ANIMA_URL || "http://127.0.0.1:3000"
+).replace(/\/+$/, "");
 const NAMESPACE = process.env.ANIMA_NAMESPACE || "default";
+const API_KEY = (process.env.ANIMA_API_KEY || "").trim();
 
 function headers(): Record<string, string> {
-  return {
+  const h: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Anima-Namespace": NAMESPACE,
   };
+  if (API_KEY) h["Authorization"] = `Bearer ${API_KEY}`;
+  return h;
 }
 
 async function request(url: string, init?: RequestInit) {

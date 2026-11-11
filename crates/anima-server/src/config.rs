@@ -180,6 +180,33 @@ impl AppConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    /// API key required on every `/api/*` request. Empty = fall back to the
+    /// `ANIMA_API_KEY` env var; if both are empty the API is unauthenticated,
+    /// which is only permitted on loopback binds.
+    #[serde(default)]
+    pub api_key: String,
+    /// Browser origins allowed to call the API cross-origin
+    /// (e.g. `["http://localhost:5173"]`). Empty = same-origin only.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
+    /// Allow a non-loopback bind without an API key. Only for deployments
+    /// where a reverse proxy or private network already handles auth.
+    #[serde(default)]
+    pub allow_unauthenticated: bool,
+}
+
+impl ServerConfig {
+    /// API key resolution: config value > `ANIMA_API_KEY` env.
+    pub fn resolve_api_key(&self) -> Option<String> {
+        let from_config = self.api_key.trim();
+        if !from_config.is_empty() {
+            return Some(from_config.to_string());
+        }
+        std::env::var("ANIMA_API_KEY")
+            .ok()
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -478,6 +505,9 @@ impl Default for AppConfig {
             server: ServerConfig {
                 host: "127.0.0.1".into(),
                 port: 3000,
+                api_key: String::new(),
+                cors_allowed_origins: Vec::new(),
+                allow_unauthenticated: false,
             },
             database: DatabaseConfig {
                 path: "./anima.db".into(),

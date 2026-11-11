@@ -17,6 +17,45 @@ export function getNamespace() {
   return currentNamespace
 }
 
+const API_KEY_STORAGE = 'anima_api_key'
+
+function getApiKey(): string {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setApiKey(key: string) {
+  try {
+    if (key) localStorage.setItem(API_KEY_STORAGE, key)
+    else localStorage.removeItem(API_KEY_STORAGE)
+  } catch {
+    // storage unavailable (private mode) — key lasts for this request only
+  }
+}
+
+/**
+ * fetch() wrapper for the Anima API. Attaches the stored API key and, when the
+ * server answers 401, asks for the key once and retries.
+ */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = (key: string) => {
+    const headers = new Headers(init.headers)
+    if (key) headers.set('Authorization', `Bearer ${key}`)
+    return fetch(path, { ...init, headers })
+  }
+  const res = await send(getApiKey())
+  if (res.status !== 401) return res
+  const entered = window.prompt('This Anima server requires an API key:')?.trim()
+  if (!entered) return res
+  const retry = await send(entered)
+  if (retry.status !== 401) setApiKey(entered)
+  else setApiKey('')
+  return retry
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -28,7 +67,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       headers['X-Anima-Namespace'] = currentNamespace
     }
   }
-  const res = await fetch(path, { ...options, headers })
+  const res = await apiFetch(path, { ...options, headers })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error || res.statusText)
@@ -137,7 +176,7 @@ export const api = {
       conversation_id: conversationId,
       attachments: attachments?.length ? attachments : undefined,
     })
-    const res = await fetch('/api/v1/chat/stream', { method: 'POST', headers, body, signal })
+    const res = await apiFetch('/api/v1/chat/stream', { method: 'POST', headers, body, signal })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }))
       throw new Error(err.error || res.statusText)
@@ -240,7 +279,7 @@ export const api = {
   // Backup & Restore
   exportBackupJson: async (namespace?: string): Promise<Blob> => {
     const ns = namespace || currentNamespace
-    const res = await fetch(`/api/v1/backup?format=json`, {
+    const res = await apiFetch(`/api/v1/backup?format=json`, {
       headers: { 'X-Anima-Namespace': ns },
     })
     if (!res.ok) {
@@ -251,7 +290,7 @@ export const api = {
   },
 
   exportBackupSqlite: async (): Promise<Blob> => {
-    const res = await fetch(`/api/v1/backup?format=sqlite`, {
+    const res = await apiFetch(`/api/v1/backup?format=sqlite`, {
       headers: { 'X-Anima-Namespace': currentNamespace },
     })
     if (!res.ok) {
@@ -272,7 +311,7 @@ export const api = {
 
   importBackupSqlite: async (file: File): Promise<void> => {
     const buffer = await file.arrayBuffer()
-    const res = await fetch('/api/v1/restore/sqlite', {
+    const res = await apiFetch('/api/v1/restore/sqlite', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/octet-stream',
