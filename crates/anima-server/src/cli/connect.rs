@@ -99,7 +99,12 @@ impl Ctx<'_> {
             return Ok(());
         }
         let old = std::fs::read_to_string(path).unwrap_or_default();
-        self.write(path, &edit(&old), what)
+        // The edits work on "\n". A file that uses CRLF gets CRLF back, so
+        // the lines we did not touch stay byte for byte the same.
+        let crlf = old.contains("\r\n");
+        let edited = edit(&old.replace("\r\n", "\n"));
+        let new = if crlf { edited.replace('\n', "\r\n") } else { edited };
+        self.write(path, &new, what)
     }
 
     fn mcp_entry(&self, typed: bool) -> Value {
@@ -254,6 +259,16 @@ fn remove_yaml_server(text: &str) -> String {
             out.push(line);
         }
     }
+    // An `mcp_servers:` key left with no entries would read as null: drop it.
+    if let Some(at) = out.iter().position(|l| l.trim_end() == "mcp_servers:") {
+        let has_entries = out[at + 1..]
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .is_some_and(|l| indent_of(l) > 0);
+        if !has_entries {
+            out.remove(at);
+        }
+    }
     let joined = out.join("\n");
     let trimmed = joined.trim_end();
     if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") }
@@ -343,8 +358,28 @@ fn harness_dir(home: &Path, harness: &str) -> PathBuf {
         "claude-desktop" => claude_desktop_dir(home),
         "codex" => home.join(".codex"),
         "cursor" => home.join(".cursor"),
-        _ => home.join(".hermes"),
+        _ => hermes_dir(home, std::env::var_os("HERMES_HOME").map(PathBuf::from)),
     }
+}
+
+/// Hermes keeps its config in `HERMES_HOME` when that is set, in
+/// `%LOCALAPPDATA%\hermes` on Windows, and in `~/.hermes` elsewhere. The
+/// environment only applies to the real home directory, not to a `--home`
+/// override.
+fn hermes_dir(home: &Path, hermes_home: Option<PathBuf>) -> PathBuf {
+    let real_home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    if real_home.as_deref() == Some(home) {
+        if let Some(dir) = hermes_home.filter(|d| !d.as_os_str().is_empty()) {
+            return dir;
+        }
+    }
+    let windows_default = home.join("AppData").join("Local").join("hermes");
+    if cfg!(target_os = "windows") && windows_default.join("config.yaml").is_file() {
+        return windows_default;
+    }
+    home.join(".hermes")
 }
 
 fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
@@ -592,6 +627,40 @@ mod tests {
         run(&opts(home.path(), "all", &[]), true).unwrap();
         assert!(read(&home.path().join(".codex").join("config.toml")).contains("[mcp_servers.anima]"));
         assert!(!home.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn crlf_files_keep_their_line_endings() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "model:\r\n  default: x\r\ntools:\r\n  - web\r\n";
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let connected = read(&dir.join("config.yaml"));
+        assert!(connected.starts_with(original), "untouched lines are unchanged");
+        assert!(!connected.replace("\r\n", "").contains('\n'), "no bare LF was introduced");
+
+        run(&opts(home.path(), "hermes", &[]), false).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), original);
+    }
+
+    #[test]
+    fn hermes_home_is_ignored_for_an_overridden_home() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = Some(PathBuf::from("/somewhere/else"));
+        assert_eq!(hermes_dir(home.path(), elsewhere), home.path().join(".hermes"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hermes_windows_install_is_found_under_local_app_data() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join("AppData").join("Local").join("hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), "model: x\n").unwrap();
+        assert_eq!(hermes_dir(home.path(), None), dir);
     }
 
     #[test]
