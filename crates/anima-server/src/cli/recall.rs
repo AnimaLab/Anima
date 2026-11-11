@@ -10,7 +10,6 @@
 //! The selection itself happens on the server (`POST /api/v1/briefing`).
 
 use std::io::{IsTerminal, Read};
-use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -64,11 +63,14 @@ fn prompt_from_payload(payload: &str) -> Option<String> {
     Some(prompt.chars().take(2000).collect())
 }
 
+/// Last folder of a path. Both separators are accepted on every platform,
+/// since the path comes from the harness and not from this OS's own APIs.
 fn folder_name(path: &str) -> Option<String> {
-    Path::new(path.trim_end_matches(['/', '\\']))
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .filter(|n| !n.is_empty())
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .map(str::to_string)
+        .filter(|n| !n.is_empty() && !n.ends_with(':'))
 }
 
 /// The project a session is about: `--project=<name>`, else the working
