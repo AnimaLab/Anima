@@ -232,103 +232,163 @@ fn status() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ---------- Windows (sc.exe) ----------
+// ---------- Windows (Task Scheduler) ----------
+//
+// The server is a console program, not a Windows service, so it is run by a
+// per-user scheduled task that starts at logon. This needs no administrator
+// rights and no extra software. `conhost --headless` keeps the console window
+// from appearing, and a small launcher script sets the working directory
+// (the config uses relative paths) and sends output to a log file.
+
+#[cfg(target_os = "windows")]
+const TASK_NAME: &str = "Anima Server";
+#[cfg(target_os = "windows")]
+const LAUNCHER: &str = "anima-service.cmd";
+#[cfg(target_os = "windows")]
+const LOG_FILE: &str = "anima-server.log";
+
+/// Quote a value for a PowerShell single-quoted string.
+#[cfg(any(target_os = "windows", test))]
+fn ps_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// The launcher script: run from its own folder, append output to the log.
+#[cfg(any(target_os = "windows", test))]
+fn launcher_script(bin: &Path, config_name: &str, log_name: &str) -> String {
+    format!(
+        "@echo off\r\nrem Started by the \"Anima Server\" scheduled task. Created by anima-server --install.\r\ncd /d \"%~dp0\"\r\n\"{}\" \"{config_name}\" >> \"{log_name}\" 2>&1\r\n",
+        bin.display()
+    )
+}
+
+/// PowerShell that registers the logon task and starts it now.
+#[cfg(any(target_os = "windows", test))]
+fn register_task_script(task: &str, launcher: &Path, cwd: &Path) -> String {
+    let argument = format!("--headless \"{}\"", launcher.display());
+    format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument {arg} -WorkingDirectory {cwd}; \
+         $trigger = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; \
+         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries \
+         -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 \
+         -RestartInterval (New-TimeSpan -Minutes 1); \
+         Register-ScheduledTask -TaskName {task} -Action $action -Trigger $trigger -Settings $settings \
+         -Description 'Anima memory server' -Force | Out-Null; \
+         Start-ScheduledTask -TaskName {task}",
+        arg = ps_quote(&argument),
+        cwd = ps_quote(&cwd.to_string_lossy()),
+        task = ps_quote(task),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn powershell(script: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|e| anyhow::anyhow!("cannot run PowerShell: {e}"))?;
+    if !output.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
 
 #[cfg(target_os = "windows")]
 fn install() -> anyhow::Result<()> {
     let bin = anima_binary()?;
     let cwd = anima_working_dir()?;
-    let config = cwd.join("config.toml");
+    anyhow::ensure!(
+        cwd.join("config.toml").is_file(),
+        "no config.toml in {}. Run --install from the folder that holds Anima's config and data.",
+        cwd.display()
+    );
+    let launcher = cwd.join(LAUNCHER);
+    std::fs::write(&launcher, launcher_script(&bin, "config.toml", LOG_FILE))?;
 
-    // Use sc.exe to create a service.
-    // Note: sc.exe requires the binary to implement the Windows Service API,
-    // which we don't. For now, use NSSM if available, otherwise fall back to
-    // a scheduled task that runs at startup.
-    let nssm = which_nssm();
-    if let Some(nssm_path) = nssm {
-        let status = std::process::Command::new(&nssm_path)
-            .args([
-                "install",
-                "anima-server",
-                &bin.to_string_lossy(),
-                &config.to_string_lossy(),
-            ])
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(s) => return Err(anyhow::anyhow!("nssm install failed: exit {s}")),
-            Err(e) => return Err(anyhow::anyhow!("nssm install failed: {e}")),
-        }
+    powershell(&register_task_script(TASK_NAME, &launcher, &cwd)).map_err(|e| {
+        anyhow::anyhow!("could not register the scheduled task \"{TASK_NAME}\": {e}")
+    })?;
 
-        // Set working directory
-        let _ = std::process::Command::new(&nssm_path)
-            .args(["set", "anima-server", "AppDirectory", &cwd.to_string_lossy()])
-            .status();
-
-        let _ = std::process::Command::new(&nssm_path)
-            .args(["start", "anima-server"])
-            .status();
-
-        println!("Anima installed as a Windows service via NSSM.");
-        println!("  Stop:   nssm stop anima-server");
-        println!("  Remove: nssm remove anima-server confirm");
-    } else {
-        // Fallback: create a scheduled task
-        let task_xml = format!(
-            r#"schtasks /create /tn "Anima Server" /tr "\"{}\" \"{}\"" /sc onlogon /rl highest /f"#,
-            bin.display(),
-            config.display(),
-        );
-        println!("NSSM not found. To install as a startup task, run:");
-        println!("  {task_xml}");
-        println!("\nOr install NSSM (https://nssm.cc) and re-run --install.");
-    }
+    println!("Anima installed. It is starting now and will start at each logon.");
+    println!("  Folder: {}", cwd.display());
+    println!("  Log:    {}", cwd.join(LOG_FILE).display());
+    println!("  Status: anima-server --service-status");
+    println!("  Remove: anima-server --uninstall");
     Ok(())
 }
 
+/// PowerShell that stops the servers started from `bin` with a config file,
+/// leaving `mcp`, `recall` and other client subcommands alone.
 #[cfg(target_os = "windows")]
-fn which_nssm() -> Option<PathBuf> {
-    std::process::Command::new("where")
-        .arg("nssm")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .next()
-                .map(|s| PathBuf::from(s.trim()))
-        })
+fn stop_servers_script(bin: &Path) -> String {
+    format!(
+        "Get-CimInstance Win32_Process -Filter \"Name='anima-server.exe'\" | \
+         Where-Object {{ $_.ExecutablePath -eq {bin} -and $_.CommandLine -like '*config.toml*' }} | \
+         ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}",
+        bin = ps_quote(&bin.to_string_lossy()),
+    )
 }
 
 #[cfg(target_os = "windows")]
 fn uninstall() -> anyhow::Result<()> {
-    if let Some(nssm_path) = which_nssm() {
-        let _ = std::process::Command::new(&nssm_path)
-            .args(["stop", "anima-server"])
-            .status();
-        let _ = std::process::Command::new(&nssm_path)
-            .args(["remove", "anima-server", "confirm"])
-            .status();
-        println!("Anima service uninstalled.");
+    let bin = anima_binary()?;
+    let task = ps_quote(TASK_NAME);
+    let script = format!(
+        "$t = Get-ScheduledTask -TaskName {task} -ErrorAction SilentlyContinue; \
+         if ($t) {{ Stop-ScheduledTask -TaskName {task} -ErrorAction SilentlyContinue; \
+         Unregister-ScheduledTask -TaskName {task} -Confirm:$false; 'removed' }} else {{ 'absent' }}; {stop}",
+        stop = stop_servers_script(&bin),
+    );
+    let outcome = powershell(&script)?;
+    if let Ok(cwd) = anima_working_dir() {
+        let _ = std::fs::remove_file(cwd.join(LAUNCHER));
+    }
+    if outcome.contains("removed") {
+        println!("Anima service uninstalled. Its data and config were left in place.");
     } else {
-        println!("Run: schtasks /delete /tn \"Anima Server\" /f");
+        println!("No \"{TASK_NAME}\" scheduled task was installed.");
     }
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn status() -> anyhow::Result<()> {
-    if let Some(nssm_path) = which_nssm() {
-        let output = std::process::Command::new(&nssm_path)
-            .args(["status", "anima-server"])
-            .output();
-        match output {
-            Ok(o) => println!("{}", String::from_utf8_lossy(&o.stdout).trim()),
-            Err(e) => println!("Could not query service: {e}"),
-        }
-    } else {
-        println!("NSSM not installed — cannot query service status.");
-    }
+    let task = ps_quote(TASK_NAME);
+    let script = format!(
+        "$t = Get-ScheduledTask -TaskName {task} -ErrorAction SilentlyContinue; \
+         if ($t) {{ 'installed, task ' + $t.State.ToString().ToLower() }} else {{ 'not installed' }}"
+    );
+    println!("Anima service: {}", powershell(&script)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn powershell_strings_are_quoted_safely() {
+        assert_eq!(ps_quote("C:\\Users\\O'Neil\\Anima"), "'C:\\Users\\O''Neil\\Anima'");
+    }
+
+    #[test]
+    fn launcher_runs_from_its_folder_and_logs() {
+        let script = launcher_script(Path::new("C:\\Program Files\\Anima\\anima-server.exe"), "config.toml", "anima-server.log");
+        assert!(script.contains("cd /d \"%~dp0\"\r\n"));
+        assert!(script.contains("\"C:\\Program Files\\Anima\\anima-server.exe\" \"config.toml\" >> \"anima-server.log\" 2>&1"));
+    }
+
+    #[test]
+    fn task_registration_hides_the_console_and_needs_no_admin() {
+        let script = register_task_script(
+            "Anima Server",
+            Path::new("C:\\Anima\\anima-service.cmd"),
+            Path::new("C:\\Anima"),
+        );
+        assert!(script.contains("-Execute 'conhost.exe' -Argument '--headless \"C:\\Anima\\anima-service.cmd\"'"));
+        assert!(script.contains("-WorkingDirectory 'C:\\Anima'"));
+        assert!(script.contains("-AtLogOn"));
+        assert!(!script.to_lowercase().contains("highest"), "must not ask for elevation");
+    }
 }
