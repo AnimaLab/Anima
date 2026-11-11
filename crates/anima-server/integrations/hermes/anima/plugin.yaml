@@ -1,0 +1,6 @@
+name: anima
+version: 0.1.0
+description: "Anima: local-first long-term memory and skills shared by all your assistants."
+hooks:
+  - on_memory_write
+  - on_session_switch

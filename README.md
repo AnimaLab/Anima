@@ -180,10 +180,16 @@ anima-server connect all             # every supported harness found on this mac
 | `claude-desktop` | yes        |                         |                  |
 | `codex`          | yes        | `AGENTS.md` and skill   |                  |
 | `cursor`         | yes        |                         |                  |
-| `hermes`         | yes        | skill                   |                  |
+| `hermes`         | provider   | skill                   | memory provider  |
 
 The skill is `anima`, a guide installed in the harness's own skills folder
 that tells the model when to search memory, what to save and how to correct it.
+
+On Hermes, Anima is installed as the external memory provider rather than as an
+MCP server: Hermes then injects the briefing and the matching memories itself,
+and mirrors what its built-in `memory` tool writes into Anima. If another
+provider already holds that slot, `connect` leaves it alone and adds Anima as
+an MCP server.
 
 `anima-server connect print` prints the MCP entry and instructions for any
 other MCP client.

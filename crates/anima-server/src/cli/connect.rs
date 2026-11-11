@@ -144,19 +144,66 @@ impl Ctx<'_> {
             crate::skills::GUIDE_DESCRIPTION,
             crate::skills::GUIDE_BODY,
         );
-        if self.connect {
-            return self.write(&path, &ours, "anima skill");
+        self.managed_file(&path, &ours, "anima skill", self.connect)
+    }
+
+    /// A file that is entirely ours: written when `present`, removed otherwise.
+    /// It is only removed while it still holds what we wrote, and its folder
+    /// goes with it once empty.
+    fn managed_file(&mut self, path: &Path, ours: &str, what: &str, present: bool) -> anyhow::Result<()> {
+        if present {
+            return self.write(path, ours, what);
         }
-        // Only remove the file if it is still the one connect wrote.
-        if std::fs::read_to_string(&path).ok().as_deref() == Some(ours.as_str()) {
+        // Compare without regard to line endings: a checkout may have changed them.
+        let same = |a: &str, b: &str| a.replace("\r\n", "\n") == b.replace("\r\n", "\n");
+        if std::fs::read_to_string(path).ok().is_some_and(|found| same(&found, ours)) {
             if !self.dry_run {
-                std::fs::remove_file(&path)?;
-                let _ = std::fs::remove_dir(&folder);
+                std::fs::remove_file(path)?;
+                if let Some(folder) = path.parent() {
+                    let _ = std::fs::remove_dir(folder);
+                }
             }
             let verb = if self.dry_run { "would remove" } else { "removed    " };
-            self.report.push(format!("  {verb} {} (anima skill)", path.display()));
+            self.report.push(format!("  {verb} {} ({what})", path.display()));
         }
         Ok(())
+    }
+
+    /// Hermes: make Anima the profile's external memory provider when no other
+    /// provider holds that slot, and fall back to a plain MCP server when one does.
+    fn hermes(&mut self, dir: &Path) -> anyhow::Result<()> {
+        let config = dir.join("config.yaml");
+        let current = std::fs::read_to_string(&config).unwrap_or_default().replace("\r\n", "\n");
+        let provider = yaml_memory_provider(&current);
+        let slot_free = provider.as_deref().is_none_or(|p| is_core_provider(p) || p == HERMES_PROVIDER);
+        // An inline `memory: {...}` cannot be edited line by line: leave it alone.
+        let as_provider = self.connect && slot_free && set_memory_provider(&current, true).is_some();
+
+        if self.connect && !as_provider {
+            self.report.push(format!(
+                "  note: Hermes already uses the memory provider {:?}; adding Anima as an MCP server instead",
+                provider.unwrap_or_default()
+            ));
+        }
+        let (connect, exe) = (self.connect, self.exe.clone());
+        self.edit_text(&config, if as_provider { "memory provider" } else { "MCP server" }, |old| {
+            if as_provider {
+                // The provider brings its own tools: an MCP entry would only duplicate them.
+                let without_mcp = remove_yaml_server(old);
+                set_memory_provider(&without_mcp, true).unwrap_or(without_mcp)
+            } else if connect {
+                upsert_yaml_server(old, &exe)
+            } else {
+                let without_mcp = remove_yaml_server(old);
+                set_memory_provider(&without_mcp, false).unwrap_or(without_mcp)
+            }
+        })?;
+
+        let plugin = dir.join("plugins").join(HERMES_PROVIDER);
+        for (file, content) in HERMES_PLUGIN_FILES {
+            self.managed_file(&plugin.join(file), content, "memory provider plugin", as_provider)?;
+        }
+        self.guide_skill(dir)
     }
 
     fn instruction_file(&mut self, path: &Path) -> anyhow::Result<()> {
@@ -272,6 +319,87 @@ fn remove_yaml_server(text: &str) -> String {
     let joined = out.join("\n");
     let trimmed = joined.trim_end();
     if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") }
+}
+
+/// Name Hermes knows the memory provider plugin by.
+const HERMES_PROVIDER: &str = "anima";
+
+/// The plugin, shipped inside the binary so `connect` needs nothing else.
+const HERMES_PLUGIN_FILES: &[(&str, &str)] = &[
+    ("__init__.py", include_str!("../../integrations/hermes/anima/__init__.py")),
+    ("plugin.yaml", include_str!("../../integrations/hermes/anima/plugin.yaml")),
+    ("README.md", include_str!("../../integrations/hermes/anima/README.md")),
+];
+
+/// Values of `memory.provider` that mean "Hermes's built-in store only".
+fn is_core_provider(value: &str) -> bool {
+    matches!(value.to_lowercase().as_str(), "" | "default" | "builtin" | "built-in" | "none" | "null" | "~")
+}
+
+fn yaml_scalar(value: &str) -> String {
+    let value = value.split(" #").next().unwrap_or("").trim();
+    value.trim_matches(|c| c == '"' || c == '\'').to_string()
+}
+
+/// Lines of the top-level `memory:` block: (index of the key line, index one past the block).
+fn memory_block(lines: &[&str]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|l| l.trim_end() == "memory:")?;
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| !l.trim().is_empty() && indent_of(l) == 0)
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    Some((start, end))
+}
+
+fn provider_line(lines: &[&str], block: (usize, usize)) -> Option<usize> {
+    (block.0 + 1..block.1).find(|&i| indent_of(lines[i]) == 2 && lines[i].trim_start().starts_with("provider:"))
+}
+
+/// The value of `memory.provider`, when the config sets one.
+fn yaml_memory_provider(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let block = memory_block(&lines)?;
+    let line = lines[provider_line(&lines, block)?];
+    Some(yaml_scalar(line.trim_start().trim_start_matches("provider:")))
+}
+
+/// Set `memory.provider` to Anima, or clear it when it is Anima. Returns
+/// `None` when the config writes `memory` in a form this cannot edit safely.
+fn set_memory_provider(text: &str, enable: bool) -> Option<String> {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    if refs.iter().any(|l| indent_of(l) == 0 && l.starts_with("memory:") && l.trim_end() != "memory:") {
+        return None;
+    }
+    let wanted = format!("  provider: {HERMES_PROVIDER}");
+    match memory_block(&refs) {
+        Some(block) => match provider_line(&refs, block) {
+            Some(at) if enable => lines[at] = wanted,
+            Some(at) => {
+                if yaml_scalar(refs[at].trim_start().trim_start_matches("provider:")) == HERMES_PROVIDER {
+                    lines.remove(at);
+                    // A `memory:` key left with nothing under it would read as null: drop it.
+                    let emptied = lines[block.0 + 1..block.1 - 1].iter().all(|l| l.trim().is_empty());
+                    if emptied {
+                        lines.remove(block.0);
+                    }
+                }
+            }
+            None if enable => lines.insert(block.0 + 1, wanted),
+            None => {}
+        },
+        None if enable => {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push("memory:".into());
+            lines.push(wanted);
+        }
+        None => {}
+    }
+    let joined = lines.join("\n");
+    let trimmed = joined.trim_end();
+    Some(if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") })
 }
 
 fn upsert_yaml_server(text: &str, exe: &str) -> String {
@@ -406,12 +534,7 @@ fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
             ctx.instruction_file(&dir.join("AGENTS.md"))?;
             ctx.guide_skill(&dir)?;
         }
-        "hermes" => {
-            ctx.edit_text(&dir.join("config.yaml"), "MCP server", |old| {
-                if connect { upsert_yaml_server(old, &exe) } else { remove_yaml_server(old) }
-            })?;
-            ctx.guide_skill(&dir)?;
-        }
+        "hermes" => ctx.hermes(&dir)?,
         other => anyhow::bail!("unknown harness: {other}. Choose one of: {}, all, print", HARNESSES.join(", ")),
     }
     Ok(())
@@ -627,6 +750,66 @@ mod tests {
         run(&opts(home.path(), "all", &[]), true).unwrap();
         assert!(read(&home.path().join(".codex").join("config.toml")).contains("[mcp_servers.anima]"));
         assert!(!home.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn hermes_becomes_the_memory_provider_and_disconnect_undoes_it() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "model:\n  default: x\nmemory:\n  memory_enabled: true\n  user_char_limit: 1375\ntools:\n  - web\n";
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let config = read(&dir.join("config.yaml"));
+        assert_eq!(
+            config,
+            "model:\n  default: x\nmemory:\n  provider: anima\n  memory_enabled: true\n  user_char_limit: 1375\ntools:\n  - web\n"
+        );
+        assert!(!config.contains("mcp_servers"), "the provider brings its own tools");
+        let plugin = dir.join("plugins").join("anima");
+        assert!(read(&plugin.join("__init__.py")).contains("class AnimaMemoryProvider"));
+        assert!(read(&plugin.join("plugin.yaml")).starts_with("name: anima"));
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), config, "second connect changes nothing");
+
+        run(&opts(home.path(), "hermes", &[]), false).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), original);
+        assert!(!plugin.exists(), "the plugin folder is removed");
+    }
+
+    #[test]
+    fn hermes_with_another_provider_gets_an_mcp_server_instead() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), "memory:\n  provider: honcho\n").unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let config = read(&dir.join("config.yaml"));
+        assert!(config.starts_with("memory:\n  provider: honcho\n"), "the other provider is left alone");
+        assert!(config.contains("mcp_servers:\n  anima:"));
+        assert!(!dir.join("plugins").join("anima").exists());
+    }
+
+    #[test]
+    fn memory_provider_yaml_edits() {
+        assert_eq!(yaml_memory_provider("memory:\n  provider: 'mem0'  # note\n").as_deref(), Some("mem0"));
+        assert_eq!(yaml_memory_provider("memory:\n  nested:\n    provider: x\n"), None);
+        assert_eq!(yaml_memory_provider("other:\n  provider: x\n"), None);
+        assert_eq!(set_memory_provider("", true).as_deref(), Some("memory:\n  provider: anima\n"));
+        assert_eq!(
+            set_memory_provider("memory:\n  provider: builtin\n", true).as_deref(),
+            Some("memory:\n  provider: anima\n")
+        );
+        assert_eq!(
+            set_memory_provider("memory:\n  provider: honcho\n", false).as_deref(),
+            Some("memory:\n  provider: honcho\n"),
+            "disconnect never clears another provider"
+        );
+        assert_eq!(set_memory_provider("memory: {provider: x}\n", true), None);
+        assert!(is_core_provider("Built-In") && is_core_provider("") && !is_core_provider("honcho"));
     }
 
     #[test]
