@@ -14,15 +14,16 @@ anima-server connect all        # every supported harness found on this machine
 
 | Harness | MCP server | Instructions | Automatic recall |
 |---------|------------|--------------|------------------|
-| `claude` (Claude Code) | `~/.claude.json` | `~/.claude/CLAUDE.md` | hooks in `~/.claude/settings.json` |
+| `claude` (Claude Code) | `~/.claude.json` | `~/.claude/CLAUDE.md`, `~/.claude/skills/anima/` | hooks in `~/.claude/settings.json` |
 | `claude-desktop` | `claude_desktop_config.json` | | |
-| `codex` | `~/.codex/config.toml` | `~/.codex/AGENTS.md` | |
+| `codex` | `~/.codex/config.toml` | `~/.codex/AGENTS.md`, `~/.codex/skills/anima/` | |
 | `cursor` | `~/.cursor/mcp.json` | | |
-| `hermes` | `~/.hermes/config.yaml` | | |
+| `hermes` | `~/.hermes/config.yaml` | `~/.hermes/skills/anima/` | |
 
 - **MCP server**: an entry named `anima` that runs `anima-server mcp`.
 - **Instructions**: a block between `<!-- anima:start -->` and `<!-- anima:end -->` telling the model to search memory before a task and save durable facts.
-- **Automatic recall**: at session start the harness receives your identity and preference memories; on each prompt it receives the memories that match it. If the server is unreachable the hooks print nothing and never block the harness.
+- **The anima skill**: a `SKILL.md` with the full guide to using this memory, in the harness's own skills folder.
+- **Automatic recall**: at session start the harness receives a [briefing](/concepts/briefing-and-skills): your profile, what is relevant to the working folder, and the list of stored skills. On each prompt it receives the memories that match it. If the server is unreachable the hooks print nothing and never block the harness.
 
 Each edit keeps the rest of the file, is safe to repeat, and leaves a `.before-anima` copy of the original the first time. Restart the harness to load Anima.
 
@@ -53,7 +54,7 @@ prints the MCP entry and the instruction text to paste into any client that spea
 anima-server disconnect claude
 ```
 
-removes the MCP entry, the instruction block and the hooks, and leaves everything else in place.
+removes the MCP entry, the instruction block, the anima skill and the hooks, and leaves everything else in place.
 
 ## Move to another machine
 
@@ -63,7 +64,7 @@ anima-server import memories.json    # new machine
 anima-server connect all
 ```
 
-The export is JSON with every namespace, original IDs, dates, categories and confidence. It holds no embeddings, so the two machines can use different embedding models. Importing the same file twice skips what is already there.
+The export is JSON with every namespace and skill, original IDs, dates, categories and confidence. It holds no embeddings, so the two machines can use different embedding models. Importing the same file twice skips what is already there.
 
 | Command | Result |
 |---------|--------|
