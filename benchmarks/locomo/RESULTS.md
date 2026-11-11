@@ -12,7 +12,9 @@
 | **Overall** | **142** | **152** | **93.4%** | **0.839** |
 
 
-*Note: evaluated on conv-26 only (1 of 10 conversations). Full 10-conversation score TBD.*
+*Note: evaluated on conv-26 only (1 of 10 conversations), the conversation used
+during development. For full 10-conversation results (87.7% best run) see
+[FULL-RUNS.md](FULL-RUNS.md).*
 
 ### Public reference scores
 
@@ -109,7 +111,7 @@ Tiers: 1=raw, 2=reflected, 3=deduced, 4=induced
 - v27→v29: reflection adds +0.7pp overall, recovers open-domain to 90.0%
 - v29→v30: graph-based retrieval adds +7.2pp overall, massive multi-hop gain (+13.5pp)
 - v30 uses /ask API (server-side retrieval+answer), v29 used Python pipeline
-- v30 evaluated on conv-26 only (1 conversation, 152 questions) — full 10-conv TBD
+- v30 evaluated on conv-26 only (1 conversation, 152 questions) — full 10-conv runs are in [FULL-RUNS.md](FULL-RUNS.md)
 - Temporal category is noisy (only 13 questions, mostly inference not date-lookup, high LLM variance)
 
 ## Architecture

@@ -17,7 +17,7 @@ npm run build
 
 Point your MCP client (Claude Desktop, Cursor, etc.) at the built MCP server. The MCP bridge connects to the Anima REST API, which must be running.
 
-The bridge expects the Anima API at `http://localhost:3000` by default.
+The bridge expects the Anima API at `http://localhost:3000` by default. Set `ANIMA_BASE_URL` to change it, and `ANIMA_API_KEY` if the server requires an API key.
 
 ## Available Tools
 
@@ -30,3 +30,5 @@ The bridge expects the Anima API at `http://localhost:3000` by default.
 | `memory_stats` | Get memory store statistics |
 | `memory_ask` | Ask a question with enriched retrieval |
 | `memory_reflect` | Trigger reflection on recent memories |
+| `memory_list` | List stored memories |
+| `memory_discover` | Find memories similar to example memories, with optional negative examples |
