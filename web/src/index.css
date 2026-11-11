@@ -1,42 +1,408 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/space-grotesk";
 
+/*
+ * Anima design tokens.
+ *
+ * Rules the UI follows (shared by Material, Carbon, Primer and Radix):
+ *  - Colors are semantic tokens, never raw values in components.
+ *  - Text meets WCAG AA: 4.5:1 for body text, 3:1 for large text and icons.
+ *  - Spacing sits on a 4px grid; type never goes below 12px.
+ *  - Interactive targets are at least 32px; focus is always visible.
+ *  - Light and dark themes are the same tokens with different values.
+ */
 @theme {
-  --color-paper: #F5F0E8;
-  --color-paper-warm: #EDE8DE;
-  --color-paper-deep: #E6DFD1;
-  --color-card: #FFFFFF;
-  --color-ink: #2D2A26;
-  --color-ink-light: #504A44;
-  --color-ink-muted: #6B6259;
-  --color-ink-faint: #8A847A;
-  --color-warm-border: #E0D8CB;
-  --color-warm-border-strong: #D4CBC0;
-  --color-accent: #C47B3B;
-  --color-accent-hover: #B06A2E;
-  --color-accent-light: #F7EDE3;
-  --color-input: #FAF7F2;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", Menlo, monospace;
+
+  /* Surfaces */
+  --color-paper: #F5F5F3;        /* app background */
+  --color-paper-warm: #EDEDEA;   /* sidebar, secondary surface */
+  --color-paper-deep: #E0E0DC;   /* hover and selected fills, tracks */
+  --color-card: #FFFFFF;         /* raised surface */
+  --color-input: #FFFFFF;
+
+  /* Text. Contrast on paper: ink 17:1, light 11:1, muted 7:1, faint 4.7:1 */
+  --color-ink: #111110;
+  --color-ink-light: #2E2E2B;
+  --color-ink-muted: #4D4D48;
+  --color-ink-faint: #6B6B65;
+
+  /* Borders */
+  --color-warm-border: #DDDDD8;
+  --color-warm-border-strong: #C4C4BE;
+
+  /* Brand: acid yellow, used for accents only (links, active state, focus,
+     data bars). Primary buttons are monochrome: accent-solid with on-accent
+     text, 17:1. Accent as text is a dark amber on light surfaces (6.1:1). */
+  --color-on-accent: #FFFFFF;
+  --color-accent: #7A5E00;
+  --color-accent-hover: #5C4700;
+  --color-accent-light: #FBF3C4;
+  --color-accent-solid: #111110;
+  --color-accent-solid-hover: #2E2E2B;
+
+  /* Status */
+  --color-success: #2F7D4F;
+  --color-success-light: #E4F2E9;
+  --color-warning: #9A4A00;
+  --color-warning-light: #FDEBD8;
+  --color-danger: #B42318;
+  --color-danger-hover: #912018;
+  --color-danger-light: #FCE9E6;
+  --color-info: #3F5F6B;
+  --color-info-light: #E6EDEF;
+
+  --font-display: "Space Grotesk Variable", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Angular geometry: small radii everywhere, including the Tailwind scale. */
+  --radius-control: 0.25rem;
+  --radius-surface: 0.375rem;
+  --radius-md: 0.1875rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.5rem;
+
+  /* Neon glow: only painted in the dark theme. */
+  --glow-accent: 0 0 0 0 transparent;
+  --glow-solid: 0 0 0 0 transparent;
+
+  --shadow-raised: 0 1px 2px rgb(17 17 16 / 0.05);
+  --shadow-overlay: 0 12px 32px rgb(17 17 16 / 0.16), 0 2px 6px rgb(17 17 16 / 0.08);
 }
 
-/* Warm scrollbar matching the notebook theme */
+/* Dark theme: same tokens, new values. Set by the theme script on <html>. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-paper: #0B0B0C;
+  --color-paper-warm: #101011;
+  --color-paper-deep: #232326;
+  --color-card: #151516;
+  --color-input: #0E0E0F;
+
+  /* Contrast on paper: ink 16:1, light 12:1, muted 7.5:1, faint 5.2:1 */
+  --color-ink: #F2F2EE;
+  --color-ink-light: #D4D4CF;
+  --color-ink-muted: #A3A39C;
+  --color-ink-faint: #85857E;
+
+  --color-warm-border: #2A2A2D;
+  --color-warm-border-strong: #414145;
+
+  /* One neon: acid yellow for text accents, focus and bars (16:1 on paper).
+     Primary buttons are near-white with dark text. */
+  --color-on-accent: #0B0B0C;
+  --glow-accent: 0 0 0 1px rgb(252 238 10 / 0.35), 0 0 18px rgb(252 238 10 / 0.14);
+  --glow-solid: 0 0 0 0 transparent;
+  --color-accent: #FCEE0A;
+  --color-accent-hover: #FFF666;
+  --color-accent-light: #2B2905;
+  --color-accent-solid: #F2F2EE;
+  --color-accent-solid-hover: #FFFFFF;
+
+  --color-success: #3DFFA2;
+  --color-success-light: #062B1C;
+  --color-warning: #FF9F1C;
+  --color-warning-light: #33200A;
+  --color-danger: #FF3B4E;
+  --color-danger-hover: #FF7C89;
+  --color-danger-light: #3A0E13;
+  --color-info: #B8C4C8;
+  --color-info-light: #1E2224;
+
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
+
+  /*
+   * Pages also use Tailwind palette utilities for categorical badges
+   * (text-amber-700 on bg-amber-500/15, and so on). Dark text shades are
+   * remapped to their light counterparts so those badges keep AA contrast.
+   */
+  --color-red-500: #F87171;    --color-red-600: #F87171;    --color-red-700: #FCA5A5;
+  --color-amber-600: #FBBF24;  --color-amber-700: #FCD34D;  --color-amber-800: #FDE68A;  --color-amber-900: #FEF3C7;
+  --color-green-600: #4ADE80;  --color-green-700: #86EFAC;
+  --color-emerald-600: #34D399; --color-emerald-700: #6EE7B7;
+  --color-teal-700: #5EEAD4;   --color-cyan-700: #67E8F9;
+  --color-sky-600: #38BDF8;    --color-sky-700: #7DD3FC;
+  --color-blue-700: #93C5FD;   --color-indigo-700: #A5B4FC;
+  --color-violet-600: #A78BFA; --color-purple-700: #D8B4FE;
+  --color-rose-700: #FDBA74;   --color-orange-700: #FDBA74;
+  --color-stone-600: #D6D3D1;
+  /* Light tinted fills and borders become deep tints. */
+  --color-red-50: #3A1814;     --color-red-200: #7A2B22;
+  --color-amber-100: #2E2410;  --color-amber-300: #7A5A14;
+  --color-green-300: #1F5C38;  --color-stone-100: #232326;
+  --color-red-100: #3A1814;    --color-red-300: #7A2B22;
+  --color-green-50: #16291D;   --color-green-100: #16291D;
+  --color-blue-100: #14273D;   --color-purple-100: #2A1B3D;
+  --color-blue-800: #BFDBFE;   --color-purple-600: #C084FC;  --color-purple-800: #E9D5FF;
+  --color-green-800: #BBF7D0;  --color-stone-800: #E7E5E4;   --color-red-800: #FECACA;
+}
+
+/* Buttons written as "bg-accent text-white" in pages are primary actions:
+   they take the monochrome solid. A bare bg-accent (bars, switches) stays
+   the accent colour. */
+.bg-accent.text-white { background-color: var(--color-accent-solid); color: var(--color-on-accent); }
+.bg-accent.text-white.hover\:bg-accent-hover:hover { background-color: var(--color-accent-solid-hover); }
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01", "calt";
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  code, kbd, pre, samp, .font-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: normal;
+  }
+
+  /* Numbers that update or sit in columns should not jitter. */
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+
+  button, [role="button"], a, select, summary, label[for] { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+
+  /* Native controls follow the theme. */
+  input, textarea, select { color: inherit; }
+  input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent); }
+  :root[data-theme="light"] input[type="range"],
+  :root[data-theme="light"] input[type="checkbox"],
+  :root[data-theme="light"] input[type="radio"] { accent-color: var(--color-ink); }
+
+  /* Visible keyboard focus everywhere; mouse clicks stay ring-free. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* Page scaffolding */
+  .page {
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+  }
+  .page-title {
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    line-height: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+  }
+  .page-description {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--color-ink-muted);
+  }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  /* Surfaces */
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-warm-border);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-raised);
+  }
+
+  /* Buttons: one primary per view, secondary for alternatives, ghost for
+     low-emphasis and icon actions, danger for destructive actions. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 2rem;
+    padding: 0.375rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background-color 120ms, border-color 120ms, color 120ms;
+  }
+  .btn:disabled { opacity: 0.5; }
+  .btn-primary { background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; box-shadow: var(--glow-solid); }
+  .btn-primary:hover:not(:disabled) { background: var(--color-accent-solid-hover); }
+  .btn-secondary {
+    background: var(--color-card);
+    border-color: var(--color-warm-border-strong);
+    color: var(--color-ink);
+  }
+  .btn-secondary:hover:not(:disabled) { background: var(--color-paper-deep); }
+  .btn-ghost { color: var(--color-ink-muted); }
+  .btn-ghost:hover:not(:disabled) { background: var(--color-paper-deep); color: var(--color-ink); }
+  .btn-danger { background: var(--color-danger); color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: var(--color-danger-hover); }
+  :root[data-theme="dark"] .btn-danger { color: #0B0B0C; }
+  .btn-icon {
+    width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+  }
+
+  /* Form fields */
+  .field {
+    width: 100%;
+    min-height: 2rem;
+    padding: 0.375rem 0.625rem;
+    background: var(--color-input);
+    border: 1px solid var(--color-warm-border-strong);
+    border-radius: var(--radius-control);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--color-ink);
+    transition: border-color 120ms, box-shadow 120ms;
+  }
+  .field::placeholder { color: var(--color-ink-faint); }
+  .field:hover { border-color: var(--color-ink-faint); }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent), var(--glow-accent);
+  }
+
+  /* Segmented control: mutually exclusive filters */
+  .segmented {
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    background: var(--color-paper-deep);
+    border-radius: var(--radius-control);
+  }
+  .segmented > button {
+    min-height: 1.75rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: calc(var(--radius-control) - 2px);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--color-ink-muted);
+    text-transform: capitalize;
+    transition: background-color 120ms, color 120ms;
+  }
+  .segmented > button:hover { color: var(--color-ink); }
+  .segmented > button[aria-pressed="true"] {
+    background: var(--color-card);
+    color: var(--color-ink);
+    font-weight: 500;
+    box-shadow: var(--shadow-raised);
+  }
+
+  /* Badges: 12px, medium weight, tinted fill */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.0625rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    font-weight: 500;
+    text-transform: capitalize;
+    white-space: nowrap;
+  }
+  .badge-neutral { background: var(--color-paper-deep); color: var(--color-ink-muted); }
+  .badge-success { background: var(--color-success-light); color: var(--color-success); }
+  .badge-warning { background: var(--color-warning-light); color: var(--color-warning); }
+  .badge-danger  { background: var(--color-danger-light);  color: var(--color-danger); }
+  .badge-info    { background: var(--color-info-light);    color: var(--color-info); }
+
+  /* Sidebar navigation */
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 2rem;
+    border-radius: var(--radius-control);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-ink-muted);
+    transition: background-color 120ms, color 120ms;
+  }
+  .nav-item:hover { background: var(--color-paper-deep); color: var(--color-ink); }
+  .nav-item[aria-current="page"] {
+    background: var(--color-card);
+    color: var(--color-ink);
+    box-shadow: var(--shadow-raised), inset 0 0 0 1px var(--color-warm-border), inset 2px 0 0 var(--color-accent);
+  }
+  .nav-item[aria-current="page"] svg { color: var(--color-accent); }
+
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -3rem;
+    z-index: 100;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-card);
+    border: 1px solid var(--color-warm-border-strong);
+    border-radius: var(--radius-control);
+    color: var(--color-ink);
+    font-weight: 500;
+  }
+  .skip-link:focus { top: 0.5rem; }
+}
+
+/* Dark theme atmosphere: a faint grid behind the app and a lit edge on cards. */
+:root[data-theme="dark"] body {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.028) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+:root[data-theme="dark"] .app-shell,
+:root[data-theme="dark"] .app-shell > div > main { background-color: transparent; }
+:root[data-theme="dark"] .card {
+  background-image: linear-gradient(180deg, rgb(252 238 10 / 0.035), transparent 48px);
+}
+:root[data-theme="dark"] .page-title {
+  text-shadow: 0 0 22px rgb(252 238 10 / 0.18);
+}
+
+/* Scrollbars follow the theme. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #D4CBC0 transparent;
+  scrollbar-color: var(--color-warm-border-strong) transparent;
 }
-
-*::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
-  background-color: #D4CBC0;
-  border-radius: 3px;
+  background-color: var(--color-warm-border-strong);
+  border-radius: 4px;
 }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--color-ink-faint); }
 
-*::-webkit-scrollbar-thumb:hover {
-  background-color: #B8AFA2;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

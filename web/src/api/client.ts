@@ -84,9 +84,9 @@ export const api = {
       body: JSON.stringify(req),
     }),
 
-  listMemories: (offset = 0, limit = 50, status?: string, memory_type?: string) =>
+  listMemories: (offset = 0, limit = 50, status?: string, memory_type?: string, category?: string) =>
     request<ListMemoriesResponse>(
-      `/api/v1/memories?offset=${offset}&limit=${limit}${status ? `&status=${status}` : ''}${memory_type ? `&memory_type=${memory_type}` : ''}`
+      `/api/v1/memories?offset=${offset}&limit=${limit}${status ? `&status=${status}` : ''}${memory_type ? `&memory_type=${memory_type}` : ''}${category ? `&category=${encodeURIComponent(category)}` : ''}`
     ),
 
   getMemory: (id: string) =>

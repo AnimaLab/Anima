@@ -5,6 +5,9 @@ export interface Memory {
   metadata: Record<string, unknown> | null
   tags: string[]
   memory_type: string
+  category?: string
+  confidence?: number
+  source?: string
   status: string
   created_at: string
   updated_at: string
@@ -18,6 +21,7 @@ export interface AddMemoryRequest {
   metadata?: Record<string, unknown>
   consolidate: boolean
   tags?: string[]
+  category?: string
 }
 
 export interface AddMemoryResponse {
@@ -42,6 +46,9 @@ export interface SearchResult {
   metadata: Record<string, unknown> | null
   tags: string[]
   memory_type: string
+  category?: string
+  confidence?: number
+  source?: string
   score: number
   vector_score: number | null
   keyword_score: number | null

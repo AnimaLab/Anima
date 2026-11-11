@@ -278,7 +278,7 @@ export function EmbeddingPage() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
-          <h2 className="text-lg font-semibold text-ink">Vector Space</h2>
+          <h1 className="page-title">Vector Space</h1>
           <p className="text-xs text-ink-muted">PCA · drag to orbit · scroll to zoom · click to inspect</p>
         </div>
         {!loading && <span className="text-xs text-ink-faint">{points.length} memories</span>}

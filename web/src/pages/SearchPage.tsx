@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, getNamespace } from '../api/client'
+import { categoryColor, provenanceText } from '../lib/memoryMeta'
 import type { SearchResponse, SearchResult, GraphData, AskResponse } from '../api/types'
 import { loadCognitiveConfig } from './SettingsPage'
-import { Search, Tag, Clock, Zap, BookOpen, ArrowUpDown, Shield, Link2, ChevronDown, ChevronRight, MessageSquare, SlidersHorizontal, Compass, X } from 'lucide-react'
+import { Search, Tag, Clock, Zap, BookOpen, ArrowUpDown, Shield, Link2, ChevronDown, ChevronRight, MessageSquare, Compass, X, Loader2 } from 'lucide-react'
 
 type SortField = 'score' | 'vector_score' | 'keyword_score' | 'temporal_score' | 'importance' | 'created_at'
 type SortDir = 'desc' | 'asc'
@@ -12,20 +13,20 @@ type AdjEntry = { id: string; content: string; similarity: number; edgeType: str
 const MEMORY_TYPES = ['all', 'fact', 'preference', 'event', 'story', 'decision', 'reflection', 'context', 'goal', 'relationship', 'emotion', 'habit', 'belief', 'skill', 'location'] as const
 
 const typeColor: Record<string, string> = {
-  preference: 'bg-purple-500/15 text-purple-700 border-purple-500/25',
-  fact: 'bg-blue-500/15 text-blue-700 border-blue-500/25',
-  event: 'bg-cyan-500/15 text-cyan-700 border-cyan-500/25',
-  decision: 'bg-orange-500/15 text-orange-700 border-orange-500/25',
-  story: 'bg-rose-500/15 text-rose-700 border-rose-500/25',
-  reflection: 'bg-indigo-500/15 text-indigo-700 border-indigo-500/25',
-  context: 'bg-stone-500/15 text-stone-600 border-stone-500/25',
-  goal: 'bg-emerald-500/15 text-emerald-700 border-emerald-500/25',
-  relationship: 'bg-pink-500/15 text-pink-700 border-pink-500/25',
-  emotion: 'bg-red-500/15 text-red-700 border-red-500/25',
-  habit: 'bg-teal-500/15 text-teal-700 border-teal-500/25',
-  belief: 'bg-amber-500/15 text-amber-700 border-amber-500/25',
-  skill: 'bg-lime-500/15 text-lime-700 border-lime-500/25',
-  location: 'bg-sky-500/15 text-sky-700 border-sky-500/25',
+  preference: 'bg-purple-500/15 text-purple-700',
+  fact: 'bg-blue-500/15 text-blue-700',
+  event: 'bg-cyan-500/15 text-cyan-700',
+  decision: 'bg-orange-500/15 text-orange-700',
+  story: 'bg-orange-500/15 text-orange-700',
+  reflection: 'bg-indigo-500/15 text-indigo-700',
+  context: 'bg-stone-500/15 text-stone-600',
+  goal: 'bg-emerald-500/15 text-emerald-700',
+  relationship: 'bg-amber-500/15 text-amber-700',
+  emotion: 'bg-red-500/15 text-red-700',
+  habit: 'bg-teal-500/15 text-teal-700',
+  belief: 'bg-amber-500/15 text-amber-700',
+  skill: 'bg-lime-500/15 text-lime-700',
+  location: 'bg-sky-500/15 text-sky-700',
 }
 
 function relativeDate(dateStr: string): string {
@@ -41,21 +42,21 @@ function relativeDate(dateStr: string): string {
 }
 
 function importanceLabel(imp: number): { text: string; color: string } {
-  if (imp >= 9) return { text: 'Critical', color: 'text-red-600' }
-  if (imp >= 7) return { text: 'Important', color: 'text-orange-600' }
+  if (imp >= 9) return { text: 'Critical', color: 'text-danger' }
+  if (imp >= 7) return { text: 'Important', color: 'text-warning' }
   if (imp >= 4) return { text: 'Normal', color: 'text-ink-muted' }
   return { text: 'Minor', color: 'text-ink-faint' }
 }
 
 function ImportanceDots({ value }: { value: number }) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-0.5" aria-hidden="true">
       {Array.from({ length: 10 }, (_, i) => (
         <div
           key={i}
           className={`w-1 h-3 rounded-sm ${
             i < value
-              ? value >= 9 ? 'bg-red-600' : value >= 7 ? 'bg-orange-500' : value >= 4 ? 'bg-accent' : 'bg-ink-faint'
+              ? value >= 9 ? 'bg-danger' : value >= 7 ? 'bg-warning' : value >= 4 ? 'bg-accent' : 'bg-ink-faint'
               : 'bg-paper-deep'
           }`}
         />
@@ -250,140 +251,153 @@ export function SearchPage() {
     }
   }
 
+  const isPending = searchMut.isPending || askMut.isPending || discoverMut.isPending
+  const neighborCount = totalContext - sortedResults.length
+  // /ask may report conflicts and a degraded (no-LLM) answer; neither is typed yet.
+  const askExtras = askResult as unknown as { conflicts?: unknown[]; degraded?: boolean } | null
+  const askConflictCount = Array.isArray(askExtras?.conflicts) ? askExtras!.conflicts!.length : 0
+  const topScore = sortedResults[0]?.score || 1
+
+  const SORT_OPTIONS: [SortField, string][] = [
+    ['score', 'Score'],
+    ['vector_score', 'Vector'],
+    ['keyword_score', 'Keyword'],
+    ['temporal_score', 'Temporal'],
+    ['importance', 'Importance'],
+    ['created_at', 'Date'],
+  ]
+
   return (
-    <div className="space-y-5">
+    <div className="page space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-ink">Search</h2>
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+        <div>
+          <h1 className="page-title">Search</h1>
+          <p className="page-description">
+            {searchType === 'ask'
+              ? 'Ask a question and get an answer drawn from your memories'
+              : 'Find memories by meaning, keywords and recency'}
+          </p>
+        </div>
+        <p className="text-xs text-ink-faint tabular-nums" aria-live="polite">
           {results && (
             <>
-              <span className="text-xs text-ink-muted">
+              <span className="text-ink-muted">
                 {results.results.length} direct + {totalContext - results.results.length} graph = {totalContext} total
               </span>
-              <span className="text-[10px] text-ink-faint">{results.query_time_ms.toFixed(1)}ms</span>
+              {' · '}
+              <span className="font-mono">{results.query_time_ms.toFixed(1)}ms</span>
             </>
           )}
           {askResult && (
             <>
-              <span className="text-xs text-ink-muted">
-                {askResult.total_search_results} memories searched
-              </span>
-              <span className="text-[10px] text-ink-faint">{askResult.elapsed_ms.toFixed(0)}ms</span>
+              <span className="text-ink-muted">{askResult.total_search_results} memories searched</span>
+              {' · '}
+              <span className="font-mono">{askResult.elapsed_ms.toFixed(0)}ms</span>
             </>
           )}
-        </div>
+        </p>
       </div>
 
       {/* Search form */}
-      <form onSubmit={handleSearch} className="space-y-3">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            {searchType === 'ask'
-              ? <MessageSquare size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600" />
-              : <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-            }
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={searchType === 'ask' ? "Ask a question about memories... (press Enter)" : "Search memories... (try: 'allergies', 'family', 'work')"}
-              className={`w-full bg-card border rounded-lg pl-9 pr-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-1 ${
-                searchType === 'ask'
-                  ? 'border-emerald-600/40 focus:ring-emerald-600 focus:border-emerald-600'
-                  : 'border-warm-border-strong focus:ring-accent focus:border-accent'
-              }`}
-            />
-          </div>
-          {(searchMut.isPending || askMut.isPending) && (
-            <div className="flex items-center px-3 text-ink-muted">
-              <div className={`w-4 h-4 border-2 border-ink-faint rounded-full animate-spin ${
-                searchType === 'ask' ? 'border-t-emerald-600' : 'border-t-accent'
-              }`} />
-            </div>
-          )}
+      <form onSubmit={handleSearch} className="space-y-3" role="search">
+        <div className="relative">
+          {searchType === 'ask'
+            ? <MessageSquare size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none" />
+            : <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none" />
+          }
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label={searchType === 'ask' ? 'Question' : 'Search query'}
+            placeholder={searchType === 'ask' ? 'Ask a question about your memories…' : 'Search memories… try “allergies”, “family”, “work”'}
+            className="field h-11 pl-11 pr-28 text-[15px]"
+          />
+          <button
+            type="submit"
+            disabled={!query.trim() || isPending}
+            className="btn btn-primary absolute right-1.5 top-1/2 -translate-y-1/2"
+          >
+            {isPending
+              ? <Loader2 size={15} className="animate-spin" />
+              : searchType === 'ask' ? <MessageSquare size={15} /> : <Search size={15} />}
+            {searchType === 'ask' ? 'Ask' : 'Search'}
+          </button>
         </div>
 
-        {/* Search type toggle + mode tabs */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
-          {/* Search vs Ask toggle */}
-          <div className="flex gap-1 bg-card rounded-lg p-1">
-            <button
-              type="button"
-              onClick={() => setSearchType('search')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                searchType === 'search'
-                  ? 'bg-accent-light text-accent shadow-sm'
-                  : 'text-ink-muted hover:text-ink hover:bg-paper-deep'
-              }`}
-            >
-              <Search size={12} />
-              Search
+        {/* Toolbar: what kind of query, how to match, and tuning */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="segmented" role="group" aria-label="Query type">
+            <button type="button" onClick={() => setSearchType('search')} aria-pressed={searchType === 'search'} className="inline-flex items-center gap-1.5">
+              <Search size={14} /> Search
             </button>
-            <button
-              type="button"
-              onClick={() => setSearchType('ask')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                searchType === 'ask'
-                  ? 'bg-emerald-600/15 text-emerald-600 shadow-sm'
-                  : 'text-ink-muted hover:text-ink hover:bg-paper-deep'
-              }`}
-            >
-              <MessageSquare size={12} />
-              Ask
+            <button type="button" onClick={() => setSearchType('ask')} aria-pressed={searchType === 'ask'} className="inline-flex items-center gap-1.5">
+              <MessageSquare size={14} /> Ask
             </button>
           </div>
 
-          {/* Classic search controls (hidden in ask mode) */}
+          {/* Matching and tuning only apply to classic search */}
           {searchType === 'search' && (
             <>
-              <div className="flex gap-1 bg-card rounded-lg p-1">
+              <div className="segmented" role="group" aria-label="Search mode">
                 {['hybrid', 'vector', 'keyword'].map(m => (
                   <button
                     key={m}
                     type="button"
                     onClick={() => handleModeSwitch(m)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors ${
-                      mode === m
-                        ? 'bg-accent-light text-accent shadow-sm'
-                        : 'text-ink-muted hover:text-ink hover:bg-paper-deep'
-                    }`}
+                    aria-pressed={mode === m}
+                    className="inline-flex items-center gap-1.5"
                   >
-                    {m === 'hybrid' && <Zap size={12} />}
-                    {m === 'vector' && <BookOpen size={12} />}
-                    {m === 'keyword' && <Search size={12} />}
+                    {m === 'hybrid' && <Zap size={14} />}
+                    {m === 'vector' && <BookOpen size={14} />}
+                    {m === 'keyword' && <Search size={14} />}
                     {m}
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-center gap-2">
-                <Clock size={12} className="text-ink-muted" />
-                <span className="text-xs text-ink-muted">Recency:</span>
-                <input type="range" min="0" max="1" step="0.05" value={temporalWeight}
-                  onChange={(e) => handleTemporalChange(parseFloat(e.target.value))}
-                  className="w-20 accent-[#5B9CA6]" />
-                <span className="text-xs text-ink-muted font-mono w-8">{temporalWeight.toFixed(2)}</span>
-              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
+                <label className="flex items-center gap-2 text-[13px] text-ink-muted min-h-8" title="How much newer memories are favoured">
+                  <Clock size={14} className="text-ink-faint" />
+                  Recency
+                  <input
+                    type="range" min="0" max="1" step="0.05" value={temporalWeight}
+                    onChange={(e) => handleTemporalChange(parseFloat(e.target.value))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-ink font-mono tabular-nums w-8">{temporalWeight.toFixed(2)}</span>
+                </label>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-ink-muted">Limit:</span>
-                <select value={limit} onChange={(e) => handleLimitChange(parseInt(e.target.value))}
-                  className="bg-card border border-warm-border-strong rounded px-2 py-1 text-xs text-ink-light focus:outline-none">
-                  {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+                <label className="flex items-center gap-2 text-[13px] text-ink-muted">
+                  Limit
+                  <select
+                    value={limit}
+                    onChange={(e) => handleLimitChange(parseInt(e.target.value))}
+                    className="field w-auto"
+                  >
+                    {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
               </div>
             </>
           )}
         </div>
 
-        {/* Type filter — only show when a non-all filter is active, or toggle via the type badge */}
+        {/* Type filter: appears once a type badge has been clicked */}
         {searchType === 'search' && typeFilter !== 'all' && (
-          <div className="flex flex-wrap gap-1 items-center">
-            <span className="text-[11px] text-ink-faint mr-1">Type:</span>
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by type">
+            <span className="section-label mr-1">Type</span>
             {MEMORY_TYPES.map(t => (
-              <button key={t} type="button" onClick={() => setTypeFilter(t)}
-                className={`px-2.5 py-1 rounded-md text-xs capitalize transition-colors ${typeFilter === t ? 'bg-paper-deep text-ink font-medium' : 'text-ink-muted hover:text-ink'}`}>
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTypeFilter(t)}
+                aria-pressed={typeFilter === t}
+                className={`min-h-8 px-2.5 rounded-md text-[13px] capitalize transition-colors ${
+                  typeFilter === t ? 'bg-paper-deep text-ink font-medium' : 'text-ink-muted hover:text-ink hover:bg-paper-deep'
+                }`}
+              >
                 {t}
               </button>
             ))}
@@ -394,259 +408,317 @@ export function SearchPage() {
       {/* Ask result */}
       {askResult && (
         <div className="space-y-4">
-          {/* Answer card */}
-          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-5">
-            <div className="flex items-start gap-3">
-              <MessageSquare size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-ink leading-relaxed whitespace-pre-wrap">{askResult.answer}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Referenced memories */}
-          {askResult.memories_referenced.length > 0 && (
-            <div>
-              <span className="text-[10px] text-ink-muted block mb-2">
-                {askResult.memories_referenced.length} memories referenced
+          <section className="card p-5" aria-label="Answer">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-7 h-7 rounded-full bg-accent-light text-accent flex items-center justify-center shrink-0">
+                <MessageSquare size={14} />
               </span>
-              <div className="space-y-1">
-                {askResult.memories_referenced.slice(0, 20).map((mem, i) => (
-                  <div key={mem.id} className="bg-card/80 border border-warm-border/60 rounded-md px-3 py-2 flex items-center gap-3">
-                    <span className="text-[10px] text-ink-faint shrink-0 font-mono w-5 text-right">{i + 1}</span>
-                    <p className="text-xs text-ink-muted flex-1 min-w-0 truncate">{mem.content}</p>
-                    <span className="text-[10px] text-ink-faint font-mono shrink-0">{mem.score.toFixed(3)}</span>
-                  </div>
-                ))}
-                {askResult.memories_referenced.length > 20 && (
-                  <p className="text-[10px] text-ink-faint pl-8">...and {askResult.memories_referenced.length - 20} more</p>
-                )}
-              </div>
+              <h2 className="text-sm font-semibold text-ink">Answer</h2>
+              {askExtras?.degraded && (
+                <span className="badge badge-warning normal-case" title="The LLM backend was unreachable, so this is retrieval output rather than a generated answer">
+                  No LLM: retrieval only
+                </span>
+              )}
             </div>
+            <p className="text-[15px] text-ink leading-relaxed whitespace-pre-wrap">{askResult.answer}</p>
+
+            {askConflictCount > 0 && (
+              <div className="mt-4 flex items-start gap-2 rounded-lg bg-warning-light px-3 py-2.5">
+                <Shield size={15} className="text-warning shrink-0 mt-0.5" />
+                <p className="text-[13px] text-warning">
+                  {askConflictCount} conflicting {askConflictCount === 1 ? 'memory was' : 'memories were'} found among the sources.
+                  Review them on the Conflicts page before relying on this answer.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {askResult.memories_referenced.length > 0 && (
+            <section aria-label="Sources">
+              <h2 className="section-label mb-2">
+                Sources · {askResult.memories_referenced.length}
+              </h2>
+              <ol className="card divide-y divide-warm-border overflow-hidden">
+                {askResult.memories_referenced.slice(0, 20).map((mem, i) => (
+                  <li key={mem.id} className="flex items-baseline gap-3 px-4 py-2.5">
+                    <span className="text-xs text-ink-faint font-mono tabular-nums w-5 text-right shrink-0">{i + 1}</span>
+                    <p className="text-[13px] text-ink-light flex-1 min-w-0 truncate" title={mem.content}>{mem.content}</p>
+                    <span className="text-xs text-ink-muted font-mono tabular-nums shrink-0">{mem.score.toFixed(3)}</span>
+                  </li>
+                ))}
+              </ol>
+              {askResult.memories_referenced.length > 20 && (
+                <p className="text-xs text-ink-faint mt-2">and {askResult.memories_referenced.length - 20} more</p>
+              )}
+            </section>
           )}
         </div>
       )}
 
       {/* Ask error */}
       {askMut.isError && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-          <p className="text-sm text-red-600">{(askMut.error as Error).message}</p>
-          <p className="text-xs text-red-500/70 mt-1">Make sure the LLM is configured in Settings</p>
+        <div className="flex items-start gap-2 rounded-lg bg-danger-light px-4 py-3" role="alert">
+          <Shield size={15} className="text-danger shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-danger font-medium">{(askMut.error as Error).message}</p>
+            <p className="text-[13px] text-ink-muted mt-0.5">Make sure the LLM is configured in Settings.</p>
+          </div>
         </div>
       )}
 
-      {/* Empty state (search mode only) */}
+      {/* Initial state: suggest what to try */}
+      {!results && !askResult && !isPending && (
+        <div className="card flex flex-col items-center text-center px-6 py-14">
+          <div className="w-11 h-11 rounded-full bg-paper-deep text-ink-muted flex items-center justify-center mb-3">
+            {searchType === 'ask' ? <MessageSquare size={20} /> : <Search size={20} />}
+          </div>
+          <p className="text-sm font-medium text-ink">
+            {searchType === 'ask' ? 'Ask a question and get an answer drawn from your memories' : 'Search by meaning, not just keywords'}
+          </p>
+          <p className="text-[13px] text-ink-muted mt-1">Try one of these to get started</p>
+          <div className="flex flex-wrap justify-center gap-2 mt-4">
+            {(searchType === 'ask'
+              ? ['What do you know about me?', 'What am I working on?', 'What are my preferences?']
+              : ['work', 'preferences', 'daily routine', 'current projects']
+            ).map(example => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => {
+                  setQuery(example)
+                  if (searchType === 'ask') askMut.mutate(example)
+                  else doSearch(example, mode, limit, temporalWeight)
+                }}
+                className="btn btn-secondary rounded-full font-normal"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* No results (search mode only) */}
       {results && results.results.length === 0 && (
-        <div className="text-center py-12">
-          <Search size={32} className="mx-auto text-ink-faint mb-3" />
-          <p className="text-ink-muted text-sm">No memories found for "{query}"</p>
-          <p className="text-ink-faint text-xs mt-1">Try a different query or switch modes</p>
+        <div className="card flex flex-col items-center text-center px-6 py-14">
+          <div className="w-11 h-11 rounded-full bg-paper-deep text-ink-muted flex items-center justify-center mb-3">
+            <Search size={20} />
+          </div>
+          <p className="text-sm font-medium text-ink break-words max-w-full">No memories found for “{query}”</p>
+          <p className="text-[13px] text-ink-muted mt-1">Try a different query or switch search mode.</p>
         </div>
       )}
 
-      {/* Discovery mode header */}
+      {/* Discovery mode banner */}
       {discoverSource && (
-        <div className="flex items-center gap-2 bg-accent/10 border border-accent/20 rounded-lg px-4 py-2.5">
-          <Compass size={14} className="text-accent shrink-0" />
-          <span className="text-xs text-accent">Similar to:</span>
-          <span className="text-xs text-ink truncate flex-1">{discoverSource.content}</span>
+        <div className="flex items-center gap-2 rounded-lg bg-accent-light pl-4 pr-1.5 py-1.5">
+          <Compass size={15} className="text-accent shrink-0" />
+          <span className="text-[13px] font-medium text-accent shrink-0">Similar to</span>
+          <span className="text-[13px] text-ink truncate flex-1 min-w-0">{discoverSource.content}</span>
           <button
+            type="button"
             onClick={() => { setDiscoverSource(null); setResults(null) }}
-            className="p-1 text-ink-muted hover:text-ink rounded transition-colors shrink-0"
+            className="btn btn-ghost btn-icon shrink-0"
             title="Clear discovery"
+            aria-label="Clear discovery"
           >
-            <X size={14} />
+            <X size={15} />
           </button>
         </div>
       )}
 
       {/* Results */}
       {sortedResults.length > 0 && (
-        <div className="space-y-3">
-          {/* Context summary */}
-          <div className="flex items-center gap-2 text-xs text-ink-muted">
-            <Zap size={12} className="text-accent" />
-            <span>{sortedResults.length} results</span>
-            {totalContext > sortedResults.length && (
-              <span className="text-ink-faint">+ {totalContext - sortedResults.length} graph neighbors</span>
-            )}
-          </div>
-
-          {/* Sort controls */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <ArrowUpDown size={12} className="text-ink-faint mr-1" />
-            <span className="text-[11px] text-ink-faint mr-1">Sort:</span>
-            {([
-              ['score', 'Score'],
-              ['vector_score', 'Vector'],
-              ['keyword_score', 'Keyword'],
-              ['temporal_score', 'Temporal'],
-              ['importance', 'Importance'],
-              ['created_at', 'Date'],
-            ] as [SortField, string][]).map(([field, label]) => (
-              <button
-                key={field}
-                onClick={() => toggleSort(field)}
-                className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
-                  sortField === field ? 'bg-accent-light text-accent' : 'text-ink-faint hover:text-ink-muted'
-                }`}
+        <section className="space-y-3" aria-label="Results">
+          {/* Summary and sort */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <p className="text-[13px] text-ink-muted">
+              <span className="font-medium text-ink">{sortedResults.length} {sortedResults.length === 1 ? 'result' : 'results'}</span>
+              {neighborCount > 0 && <> · {neighborCount} graph {neighborCount === 1 ? 'neighbor' : 'neighbors'}</>}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="search-sort" className="text-[13px] text-ink-muted flex items-center gap-1.5">
+                <ArrowUpDown size={14} className="text-ink-faint" /> Sort
+              </label>
+              <select
+                id="search-sort"
+                value={sortField}
+                onChange={(e) => { setSortField(e.target.value as SortField); setSortDir('desc') }}
+                className="field w-auto"
               >
-                {label}{sortField === field && (sortDir === 'desc' ? ' ↓' : ' ↑')}
+                {SORT_OPTIONS.map(([field, label]) => <option key={field} value={field}>{label}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={() => toggleSort(sortField)}
+                className="btn btn-secondary btn-icon"
+                title={sortDir === 'desc' ? 'Highest first. Click for lowest first' : 'Lowest first. Click for highest first'}
+                aria-label={sortDir === 'desc' ? 'Sorted highest first, switch to lowest first' : 'Sorted lowest first, switch to highest first'}
+              >
+                <span aria-hidden="true" className="text-sm leading-none">{sortDir === 'desc' ? '↓' : '↑'}</span>
               </button>
-            ))}
+            </div>
           </div>
 
-          {/* Result cards with graph neighbors */}
-          {sortedResults.map((r, i) => {
-            const neighbors = graphNeighbors.get(r.id) || []
-            const isExpanded = expandedId === r.id
-            // Check if this result is a neighbor of a previous result
-            const mutualLinks = sortedResults
-              .filter(other => other.id !== r.id)
-              .filter(other => {
-                const adj = adjacency.get(r.id) || []
-                return adj.some(n => n.id === other.id)
-              })
-              .map(other => {
-                const adj = adjacency.get(r.id) || []
-                const link = adj.find(n => n.id === other.id)
-                return { id: other.id, content: other.content, similarity: link?.similarity ?? 0 }
-              })
+          {/* One list, one surface */}
+          <ul className="card divide-y divide-warm-border overflow-hidden">
+            {sortedResults.map((r, i) => {
+              const neighbors = graphNeighbors.get(r.id) || []
+              const isExpanded = expandedId === r.id
+              // Other results this one is linked to in the graph
+              const mutualLinks = sortedResults
+                .filter(other => other.id !== r.id)
+                .filter(other => {
+                  const adj = adjacency.get(r.id) || []
+                  return adj.some(n => n.id === other.id)
+                })
+                .map(other => {
+                  const adj = adjacency.get(r.id) || []
+                  const link = adj.find(n => n.id === other.id)
+                  return { id: other.id, content: other.content, similarity: link?.similarity ?? 0 }
+                })
 
-            const isNoise = r.score < 0.01
+              const isNoise = r.score < 0.01
+              const provenance = provenanceText(r.source, r.confidence)
+              const importance = r.importance ?? 5
 
-            return (
-              <div key={r.id} className={`space-y-0 ${isNoise ? 'opacity-40' : ''}`}>
-                {/* Main result card */}
-                <div
-                  className={`bg-card border rounded-lg overflow-hidden transition-colors cursor-pointer ${
-                    isExpanded ? 'border-accent/40' : 'border-warm-border hover:border-warm-border-strong'
-                  }`}
-                  onClick={() => setExpandedId(isExpanded ? null : r.id)}
+              return (
+                <li
+                  key={r.id}
+                  className={`px-4 sm:px-5 py-4 transition-colors ${isExpanded ? 'bg-paper-warm' : 'hover:bg-paper/60'} ${isNoise ? 'opacity-50' : ''}`}
                 >
-                  {/* Score indicator bar */}
-                  <div className="h-0.5 bg-paper-deep">
-                    <div
-                      className={`h-full transition-all ${
-                        r.score > 0.7 ? 'bg-green-600' : r.score > 0.4 ? 'bg-accent' : r.score > 0.2 ? 'bg-amber-500' : 'bg-ink-faint'
-                      }`}
-                      style={{ width: `${Math.min((r.score / (sortedResults[0]?.score || 1)) * 100, 100)}%` }}
-                    />
-                  </div>
+                  <div className="flex items-start gap-3">
+                    {/* Rank */}
+                    <span className="text-[13px] font-medium text-ink-faint tabular-nums w-5 text-right shrink-0 mt-0.5">{i + 1}</span>
 
-                  <div className="p-4">
-                    <div className="flex items-start gap-3">
-                      {/* Rank number */}
-                      <span className="text-base font-bold text-ink-faint tabular-nums w-6 text-right shrink-0 mt-0.5">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                        aria-expanded={isExpanded}
+                        title={isExpanded ? 'Hide score details' : 'Show score details'}
+                        className="block w-full text-left text-sm text-ink leading-relaxed rounded break-words"
+                      >
+                        {r.content}
+                      </button>
 
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-ink leading-relaxed">{r.content}</p>
-
-                        {/* Tags + metadata */}
-                        <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                      {/* Meta */}
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 mt-2 text-xs text-ink-faint">
+                        {r.memory_type !== 'raw' && (
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); setTypeFilter(typeFilter === r.memory_type ? 'all' : r.memory_type) }}
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full border cursor-pointer hover:opacity-80 transition-opacity ${typeColor[r.memory_type] || typeColor.fact}`}
+                            onClick={() => setTypeFilter(typeFilter === r.memory_type ? 'all' : r.memory_type)}
+                            className={`badge hover:opacity-80 transition-opacity ${typeColor[r.memory_type] || 'badge-neutral'}`}
                             title={`Filter by ${r.memory_type}`}
                           >
                             {r.memory_type}
                           </button>
-                          {r.tags.map(tag => (
-                            <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-paper-deep text-ink-muted flex items-center gap-0.5 border border-warm-border-strong/50">
-                              <Tag size={8} />{tag}
-                            </span>
-                          ))}
-                          {(neighbors.length > 0 || mutualLinks.length > 0) && (
-                            <span className="text-[10px] text-accent/70 flex items-center gap-0.5">
-                              <Link2 size={9} />
-                              {neighbors.length + mutualLinks.length} linked
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setDiscoverSource({ id: r.id, content: r.content })
-                              discoverMut.mutate(r.id)
-                            }}
-                            className="text-[10px] px-1.5 py-0.5 rounded-full border border-accent/30 text-accent hover:bg-accent/10 transition-colors flex items-center gap-0.5"
-                            title="Find similar memories"
-                          >
-                            <Compass size={9} />similar
-                          </button>
-                          <span className="text-[10px] text-ink-faint">{relativeDate(r.created_at)}</span>
-                        </div>
-                      </div>
-
-                      {/* Score + importance */}
-                      <div className="text-right shrink-0 space-y-0.5">
-                        <div className="text-sm font-mono font-bold text-ink">{r.score.toFixed(2)}</div>
-                        {(r.importance ?? 5) !== 5 && (
-                          <div className={`text-[10px] ${importanceLabel(r.importance ?? 5).color}`}>
-                            {importanceLabel(r.importance ?? 5).text}
-                          </div>
                         )}
+                        {r.category && r.category !== 'general' && (
+                          <span className={`badge ${categoryColor(r.category)}`}>{r.category}</span>
+                        )}
+                        {provenance && <span className="text-ink-muted">{provenance}</span>}
+                        {r.tags.map(tag => (
+                          <span key={tag} className="badge badge-neutral normal-case">
+                            <Tag size={11} />{tag}
+                          </span>
+                        ))}
+                        {(neighbors.length > 0 || mutualLinks.length > 0) && (
+                          <span className="inline-flex items-center gap-1 text-ink-muted">
+                            <Link2 size={12} />
+                            {neighbors.length + mutualLinks.length} linked
+                          </span>
+                        )}
+                        <span>{relativeDate(r.created_at)}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDiscoverSource({ id: r.id, content: r.content })
+                            discoverMut.mutate(r.id)
+                          }}
+                          className="inline-flex items-center gap-1 min-h-6 px-1.5 -my-1 rounded-md font-medium text-accent hover:bg-accent-light transition-colors"
+                          title="Find similar memories"
+                        >
+                          <Compass size={12} /> Find similar
+                        </button>
                       </div>
                     </div>
 
-                    {/* Expanded details */}
-                    {isExpanded && (
-                      <div className="mt-4 pt-3 border-t border-warm-border space-y-3">
-                        {/* Score breakdown */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                          <ScoreCard label="Combined" value={r.score} desc="Final score after fusion + temporal + boosts" range="0–1" color="blue" />
-                          {r.vector_score != null && (
-                            <ScoreCard label="Vector" value={r.vector_score} desc="Cosine similarity between embeddings" range="0–1, >0.5 strong" color="purple" dim={mode === 'keyword'} />
-                          )}
-                          {r.keyword_score != null && (
-                            <ScoreCard label="Keyword" value={r.keyword_score} desc="BM25 term-frequency score" range="0–∞, raw BM25" color="green" dim={mode === 'vector'} maxValue={Math.max(r.keyword_score, 1)} />
-                          )}
-                          {r.temporal_score != null && (
-                            <ScoreCard label="Temporal" value={r.temporal_score} desc="Exponential decay by age" range="0–1, 1 = just now" color="teal" />
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-ink-muted">Importance:</span>
-                          <ImportanceDots value={r.importance ?? 5} />
-                          <span className="text-xs text-ink-muted font-mono">{r.importance ?? 5}/10</span>
-                        </div>
-
-                        {/* Mutual links to other search results */}
-                        {mutualLinks.length > 0 && (
-                          <div>
-                            <span className="text-[10px] text-ink-muted mb-1 block">Linked to other results:</span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {mutualLinks.map(link => (
-                                <button
-                                  key={link.id}
-                                  onClick={(e) => { e.stopPropagation(); setExpandedId(link.id) }}
-                                  className="text-[10px] px-2 py-1 rounded bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 transition-colors truncate max-w-[200px]"
-                                >
-                                  ↔ {link.content} ({link.similarity.toFixed(2)})
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="text-[10px] text-ink-faint">
-                          ID: {r.id} · Created: {new Date(r.created_at).toLocaleString()} · Updated: {new Date(r.updated_at).toLocaleString()}
-                        </div>
+                    {/* Score */}
+                    <div className="w-14 shrink-0 text-right">
+                      <div className="text-sm font-mono font-semibold text-ink tabular-nums">{r.score.toFixed(2)}</div>
+                      <div className="mt-1 h-1 rounded-full bg-paper-deep overflow-hidden" aria-hidden="true">
+                        <div
+                          className={`h-full rounded-full ${r.score > 0.7 ? 'bg-success' : r.score > 0.2 ? 'bg-accent' : 'bg-ink-faint'}`}
+                          style={{ width: `${Math.min((r.score / topScore) * 100, 100)}%` }}
+                        />
                       </div>
-                    )}
+                      {importance !== 5 && (
+                        <div className={`text-xs mt-1 ${importanceLabel(importance).color}`}>
+                          {importanceLabel(importance).text}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Graph neighbor cards (always visible if they exist) */}
-                {neighbors.length > 0 && (
-                  <NeighborCards neighbors={neighbors} />
-                )}
-              </div>
-            )
-          })}
-        </div>
+                  {/* Expanded details */}
+                  {isExpanded && (
+                    <div className="mt-4 ml-8 pt-4 border-t border-warm-border space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <ScoreCard label="Combined" value={r.score} desc="Final score after fusion, recency and boosts" range="0–1" color="blue" />
+                        {r.vector_score != null && (
+                          <ScoreCard label="Vector" value={r.vector_score} desc="Cosine similarity between embeddings" range="0–1, above 0.5 is strong" color="purple" dim={mode === 'keyword'} />
+                        )}
+                        {r.keyword_score != null && (
+                          <ScoreCard label="Keyword" value={r.keyword_score} desc="BM25 term-frequency score" range="0–∞, raw BM25" color="green" dim={mode === 'vector'} maxValue={Math.max(r.keyword_score, 1)} />
+                        )}
+                        {r.temporal_score != null && (
+                          <ScoreCard label="Temporal" value={r.temporal_score} desc="Exponential decay by age" range="0–1, 1 is just now" color="teal" />
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span className="text-[13px] text-ink-muted">Importance</span>
+                        <ImportanceDots value={importance} />
+                        <span className="text-xs text-ink-muted font-mono tabular-nums">{importance}/10</span>
+                      </div>
+
+                      {mutualLinks.length > 0 && (
+                        <div>
+                          <p className="section-label mb-1.5">Linked to other results</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {mutualLinks.map(link => (
+                              <button
+                                key={link.id}
+                                type="button"
+                                onClick={() => setExpandedId(link.id)}
+                                className="btn btn-secondary font-normal max-w-full sm:max-w-[260px]"
+                                title={link.content}
+                              >
+                                <Link2 size={13} className="shrink-0 text-ink-faint" />
+                                <span className="truncate">{link.content}</span>
+                                <span className="font-mono text-xs text-ink-muted shrink-0">{link.similarity.toFixed(2)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-faint">
+                        <div className="flex gap-1.5 min-w-0"><dt>ID</dt><dd className="font-mono text-ink-muted break-all">{r.id}</dd></div>
+                        <div className="flex gap-1.5"><dt>Created</dt><dd className="text-ink-muted">{new Date(r.created_at).toLocaleString()}</dd></div>
+                        <div className="flex gap-1.5"><dt>Updated</dt><dd className="text-ink-muted">{new Date(r.updated_at).toLocaleString()}</dd></div>
+                      </dl>
+                    </div>
+                  )}
+
+                  {/* Graph neighbours: context the model would also see */}
+                  {neighbors.length > 0 && <NeighborCards neighbors={neighbors} />}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
       )}
     </div>
   )
@@ -658,31 +730,29 @@ function NeighborCards({ neighbors }: {
   const [collapsed, setCollapsed] = useState(true)
 
   return (
-    <div className="ml-9 pl-4 border-l-2 border-accent/20">
+    <div className="ml-8 mt-2">
       <button
+        type="button"
         onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-1 text-[10px] text-accent/60 hover:text-accent py-1 transition-colors"
+        aria-expanded={!collapsed}
+        className="inline-flex items-center gap-1.5 min-h-8 px-1.5 -ml-1.5 rounded-md text-[13px] text-ink-muted hover:text-ink hover:bg-paper-deep transition-colors"
       >
-        {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-        <Link2 size={9} />
+        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        <Link2 size={13} className="text-ink-faint" />
         {neighbors.length} graph neighbor{neighbors.length > 1 ? 's' : ''}
       </button>
 
       {!collapsed && (
-        <div className="space-y-1 pb-2">
+        <ul className="mt-1 border-l-2 border-warm-border pl-3 space-y-1.5 pb-1">
           {neighbors.map(n => (
-            <div
-              key={n.id}
-              className="bg-card/80 border border-warm-border/60 rounded-md px-3 py-2 flex items-center gap-3"
-            >
-              <span className="text-[9px] text-accent/40 shrink-0 font-mono">graph</span>
-              <p className="text-xs text-ink-muted flex-1 min-w-0 truncate">{n.content}</p>
-              <span className="text-[10px] text-ink-faint font-mono shrink-0">
-                {n.edgeType === 'superseded_by' ? 'superseded' : n.similarity.toFixed(2)}
-              </span>
-            </div>
+            <li key={n.id} className="flex items-baseline gap-3">
+              <p className="text-[13px] text-ink-light flex-1 min-w-0 truncate" title={n.content}>{n.content}</p>
+              {n.edgeType === 'superseded_by'
+                ? <span className="badge badge-warning shrink-0">superseded</span>
+                : <span className="text-xs text-ink-muted font-mono tabular-nums shrink-0">{n.similarity.toFixed(2)}</span>}
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   )
@@ -691,27 +761,27 @@ function NeighborCards({ neighbors }: {
 function ScoreCard({ label, value, desc, range, color, dim, maxValue }: {
   label: string; value: number; desc: string; range: string; color: string; dim?: boolean; maxValue?: number
 }) {
-  const colors: Record<string, { bg: string; bar: string; text: string }> = {
-    blue: { bg: 'bg-accent/8', bar: 'bg-accent', text: 'text-accent' },
-    purple: { bg: 'bg-purple-500/10', bar: 'bg-purple-500', text: 'text-purple-600' },
-    green: { bg: 'bg-green-500/5', bar: 'bg-green-500', text: 'text-green-600' },
-    teal: { bg: 'bg-teal-500/5', bar: 'bg-teal-500', text: 'text-teal-600' },
+  const bars: Record<string, string> = {
+    blue: 'bg-accent',
+    purple: 'bg-info',
+    green: 'bg-success',
+    teal: 'bg-warning',
   }
-  const c = colors[color] || colors.blue
+  const bar = bars[color] || bars.blue
   const normalizedMax = maxValue ?? 1
   const pct = Math.min((value / normalizedMax) * 100, 100)
 
   return (
-    <div className={`rounded-lg p-2.5 ${c.bg} ${dim ? 'opacity-30' : ''}`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className={`text-[10px] font-medium ${c.text}`}>{label}</span>
-        <span className="text-xs font-mono text-ink-light">{value.toFixed(3)}</span>
+    <div className={`rounded-lg border border-warm-border bg-card p-3 ${dim ? 'opacity-50' : ''}`}>
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <span className="text-[13px] font-medium text-ink">{label}</span>
+        <span className="text-[13px] font-mono tabular-nums text-ink">{value.toFixed(3)}</span>
       </div>
-      <div className="w-full h-1 bg-paper-deep rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${pct}%` }} />
+      <div className="w-full h-1 bg-paper-deep rounded-full overflow-hidden" aria-hidden="true">
+        <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
       </div>
-      <p className="text-[9px] text-ink-faint mt-1">{desc}</p>
-      <p className="text-[8px] text-ink-faint mt-0.5">{range}</p>
+      <p className="text-xs text-ink-muted mt-2">{desc}</p>
+      <p className="text-xs text-ink-faint mt-0.5">{range}</p>
     </div>
   )
 }

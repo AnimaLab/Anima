@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, Box, GitCompareArrows, Activity } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus } from 'lucide-react'
+import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -8,15 +9,48 @@ import { api } from '../api/client'
 import type { DisplayMessage } from '../hooks/useChat'
 import type { NamespaceInfo } from '../api/types'
 
-const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/memories', label: 'Memories', icon: Database },
-  { path: '/search', label: 'Search', icon: Search },
-  { path: '/graph', label: 'Graph', icon: Share2 },
-  { path: '/graph3d', label: 'Embeddings', icon: Network },
-  { path: '/conflicts', label: 'Conflicts', icon: GitCompareArrows },
-  { path: '/processor', label: 'Processor', icon: Activity },
+const navGroups = [
+  {
+    label: 'Memory',
+    items: [
+      { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { path: '/memories', label: 'Memories', icon: Database },
+      { path: '/search', label: 'Search', icon: Search },
+    ],
+  },
+  {
+    label: 'Explore',
+    items: [
+      { path: '/graph', label: 'Graph', icon: Share2 },
+      { path: '/graph3d', label: 'Embeddings', icon: Network },
+      { path: '/conflicts', label: 'Conflicts', icon: GitCompareArrows },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { path: '/processor', label: 'Processor', icon: Activity },
+      { path: '/settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ]
+const navItems = navGroups.flatMap(g => g.items)
+
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'dark', label: 'Dark', icon: Moon },
+]
+
+/** Brand mark: an angular "A" sheltering one memory cell. */
+function Logo({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0 text-accent">
+      <path d="M12 2 22 21h-5.2L12 11.6 7.2 21H2L12 2Z" fill="currentColor" />
+      <rect x="10" y="16" width="4" height="4" fill="currentColor" />
+    </svg>
+  )
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -24,6 +58,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(true)
+  const { preference: themePreference } = useTheme()
+
+  // Give each page its own tab title so history and multiple tabs are usable.
+  useEffect(() => {
+    const path = location.pathname
+    const title = path === '/'
+      ? 'Dashboard'
+      : path.startsWith('/chat')
+        ? 'Chat'
+        : [...navItems].sort((a, b) => b.path.length - a.path.length).find(item => item.path !== '/' && path.startsWith(item.path))?.label
+    document.title = title ? `${title} · Anima` : 'Anima'
+  }, [location.pathname])
   const {
     setMessages, mode, setMode,
     conversationId, setConversationId,
@@ -112,185 +158,232 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const sidebarContent = (
     <>
-      {/* Header */}
-      <div className={`flex items-center ${showLabels ? 'justify-between p-3' : 'justify-center p-2'} border-b border-warm-border`}>
-        {showLabels ? (
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-ink tracking-tight">Anima</h1>
-          </div>
-        ) : (
-          <span className="text-sm font-bold text-ink">A</span>
+      {/* Brand */}
+      <div className={`flex items-center h-14 shrink-0 ${showLabels ? 'justify-between px-3' : 'justify-center'}`}>
+        {showLabels && (
+          <Link to="/" className="flex items-center gap-2.5 rounded-md" aria-label="Anima home">
+            <Logo />
+            <span className="text-base font-semibold text-ink tracking-wide uppercase font-[family-name:var(--font-display)]">Anima</span>
+          </Link>
         )}
         <button
           onClick={() => {
             if (mobileOpen) setMobileOpen(false)
             else setCollapsed(!collapsed)
           }}
-          className={`text-ink-muted hover:text-ink transition-colors ${showLabels ? 'p-1' : 'w-8 h-8 flex items-center justify-center'}`}
+          aria-label={mobileOpen ? 'Close menu' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={mobileOpen ? 'Close menu' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="btn btn-ghost btn-icon"
         >
           {mobileOpen ? <X size={18} /> : collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 p-1.5 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon }) => {
-          const active = location.pathname === path
-          return (
-            <Link
-              key={path}
-              to={path}
-              title={!showLabels ? label : undefined}
-              className={`flex items-center py-2 rounded-lg text-sm transition-colors ${
-                showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
-              } ${
-                active
-                  ? 'bg-accent-light text-accent'
-                  : 'text-ink-light hover:bg-paper-deep hover:text-ink'
-              }`}
-            >
-              <Icon size={18} className="shrink-0" />
-              {showLabels && label}
-            </Link>
-          )
-        })}
-
-        {/* Chat nav item + expandable history */}
-        <div>
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              startNewChat()
-            }}
-            title={!showLabels ? 'Chat' : undefined}
-            className={`w-full flex items-center py-2 rounded-lg text-sm transition-colors ${
-              showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
-            } ${
-              isOnChat
-                ? 'bg-accent-light text-accent'
-                : 'text-ink-light hover:bg-paper-deep hover:text-ink'
-            }`}
-          >
-            <MessageSquare size={18} className="shrink-0" />
-            {showLabels && <>
-              <span className="flex-1 text-left">Chat</span>
-              <span
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setChatOpen(!chatOpen) }}
-                className="p-0.5 text-ink-muted hover:text-ink transition-colors"
-              >
-                {chatOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </span>
-            </>}
-          </button>
-
-          {/* Chat history list */}
-          {showLabels && chatOpen && (
-            <div className="ml-3 mt-1 space-y-0.5 border-l border-warm-border pl-2">
-              {conversations.map(conv => (
-                <div
-                  key={conv.id}
-                  className={`group flex items-center gap-1.5 px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
-                    conversationId === conv.id
-                      ? 'bg-paper-deep text-ink'
-                      : 'text-ink-muted hover:bg-paper-deep/50 hover:text-ink-light'
-                  }`}
-                  onClick={() => { loadConversation(conv.id) }}
-                >
-                  <span className="truncate flex-1">{conv.title}</span>
-                  <button
-                    onClick={e => deleteConv(conv.id, e)}
-                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-600 transition-all shrink-0"
-                  >
-                    <Trash2 size={10} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </nav>
-
-      {/* Namespace selector */}
+      {/* Namespace switcher: the scope everything below applies to */}
       {showLabels ? (
-        <div className="px-3 py-2 border-t border-warm-border">
-          <label className="text-xs text-ink-muted block mb-1">Namespace</label>
-          <select
-            value={namespace}
-            onChange={(e) => setNamespace(e.target.value)}
-            className="w-full bg-input border border-warm-border rounded-md px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            {namespaces.length === 0 && (
-              <option value={namespace}>{namespace}</option>
-            )}
-            {namespaces.map((ns) => (
-              <option key={ns.namespace} value={ns.namespace}>
-                {ns.namespace} ({ns.active_count})
-              </option>
-            ))}
-          </select>
+        <div className="px-3 pb-3">
+          <label htmlFor="namespace-select" className="section-label block mb-1.5">Namespace</label>
+          <div className="relative">
+            <Layers size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none" />
+            <select
+              id="namespace-select"
+              value={namespace}
+              onChange={(e) => setNamespace(e.target.value)}
+              className="field pl-8 font-medium"
+            >
+              {namespaces.length === 0 && (
+                <option value={namespace}>{namespace}</option>
+              )}
+              {namespaces.map((ns) => (
+                <option key={ns.namespace} value={ns.namespace}>
+                  {ns.namespace} ({ns.active_count})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       ) : (
-        <div className="border-t border-warm-border py-2 flex justify-center">
-          <div title={`Namespace: ${namespace}`} className="w-9 flex items-center justify-center text-ink-muted">
+        <div className="pb-2 flex justify-center">
+          <div title={`Namespace: ${namespace}`} className="w-8 h-8 flex items-center justify-center text-ink-muted">
             <Layers size={16} />
           </div>
         </div>
       )}
 
-      {/* Settings */}
-      <div className="p-1.5 border-t border-warm-border">
-        <Link
-          to="/settings"
-          title={!showLabels ? 'Settings' : undefined}
-          className={`flex items-center py-2 rounded-lg text-sm transition-colors ${
-            showLabels ? 'gap-3 px-3' : 'justify-center w-9 mx-auto'
-          } ${
-            location.pathname === '/settings'
-              ? 'bg-accent-light text-accent'
-              : 'text-ink-light hover:bg-paper-deep hover:text-ink'
-          }`}
-        >
-          <Settings size={18} className="shrink-0" />
-          {showLabels && 'Settings'}
-        </Link>
+      {/* Navigation */}
+      <nav aria-label="Main" className="flex-1 px-2 pb-2 overflow-y-auto space-y-4">
+        {navGroups.map((group, gi) => (
+          <div key={group.label}>
+            {showLabels
+              ? <p className="section-label px-2 mb-1">{group.label}</p>
+              : gi > 0 && <div className="mx-2 mb-2 border-t border-warm-border" />}
+            <ul className="space-y-0.5">
+              {group.items.map(({ path, label, icon: Icon }) => {
+                const active = location.pathname === path
+                return (
+                  <li key={path}>
+                    <Link
+                      to={path}
+                      aria-current={active ? 'page' : undefined}
+                      aria-label={!showLabels ? label : undefined}
+                      title={!showLabels ? label : undefined}
+                      className={`nav-item ${showLabels ? 'gap-2.5 px-2' : 'justify-center w-8 mx-auto'}`}
+                    >
+                      <Icon size={16} className="shrink-0" />
+                      {showLabels && label}
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+
+            {/* Chat lives with the memory tools, with its history underneath */}
+            {gi === 0 && (
+              <div className="mt-0.5">
+                <div className="flex items-center gap-0.5">
+                  <Link
+                    to="/chat"
+                    onClick={(e) => { e.preventDefault(); startNewChat() }}
+                    aria-current={isOnChat ? 'page' : undefined}
+                    aria-label={!showLabels ? 'Chat' : undefined}
+                    title={!showLabels ? 'Chat' : undefined}
+                    className={`nav-item flex-1 ${showLabels ? 'gap-2.5 px-2' : 'justify-center w-8 mx-auto flex-none'}`}
+                  >
+                    <MessageSquare size={16} className="shrink-0" />
+                    {showLabels && 'Chat'}
+                  </Link>
+                  {showLabels && (
+                    <>
+                      <button
+                        onClick={startNewChat}
+                        aria-label="New chat"
+                        title="New chat"
+                        className="btn btn-ghost btn-icon"
+                      >
+                        <Plus size={15} />
+                      </button>
+                      {conversations.length > 0 && (
+                        <button
+                          onClick={() => setChatOpen(!chatOpen)}
+                          aria-expanded={chatOpen}
+                          aria-label={chatOpen ? 'Hide chat history' : 'Show chat history'}
+                          title={chatOpen ? 'Hide chat history' : 'Show chat history'}
+                          className="btn btn-ghost btn-icon"
+                        >
+                          {chatOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {showLabels && chatOpen && conversations.length > 0 && (
+                  <ul className="ml-4 mt-1 space-y-0.5 border-l border-warm-border pl-2">
+                    {conversations.map(conv => (
+                      <li key={conv.id} className="group flex items-center">
+                        <button
+                          onClick={() => { loadConversation(conv.id) }}
+                          aria-current={conversationId === conv.id ? 'page' : undefined}
+                          className={`flex-1 min-w-0 text-left truncate px-2 py-1.5 rounded-md text-[13px] transition-colors ${
+                            conversationId === conv.id
+                              ? 'bg-paper-deep text-ink font-medium'
+                              : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
+                          }`}
+                        >
+                          {conv.title}
+                        </button>
+                        <button
+                          onClick={e => deleteConv(conv.id, e)}
+                          aria-label={`Delete conversation ${conv.title}`}
+                          title="Delete conversation"
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-6 h-6 flex items-center justify-center rounded-md text-ink-faint hover:text-danger hover:bg-danger-light transition-all shrink-0"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </nav>
+
+      {/* Theme */}
+      <div className={`border-t border-warm-border ${showLabels ? 'p-3' : 'p-2 flex justify-center'}`}>
+        {showLabels ? (
+          <div className="segmented w-full" role="group" aria-label="Theme">
+            {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => setThemePreference(value)}
+                aria-pressed={themePreference === value}
+                title={`${label} theme`}
+                className="flex-1 inline-flex items-center justify-center gap-1.5"
+              >
+                <Icon size={14} />
+                <span className="text-xs">{label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button
+            onClick={() => setThemePreference(themePreference === 'dark' ? 'light' : 'dark')}
+            aria-label="Toggle dark theme"
+            title="Toggle dark theme"
+            className="btn btn-ghost btn-icon"
+          >
+            {themePreference === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+        )}
       </div>
     </>
   )
 
   return (
-    <div className="flex h-screen">
+    <div className="app-shell flex h-screen bg-paper text-ink">
+      <a href="#main-content" className="skip-link">Skip to content</a>
+
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-ink/30 z-40 md:hidden"
+          className="fixed inset-0 bg-black/40 z-40 md:hidden"
           onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar — desktop */}
-      <aside className={`${collapsed ? 'w-12' : 'w-56'} bg-paper-warm border-r border-warm-border flex-col shrink-0 transition-all duration-200 hidden md:flex`}>
+      <aside className={`${collapsed ? 'w-14' : 'w-60'} bg-paper-warm border-r border-warm-border flex-col shrink-0 transition-[width] duration-200 hidden md:flex`}>
         {sidebarContent}
       </aside>
 
       {/* Sidebar — mobile drawer */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-paper-warm border-r border-warm-border flex flex-col transition-transform duration-200 md:hidden ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-paper-warm border-r border-warm-border flex flex-col transition-transform duration-200 md:hidden ${mobileOpen ? 'translate-x-0 shadow-[var(--shadow-overlay)]' : '-translate-x-full'}`}
+        aria-hidden={!mobileOpen}
+        inert={!mobileOpen}
+      >
         {sidebarContent}
       </aside>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-paper-warm border-b border-warm-border md:hidden shrink-0">
+        <div className="flex items-center gap-2 px-3 h-14 bg-paper-warm border-b border-warm-border md:hidden shrink-0">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-1 text-ink-muted hover:text-ink transition-colors"
+            aria-label="Open menu"
+            className="btn btn-ghost btn-icon"
           >
             <Menu size={20} />
           </button>
-          <h1 className="text-sm font-bold text-ink">Anima</h1>
+          <Logo size={22} />
+          <span className="text-base font-semibold text-ink tracking-wide uppercase font-[family-name:var(--font-display)]">Anima</span>
         </div>
 
-        <main className="flex-1 overflow-auto bg-paper p-4 sm:p-6">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto bg-paper p-4 sm:p-6 lg:p-8 focus:outline-none">
           {children}
         </main>
       </div>
