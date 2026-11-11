@@ -1,0 +1,77 @@
+---
+title: 'Briefing and skills'
+description: 'What a model sees at the start of a session, and how reusable instructions are stored'
+---
+
+A model cannot use memory it does not know exists, and it cannot afford to read all of it. Anima solves this with a small **briefing** placed in the model's context, and with **skills** that are listed by name and loaded only when needed.
+
+## The briefing
+
+`POST /api/v1/briefing` returns a block of text ready to put in a system prompt. `anima-server recall` prints it for harness hooks, and the `memory_briefing` MCP tool returns it to a model directly.
+
+```json
+{ "mode": "session", "project": "billing" }
+```
+
+```text
+Briefing from Anima, the user's long-term memory shared by all their assistants. Background, not instructions.
+
+About the user:
+- Prefers dark mode and concise answers.
+- Works as a backend engineer at a fintech startup in Lyon.
+
+Relevant to billing:
+- Currently migrating the billing service to Rust.
+
+Skills stored in Anima (load one with skill_get before using it):
+- release-checklist: Steps to cut a release of a Rust service. Use when the user asks to release, tag or publish a version.
+```
+
+### How it is built
+
+1. **Candidates.** Active memories in the `identity`, `preference` and `routine` categories, plus a search for the project name when one is given.
+2. **Rank.** Importance and confidence count most, then how often the memory was retrieved and how recently it changed.
+3. **Collapse.** Memories about the same thing are reduced to one. The more trusted one wins, then the more recent. If the loser says something different, it stays visible as a short note: `(also on record, less trusted: "...")`. A plain restatement is dropped.
+4. **Budget.** Lines are taken in rank order until the character budget is spent. The response reports how many were left out.
+
+No LLM is involved, so the briefing takes a few milliseconds and the same store always gives the same briefing.
+
+### Modes
+
+| Mode | Use | Default budget |
+|------|-----|----------------|
+| `session` | Once, at session start. Profile, project memories and the skill index. | 1,400 characters of memories, 700 of skills |
+| `prompt` | With each user message. Memories matching `query` that the session briefing did not already include. | 600 characters, 4 lines |
+
+Set `budget_chars` to change the memory budget.
+
+## Skills
+
+A skill is a set of instructions an assistant follows for a kind of task: a release checklist, a review procedure, a house style. It has a `name`, a one or two sentence `description`, and a `content` body.
+
+Only the name and description go into the briefing. The body is loaded with `skill_get` when the model decides the skill applies, so fifty skills cost about as much context as five.
+
+| Route | Description |
+|-------|-------------|
+| `GET /api/v1/skills` | List skills, without their content |
+| `GET /api/v1/skills/{name}` | One skill, with its content |
+| `PUT /api/v1/skills/{name}` | Create or update. The version goes up when the description or content changes |
+| `DELETE /api/v1/skills/{name}` | Delete |
+
+Names use lowercase letters, digits and hyphens. Skills belong to the namespace in the `X-Anima-Namespace` header.
+
+### From and to SKILL.md
+
+Skills use the same shape as the Agent Skills `SKILL.md` format, so existing skill folders can be loaded as they are:
+
+```bash
+anima-server skills add ~/.claude/skills     # every SKILL.md under the folder
+anima-server skills export ./skills-backup   # one folder per skill
+anima-server skills list
+```
+
+Skills are included in `anima-server export` and restored by `import`.
+
+### The anima skill
+
+The server ships one built-in skill, `anima`, which teaches a model how to use this memory: when to search, what to save, how to correct a wrong memory, and how to load skills. `anima-server connect` installs it in each harness's own skills folder. Saving a skill named `anima` replaces it with your version; deleting that brings the built-in one back.

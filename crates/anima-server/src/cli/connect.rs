@@ -30,12 +30,14 @@ You have persistent memory through the `anima` MCP server. It is shared by every
 assistant and machine the user works with, so what you save here is what the
 next assistant will know.
 
-- Before starting a task, call `memory_search` with the topic to recall relevant
-  preferences, decisions and context.
+- If no briefing from Anima is in your context, call `memory_briefing` first.
+- Before starting a task, call `memory_search` with its topic.
 - When the user states a durable fact, preference, decision or correction, save
   it with `memory_add`: one fact per memory, written so it stands on its own.
 - If a stored memory is wrong or outdated, fix it with `memory_update` instead of
   adding a contradicting one.
+- Skills named in the briefing are loaded with `skill_get`. The `anima` skill is
+  the full guide to using this memory.
 - Do not store secrets, credentials or details that only matter to the current task.";
 
 const HARNESSES: &[&str] = &["claude", "claude-desktop", "codex", "cursor", "hermes"];
@@ -97,7 +99,12 @@ impl Ctx<'_> {
             return Ok(());
         }
         let old = std::fs::read_to_string(path).unwrap_or_default();
-        self.write(path, &edit(&old), what)
+        // The edits work on "\n". A file that uses CRLF gets CRLF back, so
+        // the lines we did not touch stay byte for byte the same.
+        let crlf = old.contains("\r\n");
+        let edited = edit(&old.replace("\r\n", "\n"));
+        let new = if crlf { edited.replace('\n', "\r\n") } else { edited };
+        self.write(path, &new, what)
     }
 
     fn mcp_entry(&self, typed: bool) -> Value {
@@ -123,6 +130,80 @@ impl Ctx<'_> {
                 servers.remove(SERVER_NAME);
             }
         })
+    }
+
+    /// Install or remove the `anima` skill in a harness's skills folder.
+    fn guide_skill(&mut self, harness_dir: &Path) -> anyhow::Result<()> {
+        if !self.instructions {
+            return Ok(());
+        }
+        let folder = harness_dir.join("skills").join(crate::skills::GUIDE_NAME);
+        let path = folder.join("SKILL.md");
+        let ours = super::skills::render_skill_md(
+            crate::skills::GUIDE_NAME,
+            crate::skills::GUIDE_DESCRIPTION,
+            crate::skills::GUIDE_BODY,
+        );
+        self.managed_file(&path, &ours, "anima skill", self.connect)
+    }
+
+    /// A file that is entirely ours: written when `present`, removed otherwise.
+    /// It is only removed while it still holds what we wrote, and its folder
+    /// goes with it once empty.
+    fn managed_file(&mut self, path: &Path, ours: &str, what: &str, present: bool) -> anyhow::Result<()> {
+        if present {
+            return self.write(path, ours, what);
+        }
+        // Compare without regard to line endings: a checkout may have changed them.
+        let same = |a: &str, b: &str| a.replace("\r\n", "\n") == b.replace("\r\n", "\n");
+        if std::fs::read_to_string(path).ok().is_some_and(|found| same(&found, ours)) {
+            if !self.dry_run {
+                std::fs::remove_file(path)?;
+                if let Some(folder) = path.parent() {
+                    let _ = std::fs::remove_dir(folder);
+                }
+            }
+            let verb = if self.dry_run { "would remove" } else { "removed    " };
+            self.report.push(format!("  {verb} {} ({what})", path.display()));
+        }
+        Ok(())
+    }
+
+    /// Hermes: make Anima the profile's external memory provider when no other
+    /// provider holds that slot, and fall back to a plain MCP server when one does.
+    fn hermes(&mut self, dir: &Path) -> anyhow::Result<()> {
+        let config = dir.join("config.yaml");
+        let current = std::fs::read_to_string(&config).unwrap_or_default().replace("\r\n", "\n");
+        let provider = yaml_memory_provider(&current);
+        let slot_free = provider.as_deref().is_none_or(|p| is_core_provider(p) || p == HERMES_PROVIDER);
+        // An inline `memory: {...}` cannot be edited line by line: leave it alone.
+        let as_provider = self.connect && slot_free && set_memory_provider(&current, true).is_some();
+
+        if self.connect && !as_provider {
+            self.report.push(format!(
+                "  note: Hermes already uses the memory provider {:?}; adding Anima as an MCP server instead",
+                provider.unwrap_or_default()
+            ));
+        }
+        let (connect, exe) = (self.connect, self.exe.clone());
+        self.edit_text(&config, if as_provider { "memory provider" } else { "MCP server" }, |old| {
+            if as_provider {
+                // The provider brings its own tools: an MCP entry would only duplicate them.
+                let without_mcp = remove_yaml_server(old);
+                set_memory_provider(&without_mcp, true).unwrap_or(without_mcp)
+            } else if connect {
+                upsert_yaml_server(old, &exe)
+            } else {
+                let without_mcp = remove_yaml_server(old);
+                set_memory_provider(&without_mcp, false).unwrap_or(without_mcp)
+            }
+        })?;
+
+        let plugin = dir.join("plugins").join(HERMES_PROVIDER);
+        for (file, content) in HERMES_PLUGIN_FILES {
+            self.managed_file(&plugin.join(file), content, "memory provider plugin", as_provider)?;
+        }
+        self.guide_skill(dir)
     }
 
     fn instruction_file(&mut self, path: &Path) -> anyhow::Result<()> {
@@ -225,9 +306,100 @@ fn remove_yaml_server(text: &str) -> String {
             out.push(line);
         }
     }
+    // An `mcp_servers:` key left with no entries would read as null: drop it.
+    if let Some(at) = out.iter().position(|l| l.trim_end() == "mcp_servers:") {
+        let has_entries = out[at + 1..]
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .is_some_and(|l| indent_of(l) > 0);
+        if !has_entries {
+            out.remove(at);
+        }
+    }
     let joined = out.join("\n");
     let trimmed = joined.trim_end();
     if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") }
+}
+
+/// Name Hermes knows the memory provider plugin by.
+const HERMES_PROVIDER: &str = "anima";
+
+/// The plugin, shipped inside the binary so `connect` needs nothing else.
+const HERMES_PLUGIN_FILES: &[(&str, &str)] = &[
+    ("__init__.py", include_str!("../../integrations/hermes/anima/__init__.py")),
+    ("plugin.yaml", include_str!("../../integrations/hermes/anima/plugin.yaml")),
+    ("README.md", include_str!("../../integrations/hermes/anima/README.md")),
+];
+
+/// Values of `memory.provider` that mean "Hermes's built-in store only".
+fn is_core_provider(value: &str) -> bool {
+    matches!(value.to_lowercase().as_str(), "" | "default" | "builtin" | "built-in" | "none" | "null" | "~")
+}
+
+fn yaml_scalar(value: &str) -> String {
+    let value = value.split(" #").next().unwrap_or("").trim();
+    value.trim_matches(|c| c == '"' || c == '\'').to_string()
+}
+
+/// Lines of the top-level `memory:` block: (index of the key line, index one past the block).
+fn memory_block(lines: &[&str]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|l| l.trim_end() == "memory:")?;
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| !l.trim().is_empty() && indent_of(l) == 0)
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    Some((start, end))
+}
+
+fn provider_line(lines: &[&str], block: (usize, usize)) -> Option<usize> {
+    (block.0 + 1..block.1).find(|&i| indent_of(lines[i]) == 2 && lines[i].trim_start().starts_with("provider:"))
+}
+
+/// The value of `memory.provider`, when the config sets one.
+fn yaml_memory_provider(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let block = memory_block(&lines)?;
+    let line = lines[provider_line(&lines, block)?];
+    Some(yaml_scalar(line.trim_start().trim_start_matches("provider:")))
+}
+
+/// Set `memory.provider` to Anima, or clear it when it is Anima. Returns
+/// `None` when the config writes `memory` in a form this cannot edit safely.
+fn set_memory_provider(text: &str, enable: bool) -> Option<String> {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    if refs.iter().any(|l| indent_of(l) == 0 && l.starts_with("memory:") && l.trim_end() != "memory:") {
+        return None;
+    }
+    let wanted = format!("  provider: {HERMES_PROVIDER}");
+    match memory_block(&refs) {
+        Some(block) => match provider_line(&refs, block) {
+            Some(at) if enable => lines[at] = wanted,
+            Some(at) => {
+                if yaml_scalar(refs[at].trim_start().trim_start_matches("provider:")) == HERMES_PROVIDER {
+                    lines.remove(at);
+                    // A `memory:` key left with nothing under it would read as null: drop it.
+                    let emptied = lines[block.0 + 1..block.1 - 1].iter().all(|l| l.trim().is_empty());
+                    if emptied {
+                        lines.remove(block.0);
+                    }
+                }
+            }
+            None if enable => lines.insert(block.0 + 1, wanted),
+            None => {}
+        },
+        None if enable => {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push("memory:".into());
+            lines.push(wanted);
+        }
+        None => {}
+    }
+    let joined = lines.join("\n");
+    let trimmed = joined.trim_end();
+    Some(if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") })
 }
 
 fn upsert_yaml_server(text: &str, exe: &str) -> String {
@@ -314,8 +486,28 @@ fn harness_dir(home: &Path, harness: &str) -> PathBuf {
         "claude-desktop" => claude_desktop_dir(home),
         "codex" => home.join(".codex"),
         "cursor" => home.join(".cursor"),
-        _ => home.join(".hermes"),
+        _ => hermes_dir(home, std::env::var_os("HERMES_HOME").map(PathBuf::from)),
     }
+}
+
+/// Hermes keeps its config in `HERMES_HOME` when that is set, in
+/// `%LOCALAPPDATA%\hermes` on Windows, and in `~/.hermes` elsewhere. The
+/// environment only applies to the real home directory, not to a `--home`
+/// override.
+fn hermes_dir(home: &Path, hermes_home: Option<PathBuf>) -> PathBuf {
+    let real_home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    if real_home.as_deref() == Some(home) {
+        if let Some(dir) = hermes_home.filter(|d| !d.as_os_str().is_empty()) {
+            return dir;
+        }
+    }
+    let windows_default = home.join("AppData").join("Local").join("hermes");
+    if cfg!(target_os = "windows") && windows_default.join("config.yaml").is_file() {
+        return windows_default;
+    }
+    home.join(".hermes")
 }
 
 fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
@@ -326,6 +518,7 @@ fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
         "claude" => {
             ctx.mcp_json(&home.join(".claude.json"), true)?;
             ctx.instruction_file(&dir.join("CLAUDE.md"))?;
+            ctx.guide_skill(&dir)?;
             if ctx.hooks {
                 ctx.edit_json(&dir.join("settings.json"), "recall hooks", |root| {
                     set_claude_hooks(root, &exe, connect)
@@ -339,12 +532,9 @@ fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
                 if connect { upsert_toml_server(old, &exe) } else { remove_toml_server(old) }
             })?;
             ctx.instruction_file(&dir.join("AGENTS.md"))?;
+            ctx.guide_skill(&dir)?;
         }
-        "hermes" => {
-            ctx.edit_text(&dir.join("config.yaml"), "MCP server", |old| {
-                if connect { upsert_yaml_server(old, &exe) } else { remove_yaml_server(old) }
-            })?;
-        }
+        "hermes" => ctx.hermes(&dir)?,
         other => anyhow::bail!("unknown harness: {other}. Choose one of: {}, all, print", HARNESSES.join(", ")),
     }
     Ok(())
@@ -470,6 +660,9 @@ mod tests {
 
         let md = read(&home.path().join(".claude").join("CLAUDE.md"));
         assert_eq!(md.matches(BLOCK_START).count(), 1);
+        let skill = read(&home.path().join(".claude").join("skills").join("anima").join("SKILL.md"));
+        assert!(skill.starts_with("---\nname: anima\ndescription: \""));
+        assert!(skill.contains("# Using Anima"));
         assert!(claude_json.with_file_name(".claude.json.before-anima").exists());
     }
 
@@ -486,6 +679,7 @@ mod tests {
 
         assert_eq!(read(&dir.join("CLAUDE.md")), "# Mine\n\nKeep this.\n");
         assert_eq!(read(&dir.join("settings.json")), "{\n  \"model\": \"opus\"\n}\n");
+        assert!(!dir.join("skills").join("anima").exists(), "the installed skill is removed");
         let root: Value = serde_json::from_str(&read(&home.path().join(".claude.json"))).unwrap();
         assert!(root["mcpServers"].get("anima").is_none());
     }
@@ -556,6 +750,100 @@ mod tests {
         run(&opts(home.path(), "all", &[]), true).unwrap();
         assert!(read(&home.path().join(".codex").join("config.toml")).contains("[mcp_servers.anima]"));
         assert!(!home.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn hermes_becomes_the_memory_provider_and_disconnect_undoes_it() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "model:\n  default: x\nmemory:\n  memory_enabled: true\n  user_char_limit: 1375\ntools:\n  - web\n";
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let config = read(&dir.join("config.yaml"));
+        assert_eq!(
+            config,
+            "model:\n  default: x\nmemory:\n  provider: anima\n  memory_enabled: true\n  user_char_limit: 1375\ntools:\n  - web\n"
+        );
+        assert!(!config.contains("mcp_servers"), "the provider brings its own tools");
+        let plugin = dir.join("plugins").join("anima");
+        assert!(read(&plugin.join("__init__.py")).contains("class AnimaMemoryProvider"));
+        assert!(read(&plugin.join("plugin.yaml")).starts_with("name: anima"));
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), config, "second connect changes nothing");
+
+        run(&opts(home.path(), "hermes", &[]), false).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), original);
+        assert!(!plugin.exists(), "the plugin folder is removed");
+    }
+
+    #[test]
+    fn hermes_with_another_provider_gets_an_mcp_server_instead() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), "memory:\n  provider: honcho\n").unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let config = read(&dir.join("config.yaml"));
+        assert!(config.starts_with("memory:\n  provider: honcho\n"), "the other provider is left alone");
+        assert!(config.contains("mcp_servers:\n  anima:"));
+        assert!(!dir.join("plugins").join("anima").exists());
+    }
+
+    #[test]
+    fn memory_provider_yaml_edits() {
+        assert_eq!(yaml_memory_provider("memory:\n  provider: 'mem0'  # note\n").as_deref(), Some("mem0"));
+        assert_eq!(yaml_memory_provider("memory:\n  nested:\n    provider: x\n"), None);
+        assert_eq!(yaml_memory_provider("other:\n  provider: x\n"), None);
+        assert_eq!(set_memory_provider("", true).as_deref(), Some("memory:\n  provider: anima\n"));
+        assert_eq!(
+            set_memory_provider("memory:\n  provider: builtin\n", true).as_deref(),
+            Some("memory:\n  provider: anima\n")
+        );
+        assert_eq!(
+            set_memory_provider("memory:\n  provider: honcho\n", false).as_deref(),
+            Some("memory:\n  provider: honcho\n"),
+            "disconnect never clears another provider"
+        );
+        assert_eq!(set_memory_provider("memory: {provider: x}\n", true), None);
+        assert!(is_core_provider("Built-In") && is_core_provider("") && !is_core_provider("honcho"));
+    }
+
+    #[test]
+    fn crlf_files_keep_their_line_endings() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = "model:\r\n  default: x\r\ntools:\r\n  - web\r\n";
+        std::fs::write(dir.join("config.yaml"), original).unwrap();
+
+        run(&opts(home.path(), "hermes", &[]), true).unwrap();
+        let connected = read(&dir.join("config.yaml"));
+        assert!(connected.starts_with(original), "untouched lines are unchanged");
+        assert!(!connected.replace("\r\n", "").contains('\n'), "no bare LF was introduced");
+
+        run(&opts(home.path(), "hermes", &[]), false).unwrap();
+        assert_eq!(read(&dir.join("config.yaml")), original);
+    }
+
+    #[test]
+    fn hermes_home_is_ignored_for_an_overridden_home() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = Some(PathBuf::from("/somewhere/else"));
+        assert_eq!(hermes_dir(home.path(), elsewhere), home.path().join(".hermes"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hermes_windows_install_is_found_under_local_app_data() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join("AppData").join("Local").join("hermes");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), "model: x\n").unwrap();
+        assert_eq!(hermes_dir(home.path(), None), dir);
     }
 
     #[test]

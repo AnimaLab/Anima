@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen } from 'lucide-react'
 import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
@@ -16,6 +16,7 @@ const navGroups = [
       { path: '/', label: 'Dashboard', icon: LayoutDashboard },
       { path: '/memories', label: 'Memories', icon: Database },
       { path: '/search', label: 'Search', icon: Search },
+      { path: '/skills', label: 'Skills', icon: BookOpen },
     ],
   },
   {

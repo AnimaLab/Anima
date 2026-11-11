@@ -6537,12 +6537,23 @@ async fn export_json(
         })
         .collect();
 
+    let skills = {
+        let conn = state.store.writer_conn().await;
+        if all {
+            anima_db::skills::list_all(&conn)
+        } else {
+            anima_db::skills::list(&conn, ns.as_str())
+        }
+        .map_err(crate::skills::db)?
+    };
+
     let envelope = BackupEnvelope {
-        version: "1.1".into(),
+        version: "1.2".into(),
         exported_at: chrono::Utc::now().to_rfc3339(),
         namespace: if all { "*".into() } else { ns.as_str().to_string() },
         memory_count: backup_memories.len(),
         memories: backup_memories,
+        skills,
     };
 
     let json = serde_json::to_vec_pretty(&envelope)
@@ -6572,7 +6583,7 @@ pub async fn import_backup(
     let start = std::time::Instant::now();
     let backup = req.backup;
 
-    if !matches!(backup.version.as_str(), "1.0" | "1.1") {
+    if !matches!(backup.version.as_str(), "1.0" | "1.1" | "1.2") {
         return Err(AppError::BadRequest(format!(
             "unsupported backup version: {}",
             backup.version
@@ -6676,10 +6687,41 @@ pub async fn import_backup(
 
     state.record_ingestion(imported as u64);
 
+    // Skills: merge keeps whichever copy was updated last; replace takes the backup's.
+    let mut skills_imported = 0usize;
+    let mut skills_skipped = 0usize;
+    {
+        let conn = state.store.writer_conn().await;
+        for mut skill in backup.skills {
+            if !anima_db::skills::valid_name(&skill.name) {
+                skills_skipped += 1;
+                continue;
+            }
+            if !req.preserve_namespaces {
+                skill.namespace = ns.as_str().to_string();
+            }
+            let existing = anima_db::skills::get(&conn, &skill.namespace, &skill.name)
+                .map_err(crate::skills::db)?;
+            let keep_existing = req.mode != "replace"
+                && existing.as_ref().is_some_and(|e| e.updated_at >= skill.updated_at);
+            if keep_existing {
+                skills_skipped += 1;
+                continue;
+            }
+            if let Some(e) = existing {
+                skill.id = e.id;
+            }
+            anima_db::skills::put(&conn, &skill).map_err(crate::skills::db)?;
+            skills_imported += 1;
+        }
+    }
+
     Ok(Json(ImportResponse {
         imported,
         skipped,
         total,
+        skills_imported,
+        skills_skipped,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     }))
 }

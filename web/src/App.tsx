@@ -15,6 +15,7 @@ import { Graph3DPage } from './pages/Graph3DPage'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ConflictsPage } from './pages/ConflictsPage'
+import { SkillsPage } from './pages/SkillsPage'
 import { ProcessorLogPage } from './pages/ProcessorLogPage'
 
 const queryClient = new QueryClient({
@@ -550,6 +551,7 @@ export default function App() {
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/chat/:id" element={<ChatPage />} />
                 <Route path="/conflicts" element={<ConflictsPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
                 <Route path="/processor" element={<ProcessorLogPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>

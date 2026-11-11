@@ -1,14 +1,15 @@
-//! `recall`: print memories for a harness hook.
+//! `recall`: print a briefing for a harness hook.
 //!
 //! A harness runs this at session start, or on each prompt, and adds what it
 //! prints to the model's context. A hook must never get in the user's way,
 //! so every failure (server down, slow, bad input) prints nothing and exits 0.
 //!
-//! With `--prompt`, the hook's JSON payload is read from stdin and its
-//! `prompt` field is searched. Without it, the standing profile (identity and
-//! preferences) is printed.
+//! Without flags it prints the session briefing: the user's profile, what is
+//! relevant to the current project, and the list of stored skills. With
+//! `--prompt` it prints the memories matching the prompt in the hook payload.
+//! The selection itself happens on the server (`POST /api/v1/briefing`).
 
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -17,41 +18,38 @@ use super::client::Api;
 use super::Options;
 
 const TIMEOUT: Duration = Duration::from_secs(4);
-/// Below this relevance a search hit is more likely noise than context.
-/// Hybrid scores are small: unrelated memories score 0, loosely related ones
-/// around 0.03, strong matches 0.2 and up.
-const MIN_SCORE: f64 = 0.02;
-const MAX_LINE_CHARS: usize = 400;
 
 pub async fn run(opts: &Options) -> anyhow::Result<()> {
     let Ok(api) = Api::from_options(opts, TIMEOUT) else {
         return Ok(());
     };
-    let text = if opts.has("--prompt") {
-        for_prompt(&api).await
+    let payload = read_payload();
+    let request = if opts.has("--prompt") {
+        match prompt_from_payload(&payload) {
+            Some(prompt) => json!({ "mode": "prompt", "query": prompt }),
+            None => return Ok(()),
+        }
     } else {
-        profile(&api).await
+        json!({ "mode": "session", "project": project(opts, &payload) })
     };
-    if let Some(text) = text {
-        print!("{text}");
+    if let Ok(briefing) = api.post("/api/v1/briefing", &request).await {
+        if let Some(text) = briefing.get("text").and_then(Value::as_str) {
+            print!("{text}");
+        }
     }
     Ok(())
 }
 
-fn one_line(content: &str) -> String {
-    let flat = content.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= MAX_LINE_CHARS {
-        return flat;
+/// The hook payload on stdin. Run by hand from a terminal there is none, and
+/// waiting for one would hang.
+fn read_payload() -> String {
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return String::new();
     }
-    let cut: String = flat.chars().take(MAX_LINE_CHARS).collect();
-    format!("{cut}…")
-}
-
-fn bullets<'a>(items: impl Iterator<Item = &'a Value>) -> Vec<String> {
-    items
-        .filter_map(|m| m.get("content").and_then(Value::as_str))
-        .map(|c| format!("- {}", one_line(c)))
-        .collect()
+    let mut payload = String::new();
+    let _ = stdin.read_to_string(&mut payload);
+    payload
 }
 
 /// The prompt text from a hook payload, when it is worth searching for.
@@ -65,50 +63,30 @@ fn prompt_from_payload(payload: &str) -> Option<String> {
     Some(prompt.chars().take(2000).collect())
 }
 
-fn format_block(title: &str, lines: &[String]) -> Option<String> {
-    if lines.is_empty() {
-        return None;
-    }
-    Some(format!("{title}\n{}\n", lines.join("\n")))
+/// Last folder of a path. Both separators are accepted on every platform,
+/// since the path comes from the harness and not from this OS's own APIs.
+fn folder_name(path: &str) -> Option<String> {
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .map(str::to_string)
+        .filter(|n| !n.is_empty() && !n.ends_with(':'))
 }
 
-async fn for_prompt(api: &Api) -> Option<String> {
-    let mut payload = String::new();
-    std::io::stdin().read_to_string(&mut payload).ok()?;
-    let prompt = prompt_from_payload(&payload)?;
-    let found = api
-        .post("/api/v1/memories/search", &json!({ "query": prompt, "limit": 6, "search_mode": "hybrid" }))
-        .await
-        .ok()?;
-    let hits = found.get("results")?.as_array()?;
-    let relevant = hits
-        .iter()
-        .filter(|m| m.get("score").and_then(Value::as_f64).unwrap_or(0.0) >= MIN_SCORE);
-    format_block(
-        "Memories from Anima that may be relevant to this message (stored earlier by the user or their assistants; some may not apply):",
-        &bullets(relevant),
-    )
-}
-
-async fn profile(api: &Api) -> Option<String> {
-    let mut lines = Vec::new();
-    for category in ["identity", "preference"] {
-        let query = [("category", category), ("status", "active"), ("limit", "15")];
-        let Ok(listed) = api
-            .json(api.request(reqwest::Method::GET, "/api/v1/memories").query(&query))
-            .await
-        else {
-            return None;
-        };
-        if let Some(memories) = listed.get("memories").and_then(Value::as_array) {
-            lines.extend(bullets(memories.iter()));
-        }
+/// The project a session is about: `--project=<name>`, else the working
+/// folder the harness reported, else the current folder.
+fn project(opts: &Options, payload: &str) -> Option<String> {
+    if let Some(name) = opts.flags.iter().find_map(|f| f.strip_prefix("--project=")) {
+        return Some(name.to_string()).filter(|n| !n.is_empty());
     }
-    format_block(
-        "What Anima, the user's long-term memory, holds about them and their preferences. \
-         More is available through the anima memory tools:",
-        &lines,
-    )
+    let from_payload = serde_json::from_str::<Value>(payload)
+        .ok()
+        .and_then(|v| v.get("cwd").and_then(Value::as_str).and_then(folder_name));
+    from_payload.or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|d| folder_name(&d.to_string_lossy()))
+    })
 }
 
 #[cfg(test)]
@@ -130,17 +108,12 @@ mod tests {
     }
 
     #[test]
-    fn long_content_is_flattened_and_cut() {
-        assert_eq!(one_line("a\n  b\tc"), "a b c");
-        let long = "x".repeat(MAX_LINE_CHARS + 50);
-        let cut = one_line(&long);
-        assert_eq!(cut.chars().count(), MAX_LINE_CHARS + 1);
-        assert!(cut.ends_with('…'));
-    }
-
-    #[test]
-    fn empty_results_print_nothing() {
-        assert!(format_block("title", &[]).is_none());
-        assert_eq!(format_block("t", &["- a".into()]).as_deref(), Some("t\n- a\n"));
+    fn project_comes_from_the_flag_then_the_payload_folder() {
+        let payload = r#"{"cwd":"C:\\Users\\me\\code\\billing-api\\","source":"startup"}"#;
+        let none = Options::default();
+        assert_eq!(project(&none, payload).as_deref(), Some("billing-api"));
+        assert_eq!(project(&none, r#"{"cwd":"/home/me/work/anima"}"#).as_deref(), Some("anima"));
+        let flagged = Options { flags: vec!["--project=other".into()], ..Default::default() };
+        assert_eq!(project(&flagged, payload).as_deref(), Some("other"));
     }
 }

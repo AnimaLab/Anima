@@ -4,7 +4,9 @@ import type {
   ChatRequest, ChatResponse, Conversation, ConversationSummary,
   LlmConfig, ChatMessage, StreamEvent, FileAttachment,
   AskRequest, AskResponse, EmbeddingsResponse,
-  ContradictionEntry, SupersessionLink, ProfilesResponse
+  ContradictionEntry,
+  Skill,
+  SkillSummary, SupersessionLink, ProfilesResponse
 } from './types'
 
 let currentNamespace = 'default'
@@ -243,6 +245,24 @@ export const api = {
   // Profiles
   getProfiles: () =>
     request<ProfilesResponse>('/api/v1/profiles'),
+
+  // Skills
+  listSkills: () =>
+    request<{ skills: SkillSummary[] }>('/api/v1/skills'),
+
+  getSkill: (name: string) =>
+    request<Skill>(`/api/v1/skills/${encodeURIComponent(name)}`),
+
+  saveSkill: (name: string, description: string, content: string) =>
+    request<Skill>(`/api/v1/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ description, content }),
+    }),
+
+  deleteSkill: (name: string) =>
+    request<{ deleted: boolean }>(`/api/v1/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 
   // Conflicts & Contradictions
   listContradictions: (limit = 50, offset = 0) =>

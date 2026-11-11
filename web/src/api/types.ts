@@ -306,3 +306,27 @@ export interface ProfilesResponse {
 export interface TelemetryConfig {
   enabled: boolean
 }
+
+/** A stored skill as listed: everything but its instructions. */
+export interface SkillSummary {
+  name: string
+  description: string
+  version: number
+  updated_at: string
+  /** Size of the instructions in characters. */
+  size: number
+  /** True for the skill shipped with the server and not overridden. */
+  builtin: boolean
+}
+
+export interface Skill {
+  id: string
+  namespace: string
+  name: string
+  description: string
+  content: string
+  version: number
+  created_at: string
+  updated_at: string
+  builtin: boolean
+}

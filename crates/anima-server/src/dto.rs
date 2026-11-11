@@ -914,6 +914,9 @@ pub struct BackupEnvelope {
     pub namespace: String,
     pub memory_count: usize,
     pub memories: Vec<BackupMemory>,
+    /// Stored skills. Absent in backups older than format 1.2.
+    #[serde(default)]
+    pub skills: Vec<anima_db::skills::Skill>,
 }
 
 /// A single memory in the backup format (no embedding — re-embedded on import).
@@ -978,5 +981,7 @@ pub struct ImportResponse {
     pub imported: usize,
     pub skipped: usize,
     pub total: usize,
+    pub skills_imported: usize,
+    pub skills_skipped: usize,
     pub elapsed_ms: f64,
 }

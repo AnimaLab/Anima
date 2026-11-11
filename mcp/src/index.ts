@@ -145,6 +145,66 @@ server.tool(
   },
 );
 
+server.tool(
+  "memory_briefing",
+  "A short briefing to read at the start of a session: who the user is, what is relevant to the current project, and which skills are stored. Small by design; use memory_search for anything more specific.",
+  {
+    project: z.string().optional().describe("Name of the project or working folder, to include memories relevant to it"),
+  },
+  async ({ project }) => {
+    const result = await client.briefing(project);
+    return { content: [{ type: "text" as const, text: result.text || "Anima holds nothing to brief on yet." }] };
+  },
+);
+
+server.tool(
+  "skill_list",
+  "List the skills stored in Anima: name, description and size. Skills are reusable instructions (procedures, checklists, conventions) shared by all the user's assistants.",
+  {},
+  async () => {
+    const result = await client.listSkills();
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "skill_get",
+  "Load a skill's full instructions by name. Do this before a task the skill's description matches, then follow it.",
+  {
+    name: z.string().describe("Skill name, as shown by skill_list or the briefing"),
+  },
+  async ({ name }) => {
+    const result = await client.getSkill(name);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "skill_save",
+  "Create or update a skill. Use it when the user teaches a repeatable procedure worth keeping. Saving under an existing name replaces that skill and raises its version.",
+  {
+    name: z.string().describe("Lowercase letters, digits and hyphens, e.g. 'release-checklist'"),
+    description: z.string().describe("One sentence saying what the skill does and when to use it"),
+    content: z.string().describe("The instructions, in Markdown"),
+  },
+  async ({ name, description, content }) => {
+    const result = await client.saveSkill(name, description, content);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "skill_delete",
+  "Delete a stored skill by name.",
+  {
+    name: z.string().describe("Skill name"),
+  },
+  async ({ name }) => {
+    const result = await client.deleteSkill(name);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 // --- Start ---
 
 const transport = new StdioServerTransport();

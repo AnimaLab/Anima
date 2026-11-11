@@ -25,6 +25,7 @@ Your memories belong to you, not your LLM provider.
 - [Quickstart](#quickstart)
 - [LLM setup](#llm-setup)
 - [Connect your tools](#connect-your-tools)
+- [Briefing and skills](#briefing-and-skills)
 - [Move to another machine](#move-to-another-machine)
 - [Integrations](#integrations)
 - [Concepts](#concepts)
@@ -175,11 +176,20 @@ anima-server connect all             # every supported harness found on this mac
 
 | Harness          | MCP server | Instructions            | Automatic recall |
 | ---------------- | ---------- | ----------------------- | ---------------- |
-| `claude`         | yes        | `~/.claude/CLAUDE.md`   | hooks            |
+| `claude`         | yes        | `CLAUDE.md` and skill   | hooks            |
 | `claude-desktop` | yes        |                         |                  |
-| `codex`          | yes        | `~/.codex/AGENTS.md`    |                  |
+| `codex`          | yes        | `AGENTS.md` and skill   |                  |
 | `cursor`         | yes        |                         |                  |
-| `hermes`         | yes        |                         |                  |
+| `hermes`         | provider   | skill                   | memory provider  |
+
+The skill is `anima`, a guide installed in the harness's own skills folder
+that tells the model when to search memory, what to save and how to correct it.
+
+On Hermes, Anima is installed as the external memory provider rather than as an
+MCP server: Hermes then injects the briefing and the matching memories itself,
+and mirrors what its built-in `memory` tool writes into Anima. If another
+provider already holds that slot, `connect` leaves it alone and adds Anima as
+an MCP server.
 
 `anima-server connect print` prints the MCP entry and instructions for any
 other MCP client.
@@ -197,6 +207,42 @@ anima-server connect all --url https://memory.example.org --api-key "$ANIMA_API_
 The address and key are saved to `~/.anima/client.json`, not to the harness
 files.
 
+## Briefing and skills
+
+At the start of a session a connected harness receives a briefing: who you
+are, what is relevant to the current project, and which skills exist. It is
+built without an LLM in a few milliseconds and held to a character budget, so
+it stays small however much Anima remembers.
+
+```text
+About the user:
+- Prefers dark mode and concise answers.
+- My favorite programming language is Rust. (also on record, less trusted: "Favorite programming language is Python.")
+
+Relevant to billing:
+- Currently migrating the billing service to Rust.
+
+Skills stored in Anima (load one with skill_get before using it):
+- release-checklist: Steps to cut a release of a Rust service.
+```
+
+Memories about the same thing are collapsed to the most trusted one, and a
+disagreement stays visible instead of being silently resolved. With each
+message, the harness also receives the memories matching it that the briefing
+did not already include.
+
+Skills are reusable instructions: checklists, procedures, house style. Only
+their names and descriptions go into the briefing; the body is loaded on
+demand, so many skills cost little context. Existing `SKILL.md` folders load as
+they are:
+
+```bash
+anima-server skills add ~/.claude/skills
+anima-server skills list
+```
+
+Details are in [docs/concepts/briefing-and-skills.mdx](docs/concepts/briefing-and-skills.mdx).
+
 ## Move to another machine
 
 ```bash
@@ -205,8 +251,8 @@ anima-server import memories.json    # on the new one
 anima-server connect all
 ```
 
-The export is plain JSON holding every namespace, with original IDs, dates,
-categories and confidence. It carries no embeddings, so it does not depend on
+The export is plain JSON holding every namespace and every skill, with original
+IDs, dates, categories and confidence. It carries no embeddings, so it does not depend on
 the embedding model: the receiving server re-embeds on import. Importing twice
 is safe; memories already present are skipped, and deleted ones stay deleted.
 
@@ -247,18 +293,19 @@ Then add it to your MCP config:
 ```
 
 Tools: `memory_search`, `memory_add`, `memory_update`, `memory_delete`,
-`memory_list`, `memory_stats`, `memory_ask`, `memory_reflect`, and
-`memory_discover`.
+`memory_list`, `memory_stats`, `memory_ask`, `memory_reflect`,
+`memory_discover`, `memory_briefing`, `skill_list`, `skill_get`, `skill_save`,
+and `skill_delete`.
 
 ### Web UI
 
-Open `http://localhost:3000` to browse and edit memories, run searches, chat,
+Open `http://localhost:3000` to browse and edit memories and skills, run searches, chat,
 explore the memory graph, inspect conflicts and embeddings, and change
 settings. Light and dark themes are included.
 
-| Memories | Settings |
-| -------- | -------- |
-| ![Memories page](docs/images/memories.png) | ![Settings page](docs/images/settings.png) |
+| Memories | Skills |
+| -------- | ------ |
+| ![Memories page](docs/images/memories.png) | ![Skills page](docs/images/skills.png) |
 
 ### REST API
 
@@ -276,6 +323,8 @@ reference is in [docs/api-reference](docs/api-reference). Key routes:
 | `POST /api/v1/ask`                    | Retrieval-augmented answer, with `conflicts`             |
 | `POST /api/v1/chat`                   | Conversational interface                                 |
 | `GET /api/v1/contradictions`          | Contradiction ledger                                     |
+| `POST /api/v1/briefing`               | Budgeted briefing for a session or a prompt              |
+| `GET /api/v1/skills`, `/skills/{name}`| List, read, save and delete skills                       |
 | `GET /api/v1/audit/events`            | Audit trail                                              |
 | `GET /api/v1/profiles`                | Resolved LLM profiles and routing                        |
 | `GET /api/v1/calibration/weights`     | Current auto-tuned search weights                        |

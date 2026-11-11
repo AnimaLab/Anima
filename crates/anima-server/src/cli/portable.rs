@@ -42,11 +42,10 @@ pub async fn export(opts: &Options) -> anyhow::Result<()> {
     if full {
         println!("Saved a full snapshot ({} bytes) to {}", bytes.len(), path.display());
     } else {
-        let count = serde_json::from_slice::<Value>(&bytes)
-            .ok()
-            .and_then(|v| v.get("memory_count").and_then(Value::as_u64))
-            .unwrap_or(0);
-        println!("Saved {count} memories to {}", path.display());
+        let saved = serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null);
+        let count = saved.get("memory_count").and_then(Value::as_u64).unwrap_or(0);
+        let skills = saved.get("skills").and_then(Value::as_array).map_or(0, Vec::len);
+        println!("Saved {count} memories and {skills} skills to {}", path.display());
     }
     println!("Load it elsewhere with: anima-server import {}", path.display());
     Ok(())
@@ -95,6 +94,11 @@ pub async fn import(opts: &Options) -> anyhow::Result<()> {
         n("total"),
         api.base(),
         n("skipped"),
+    );
+    println!(
+        "Imported {} skills ({} skipped: same or newer copy already present)",
+        n("skills_imported"),
+        n("skills_skipped"),
     );
     Ok(())
 }

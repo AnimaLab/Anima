@@ -204,6 +204,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/memories/discover", post(handlers::discover_memories))
         .route("/api/v1/memories/purge", post(handlers::purge_deleted_memories))
         .route("/api/v1/stats", get(handlers::get_stats))
+        .route("/api/v1/briefing", post(crate::briefing::briefing))
+        .route("/api/v1/skills", get(crate::skills::list_skills))
+        .route(
+            "/api/v1/skills/{name}",
+            get(crate::skills::get_skill)
+                .put(crate::skills::put_skill)
+                .delete(crate::skills::delete_skill),
+        )
         .route("/api/v1/namespaces", get(handlers::list_namespaces).delete(handlers::delete_namespace))
         .route("/api/v1/namespaces/rename", post(handlers::rename_namespace))
         .route("/api/v1/vec/status", get(handlers::get_vec_status))
