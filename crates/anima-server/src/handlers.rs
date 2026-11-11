@@ -5508,7 +5508,10 @@ mod tests {
     fn noisy_input_detection_flags_gibberish() {
         let noisy = "!!!! #### ???? !!!!! #### ???? !!!!! #### ???? !!!!!";
         assert!(is_likely_noisy_or_adversarial_input(noisy));
-        assert!(is_likely_noisy_or_adversarial_input("aaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        // A single character repeated 30+ times is treated as junk; shorter
+        // runs (e.g. "aaaaargh", ASCII separators) must stay allowed.
+        assert!(is_likely_noisy_or_adversarial_input(&"a".repeat(30)));
+        assert!(!is_likely_noisy_or_adversarial_input(&"a".repeat(29)));
     }
 
     #[test]
