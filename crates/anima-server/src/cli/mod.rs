@@ -13,6 +13,7 @@ mod connect;
 mod mcp;
 mod portable;
 mod recall;
+mod skills;
 
 use std::path::PathBuf;
 
@@ -28,8 +29,13 @@ Usage:
   anima-server disconnect <harness>     Remove Anima from a harness
   anima-server export [file]            Save every memory to one file
   anima-server import <file>            Load memories from an export
+  anima-server skills list              Show stored skills
+  anima-server skills add <path>...     Store SKILL.md files or folders of them
+  anima-server skills export <dir>      Write stored skills as SKILL.md folders
+  anima-server skills remove <name>     Delete a stored skill
   anima-server mcp                      Serve memory tools over MCP stdio
-  anima-server recall                   Print memories for a harness hook
+  anima-server recall                   Print a briefing for a harness hook
+                                        (--prompt, --project=<name>)
   anima-server --install | --uninstall | --service-status
 
 Harnesses: claude, claude-desktop, codex, cursor, hermes, all, print
@@ -119,6 +125,7 @@ pub async fn dispatch(args: &[String]) -> Option<anyhow::Result<()>> {
         "import" => run(rest, |o| async move { portable::import(&o).await }).await,
         "mcp" => run(rest, |o| async move { mcp::serve(&o).await }).await,
         "recall" => run(rest, |o| async move { recall::run(&o).await }).await,
+        "skills" => run(rest, |o| async move { skills::run(&o).await }).await,
         _ => return None,
     };
     Some(result)

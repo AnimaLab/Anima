@@ -30,12 +30,14 @@ You have persistent memory through the `anima` MCP server. It is shared by every
 assistant and machine the user works with, so what you save here is what the
 next assistant will know.
 
-- Before starting a task, call `memory_search` with the topic to recall relevant
-  preferences, decisions and context.
+- If no briefing from Anima is in your context, call `memory_briefing` first.
+- Before starting a task, call `memory_search` with its topic.
 - When the user states a durable fact, preference, decision or correction, save
   it with `memory_add`: one fact per memory, written so it stands on its own.
 - If a stored memory is wrong or outdated, fix it with `memory_update` instead of
   adding a contradicting one.
+- Skills named in the briefing are loaded with `skill_get`. The `anima` skill is
+  the full guide to using this memory.
 - Do not store secrets, credentials or details that only matter to the current task.";
 
 const HARNESSES: &[&str] = &["claude", "claude-desktop", "codex", "cursor", "hermes"];
@@ -123,6 +125,33 @@ impl Ctx<'_> {
                 servers.remove(SERVER_NAME);
             }
         })
+    }
+
+    /// Install or remove the `anima` skill in a harness's skills folder.
+    fn guide_skill(&mut self, harness_dir: &Path) -> anyhow::Result<()> {
+        if !self.instructions {
+            return Ok(());
+        }
+        let folder = harness_dir.join("skills").join(crate::skills::GUIDE_NAME);
+        let path = folder.join("SKILL.md");
+        let ours = super::skills::render_skill_md(
+            crate::skills::GUIDE_NAME,
+            crate::skills::GUIDE_DESCRIPTION,
+            crate::skills::GUIDE_BODY,
+        );
+        if self.connect {
+            return self.write(&path, &ours, "anima skill");
+        }
+        // Only remove the file if it is still the one connect wrote.
+        if std::fs::read_to_string(&path).ok().as_deref() == Some(ours.as_str()) {
+            if !self.dry_run {
+                std::fs::remove_file(&path)?;
+                let _ = std::fs::remove_dir(&folder);
+            }
+            let verb = if self.dry_run { "would remove" } else { "removed    " };
+            self.report.push(format!("  {verb} {} (anima skill)", path.display()));
+        }
+        Ok(())
     }
 
     fn instruction_file(&mut self, path: &Path) -> anyhow::Result<()> {
@@ -326,6 +355,7 @@ fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
         "claude" => {
             ctx.mcp_json(&home.join(".claude.json"), true)?;
             ctx.instruction_file(&dir.join("CLAUDE.md"))?;
+            ctx.guide_skill(&dir)?;
             if ctx.hooks {
                 ctx.edit_json(&dir.join("settings.json"), "recall hooks", |root| {
                     set_claude_hooks(root, &exe, connect)
@@ -339,11 +369,13 @@ fn apply(ctx: &mut Ctx, harness: &str) -> anyhow::Result<()> {
                 if connect { upsert_toml_server(old, &exe) } else { remove_toml_server(old) }
             })?;
             ctx.instruction_file(&dir.join("AGENTS.md"))?;
+            ctx.guide_skill(&dir)?;
         }
         "hermes" => {
             ctx.edit_text(&dir.join("config.yaml"), "MCP server", |old| {
                 if connect { upsert_yaml_server(old, &exe) } else { remove_yaml_server(old) }
             })?;
+            ctx.guide_skill(&dir)?;
         }
         other => anyhow::bail!("unknown harness: {other}. Choose one of: {}, all, print", HARNESSES.join(", ")),
     }
@@ -470,6 +502,9 @@ mod tests {
 
         let md = read(&home.path().join(".claude").join("CLAUDE.md"));
         assert_eq!(md.matches(BLOCK_START).count(), 1);
+        let skill = read(&home.path().join(".claude").join("skills").join("anima").join("SKILL.md"));
+        assert!(skill.starts_with("---\nname: anima\ndescription: \""));
+        assert!(skill.contains("# Using Anima"));
         assert!(claude_json.with_file_name(".claude.json.before-anima").exists());
     }
 
@@ -486,6 +521,7 @@ mod tests {
 
         assert_eq!(read(&dir.join("CLAUDE.md")), "# Mine\n\nKeep this.\n");
         assert_eq!(read(&dir.join("settings.json")), "{\n  \"model\": \"opus\"\n}\n");
+        assert!(!dir.join("skills").join("anima").exists(), "the installed skill is removed");
         let root: Value = serde_json::from_str(&read(&home.path().join(".claude.json"))).unwrap();
         assert!(root["mcpServers"].get("anima").is_none());
     }

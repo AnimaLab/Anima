@@ -15,8 +15,10 @@ use super::Options;
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
 const INSTRUCTIONS: &str = "Anima is the user's long-term memory, shared by every assistant and \
-machine they use. Search it for relevant context before starting a task, and save durable facts, \
-preferences, decisions and corrections as they come up. Do not store secrets or credentials.";
+machine they use. At the start of a session call memory_briefing unless a briefing from Anima is \
+already in context. Search memory before starting a task, and save durable facts, preferences, \
+decisions and corrections as they come up. Skills listed in the briefing are loaded with skill_get. \
+For the full guide, call skill_get with the name anima. Do not store secrets or credentials.";
 
 pub async fn serve(opts: &Options) -> anyhow::Result<()> {
     let api = Api::from_options(opts, Duration::from_secs(120))?;
@@ -76,6 +78,8 @@ async fn handle(api: &Api, msg: &Value) -> Option<Value> {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
             let (text, is_error) = match call(api, name, &args).await {
+                // A plain string result is prose for the model: send it unquoted.
+                Ok(Value::String(s)) => (s, false),
                 Ok(v) => (serde_json::to_string_pretty(&v).unwrap_or_default(), false),
                 Err(e) => (e.to_string(), true),
             };
@@ -194,6 +198,47 @@ pub fn tools() -> Vec<Value> {
             &[],
         ),
         tool(
+            "memory_briefing",
+            "A short briefing to read at the start of a session: who the user is, what is \
+             relevant to the current project, and which skills are stored. Small by design; \
+             use memory_search for anything more specific.",
+            json!({
+                "project": { "type": "string", "description": "Name of the project or working folder, to include memories relevant to it" },
+            }),
+            &[],
+        ),
+        tool(
+            "skill_list",
+            "List the skills stored in Anima: name, description and size. Skills are reusable \
+             instructions (procedures, checklists, conventions) shared by all the user's assistants.",
+            json!({}),
+            &[],
+        ),
+        tool(
+            "skill_get",
+            "Load a skill's full instructions by name. Do this before a task the skill's \
+             description matches, then follow it.",
+            json!({ "name": { "type": "string", "description": "Skill name, as shown by skill_list or the briefing" } }),
+            &["name"],
+        ),
+        tool(
+            "skill_save",
+            "Create or update a skill. Use it when the user teaches a repeatable procedure worth \
+             keeping. Saving under an existing name replaces that skill and raises its version.",
+            json!({
+                "name": { "type": "string", "description": "Lowercase letters, digits and hyphens, e.g. 'release-checklist'" },
+                "description": { "type": "string", "description": "One sentence saying what the skill does and when to use it" },
+                "content": { "type": "string", "description": "The instructions, in Markdown" },
+            }),
+            &["name", "description", "content"],
+        ),
+        tool(
+            "skill_delete",
+            "Delete a stored skill by name.",
+            json!({ "name": { "type": "string", "description": "Skill name" } }),
+            &["name"],
+        ),
+        tool(
             "memory_discover",
             "Find memories similar to one concept while steering away from another, for \
              exploratory queries such as 'travel but not work trips'.",
@@ -222,7 +267,8 @@ fn pick(args: &Value, keys: &[&str]) -> serde_json::Map<String, Value> {
 }
 
 fn encode(segment: &str) -> String {
-    url::form_urlencoded::byte_serialize(segment.as_bytes()).collect()
+    // Form encoding writes a space as "+", which is wrong in a path segment.
+    url::form_urlencoded::byte_serialize(segment.as_bytes()).collect::<String>().replace('+', "%20")
 }
 
 async fn search_ids(api: &Api, query: &str) -> anyhow::Result<Vec<Value>> {
@@ -307,6 +353,31 @@ async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
             });
             api.post("/api/v1/memories/discover", &body).await
         }
+        "memory_briefing" => {
+            let mut body = pick(args, &["project"]);
+            body.insert("mode".into(), json!("session"));
+            let briefing = api.post("/api/v1/briefing", &Value::Object(body)).await?;
+            // The text is the briefing; the structured fields would only repeat it.
+            let text = briefing.get("text").and_then(Value::as_str).unwrap_or("");
+            Ok(json!(if text.is_empty() { "Anima holds nothing to brief on yet." } else { text }))
+        }
+        "skill_list" => api.get("/api/v1/skills").await,
+        "skill_get" => {
+            let name = required_str(args, "name")?;
+            api.get(&format!("/api/v1/skills/{}", encode(name))).await
+        }
+        "skill_save" => {
+            let name = required_str(args, "name")?;
+            required_str(args, "description")?;
+            required_str(args, "content")?;
+            let body = pick(args, &["description", "content"]);
+            let path = format!("/api/v1/skills/{}", encode(name));
+            api.json(api.request(Method::PUT, &path).json(&Value::Object(body))).await
+        }
+        "skill_delete" => {
+            let name = required_str(args, "name")?;
+            api.json(api.request(Method::DELETE, &format!("/api/v1/skills/{}", encode(name)))).await
+        }
         other => anyhow::bail!("unknown tool: {other}"),
     }
 }
@@ -345,7 +416,8 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec![
             "memory_search", "memory_add", "memory_update", "memory_delete", "memory_list",
-            "memory_stats", "memory_ask", "memory_reflect", "memory_discover",
+            "memory_stats", "memory_ask", "memory_reflect", "memory_briefing", "skill_list",
+            "skill_get", "skill_save", "skill_delete", "memory_discover",
         ]);
         for t in tools {
             assert_eq!(t["inputSchema"]["type"], "object");
