@@ -3,7 +3,7 @@ import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, U
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
-import { api } from '../api/client'
+import { api, apiFetch } from '../api/client'
 import type { NamespaceInfo, ProfilesResponse } from '../api/types'
 
 export interface CognitiveConfig {
@@ -92,7 +92,7 @@ export function SettingsPage() {
     setLoadingModels(true)
     setModelError(null)
     try {
-      const res = await fetch('/api/v1/models')
+      const res = await apiFetch('/api/v1/models')
       if (!res.ok) throw new Error(`${res.status}`)
       const json = await res.json()
       const list: ModelInfo[] = (json.data || []).map((m: { id: string; owned_by?: string }) => ({

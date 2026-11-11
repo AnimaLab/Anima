@@ -27,7 +27,7 @@ Pick whichever method gets you running fastest.
   </Tab>
   <Tab title="Docker">
     ```bash
-    docker run -p 3000:3000 -v ./anima.db:/app/anima.db ghcr.io/animalab/anima:latest
+    docker run -p 3000:3000 -e ANIMA_API_KEY=your-secret-key -v ./anima.db:/app/anima.db ghcr.io/animalab/anima:latest
     ```
   </Tab>
   <Tab title="Build from source">

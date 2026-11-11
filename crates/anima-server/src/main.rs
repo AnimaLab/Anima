@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod config;
 mod dto;
 mod handlers;
@@ -21,7 +22,6 @@ use anima_embed::download::ensure_model_files;
 use anima_embed::model::{EmbeddingModel, PoolingStrategy};
 use anima_embed::openai::OpenAiEmbedder;
 use tokio::signal;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::app::{AppState, build_router};
@@ -515,8 +515,17 @@ async fn start_server(
         });
     }
 
+    // Layers run outermost-last: CORS answers preflights before the auth
+    // guard sees them (preflights never carry credentials).
+    let auth_settings = Arc::new(auth::AuthSettings::from_config(&config.server)?);
+    if auth_settings.key_required() {
+        tracing::info!("API key authentication enabled for /api/*");
+    } else {
+        tracing::info!("No API key set — API is unauthenticated (loopback only)");
+    }
     let app = build_router(state.clone())
-        .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn_with_state(auth_settings, auth::guard))
+        .layer(auth::cors_layer(&config.server))
         .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port)

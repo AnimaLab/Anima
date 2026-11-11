@@ -34,6 +34,8 @@ COPY --from=web-builder /app/dist/ ./web/dist/
 RUN sed -i 's/host = "127.0.0.1"/host = "0.0.0.0"/' config.default.toml && \
     sed -i 's|http://localhost:|http://host.docker.internal:|g' config.default.toml
 
+# The container binds 0.0.0.0, so the server requires ANIMA_API_KEY at runtime:
+#   docker run -e ANIMA_API_KEY=... -p 3000:3000 anima-server
 EXPOSE 3000
 
 ENTRYPOINT ["anima-server"]

@@ -1,128 +1,75 @@
 # Anima
 
-[License: Apache 2.0](LICENSE)
-[Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks)
+[License: Apache 2.0](LICENSE) · [Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks) · [Contributing](CONTRIBUTING.md)
 
-Anima is a local-first memory engine for AI assistants and agent workflows. It
-helps systems remember facts, preferences, decisions, and prior context across
-sessions without relying on a hosted memory backend.
+**Local-first memory for AI assistants and agents.** Anima remembers facts,
+preferences, decisions, and prior context across sessions, in a single SQLite
+file you control. No hosted backend required.
 
-Under the hood, Anima combines a Rust API server, SQLite storage, hybrid
-retrieval, local embeddings, a TypeScript MCP bridge, and a web UI for
-inspecting and managing memory.
-
-It is built for teams that want persistent, auditable memory with minimal
-infrastructure and full data control. The current public release is text-first:
-it supports memory ingestion, retrieval, revisions, audit trails, and
-REST/MCP-based integration. Audio, image, and video ingestion are roadmap
-items, not shipped features.
+One Rust binary gives you a REST API, a web UI, hybrid retrieval with local
+embeddings, and a full audit trail. A TypeScript bridge exposes it to any MCP
+client.
 
 Your memories belong to you, not your LLM provider.
 
-## Benchmark
+## Contents
 
-**87.73% on LOCOMO** — the academic benchmark for long-term conversational
-memory. Human baseline: 87.9%. Gap: 0.17%.
-
-Full results and methodology live in
-[Anima-Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks). Headline
-numbers:
-
-- **87.7%** full-dataset LoCoMo accuracy across all 10 conversations, 1,540 questions
-- **93.4%** on `conv-26` only, 152 questions, single-conversation focused run
-- **0.864** broad continuous judge score
-
-Dataset guidance lives in [DATASETS.md](DATASETS.md). See also
-[CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR expectations.
+- [Why Anima](#why-anima)
+- [Quickstart](#quickstart)
+- [LLM setup](#llm-setup)
+- [Integrations](#integrations)
+- [Concepts](#concepts)
+- [Security](#security)
+- [Deployment](#deployment)
+- [Benchmarks](#benchmarks)
+- [Development](#development)
+- [Telemetry](#telemetry)
 
 ## Why Anima
 
-- **Local-first storage**: memories live in a SQLite database file under your
-control.
-- **Cloud-optional reasoning**: start in smoke mode with no remote LLM, or wire
-Anima to Ollama or another OpenAI-compatible backend for deeper reasoning.
-- **Hybrid retrieval**: semantic, keyword, and temporal ranking work together
-instead of forcing a vector-only workflow.
-- **Inspectable memory**: revisions, rollback, audit events, graphs, and
-embedding views make the system easier to trust and debug.
-- **Multiple integration surfaces**: REST API, MCP server, and web UI are all
-part of the repo.
+- **Local-first**: memories live in a SQLite file on your machine. Embeddings
+  and re-ranking run locally through ONNX.
+- **Cloud-optional**: store and search need no LLM at all. Add Ollama or any
+  OpenAI-compatible endpoint when you want generated answers and reflection.
+- **Hybrid retrieval**: vector, keyword, and temporal signals are ranked
+  together, with an optional cross-encoder re-ranker.
+- **Auditable**: every memory has revisions, rollback, provenance, a
+  confidence score, and a contradiction ledger showing what replaced what.
+- **Easy to integrate**: REST API, MCP server, and web UI ship in this repo.
 
-## What Ships Today
+Anima is text-first today. Audio, image, and video ingestion are on the
+roadmap, not shipped.
 
+## Quickstart
 
-| Capability                | Status  | Notes                                                       |
-| ------------------------- | ------- | ----------------------------------------------------------- |
-| Persistent memory API     | Shipped | Add, search, list, update, merge, and delete memories       |
-| Cursor pagination         | Shipped | Keyset pagination via `cursor` for constant-time scrolling  |
-| Hybrid retrieval          | Shipped | Vector + keyword + temporal ranking with auto-tuned weights |
-| Multi-vector search       | Shipped | Named vectors per memory with query routing heuristics      |
-| Scalar quantization       | Shipped | Int8 quantized vec indexes with f32 source for reindexing   |
-| Discovery mode            | Shipped | "Find similar" — example-based search with pos/neg vectors  |
-| Result grouping           | Shipped | Deduplicate by episode, category, or source via `group_by`  |
-| Cross-encoder re-ranking  | Shipped | Optional bge-reranker-v2-m3 for better natural language     |
-| Confidence + source       | Shipped | Per-memory trust scoring and provenance tracking            |
-| Typed memory categories   | Shipped | Per-category decay rates and filtering                      |
-| Revisions and audit trail | Shipped | Revision history, rollback, and audit events                |
-| Conflict detection        | Shipped | Supersession chains, contradiction ledger, web inspector    |
-| Namespace isolation       | Shipped | `X-Anima-Namespace` plus namespace ACL support              |
-| Background consolidation  | Shipped | Reflection and deduction pipeline with auto-classification  |
-| Provider profiles         | Shipped | Named LLM profiles with per-operation routing               |
-| Configurable embeddings   | Shipped | Local ONNX or any OpenAI-compatible API (Cohere, Voyage)    |
-| Graceful degradation      | Shipped | Returns retrieval results when LLM backend is down          |
-| MCP bridge                | Shipped | Tool surface for assistants and coding agents               |
-| Web UI                    | Shipped | Search, chat, graphs, conflicts, embeddings, and settings   |
-| Multimodal ingestion      | Roadmap | Audio, image, and video are not public-server features yet  |
+### 1. Install
 
+**Release binary** (no Rust needed). Download the archive for your platform
+from [GitHub Releases](https://github.com/AnimaLab/Anima/releases), extract it,
+and run `anima-server` from the extracted folder. Builds are published for
+Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). The
+archive includes `config.default.toml` and service templates.
 
-## Install
-
-Pick whichever method gets you running fastest.
-
-### Option A: Download a release (no Rust needed)
-
-Download the latest binary for your platform from
-[GitHub Releases](https://github.com/AnimaLab/Anima/releases):
+**Docker**. The container listens on all interfaces, so it requires an API key
+(see [Security](#security)):
 
 ```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/AnimaLab/Anima/releases/latest/download/anima-server-latest-aarch64-apple-darwin.tar.gz | tar xz
-cd anima-server-*
-./anima-server
+docker run -p 3000:3000 -e ANIMA_API_KEY=your-secret-key \
+  -v ./anima.db:/app/anima.db ghcr.io/animalab/anima:latest
 ```
 
-```bash
-# Linux (x86_64)
-curl -L https://github.com/AnimaLab/Anima/releases/latest/download/anima-server-latest-x86_64-unknown-linux-gnu.tar.gz | tar xz
-cd anima-server-*
-./anima-server
-```
-
-The release archive includes the binary, `config.default.toml`, and service
-templates. No Rust toolchain required.
-
-### Option B: Docker (no Rust needed)
-
-```bash
-docker run -p 3000:3000 -v ./anima.db:/app/anima.db ghcr.io/animalab/anima:latest
-```
-
-### Option C: Build from source
+**From source**:
 
 ```bash
 cargo build --release -p anima-server
 ./target/release/anima-server
 ```
 
-In all cases, Anima starts on `http://localhost:3000`. On first run it downloads
-the local embedding models automatically. The web UI is served at the
-same address.
+Anima starts on `http://localhost:3000` and serves the web UI at the same
+address. On first run it downloads the local models: the BGE-M3 embedder and
+the bge-reranker-v2-m3 re-ranker (571 MB).
 
-## Quickstart
-
-Once Anima is running, the core loop is three steps:
-
-### 1. Store a memory
+### 2. Store a memory
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/memories \
@@ -131,7 +78,7 @@ curl -X POST http://localhost:3000/api/v1/memories \
   -d '{"content": "I love hiking on weekends.", "tags": ["preference"]}'
 ```
 
-### 2. Search
+### 3. Search
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/memories/search \
@@ -140,7 +87,7 @@ curl -X POST http://localhost:3000/api/v1/memories/search \
   -d '{"query": "What does the user like to do on weekends?", "limit": 5}'
 ```
 
-### 3. Ask (requires an LLM backend)
+### 4. Ask (needs an LLM backend)
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/ask \
@@ -149,249 +96,70 @@ curl -X POST http://localhost:3000/api/v1/ask \
   -d '{"question": "What are the user'\''s hobbies?"}'
 ```
 
-Store and search work with zero configuration. The `/ask` and `/chat` endpoints
-need an LLM backend — see the next section.
+If the server has an API key, add `-H "Authorization: Bearer $ANIMA_API_KEY"`
+to each request.
 
-## LLM Setup
+## LLM setup
 
-By default Anima expects Ollama running locally. Pull a model and you're set:
+Store and search work with zero configuration. `/ask`, `/chat`, and background
+reflection need an LLM. By default Anima expects Ollama on the same machine:
 
 ```bash
 ollama serve
 ollama pull qwen3.5:4b
 ```
 
-To use a cloud API instead (OpenAI, Groq, Together, etc.), edit
-`config.default.toml`:
+To use a cloud API (OpenAI, Groq, Together, or anything OpenAI-compatible),
+copy `config.default.toml` to `config.toml` and edit:
 
 ```toml
 [llm]
 base_url = "https://api.groq.com/openai/v1"
 model = "qwen/qwen3-32b"
-api_key = ""  # or set OPENAI_API_KEY env var
+api_key = ""  # or set OPENAI_API_KEY, also read from a .env file
 ```
 
-Or use a `.env` file in the project root (loaded automatically):
+If the LLM is unreachable, `/ask` degrades gracefully: it returns the retrieved
+memories with `"degraded": true` instead of a generated answer.
 
-```
-OPENAI_API_KEY=sk-...
-```
+### Provider profiles
 
-Without an LLM backend, store and search still work. The `/ask` endpoint
-degrades gracefully — it returns retrieval results directly instead of an
-LLM-generated answer (the response includes `"degraded": true`).
-
-## Provider Profiles
-
-Use different models for different operations. Define named profiles in
-`config.toml` and route each operation to the right one:
+Route each operation to a different model by defining named profiles:
 
 ```toml
 [profiles.fast]
 base_url = "http://localhost:11434/v1"
 model = "qwen3.5:4b"
 
-[profiles.strong]
-base_url = "http://localhost:11434/v1"
-model = "qwen3:32b"
-
 [profiles.cloud]
 base_url = "https://api.groq.com/openai/v1"
 model = "qwen/qwen3-32b"
-api_key = ""  # or set CLOUD_API_KEY env var
+api_key = ""  # or set CLOUD_API_KEY
 
 [routing]
-ask = "strong"
+ask = "cloud"
 chat = "fast"
 processor = "cloud"
 consolidation = "fast"
 ```
 
-Multiple profiles can point to the same endpoint with different models (e.g. same
-Ollama, different model sizes). Profile names are arbitrary.
+Profile names are arbitrary. Key resolution per profile is: config value, then
+`{PROFILE_NAME}_API_KEY`, then `OPENAI_API_KEY`. Without `[profiles]`, the
+`[llm]`, `[processor]`, and `[consolidation]` sections apply. A per-request
+`llm` override on `/chat` and `/ask` always wins.
 
-When `[profiles]` is absent, the legacy `[llm]`, `[processor]`, and
-`[consolidation]` sections work exactly as before. Per-request `llm` overrides in
-`/chat` and `/ask` still take priority over the routed profile.
+## Integrations
 
-API key resolution per profile: config value > `{PROFILE_NAME}_API_KEY` env >
-`OPENAI_API_KEY` env.
+### MCP
 
-## Memory Categories
-
-Every memory has a semantic `category` that controls how fast it decays and how
-it's ranked in search. Set it on ingestion or let the reflection pipeline
-classify automatically.
-
-**Built-in categories:**
-
-
-| Category      | Decay half-life | Use case                                         |
-| ------------- | --------------- | ------------------------------------------------ |
-| `identity`    | ~2,888 days     | Who the user is, names, relationships            |
-| `preference`  | ~289 days       | Likes, dislikes, communication style             |
-| `routine`     | ~96 days        | Recurring tasks, schedules, habits               |
-| `environment` | ~58 days        | Ports, paths, services, technical infra          |
-| `inferred`    | ~29 days        | Conclusions Anima drew but user hasn't confirmed |
-| `general`     | ~29 days        | Default — uncategorized memories                 |
-| `task`        | ~6 days         | Current work, temporary context                  |
-
-
-**Custom categories:** define your own in `config.toml` with a name and half-life:
-
-```toml
-[categories.health]
-half_life_days = 144   # temporal score drops to 50% after 144 days
-
-[categories.finance]
-half_life_days = 58
-```
+The MCP bridge exposes Anima to Claude Code, Claude Desktop, and other MCP
+clients. Build it once:
 
 ```bash
-# Set category on ingestion (built-in or custom)
-curl -X POST "$BASE_URL/api/v1/memories" \
-  -H "Content-Type: application/json" \
-  -H "X-Anima-Namespace: default" \
-  -d '{"content": "Blood pressure 120/80", "category": "health"}'
-
-# Filter by category
-curl "$BASE_URL/api/v1/memories?category=health" \
-  -H "X-Anima-Namespace: default"
+cd mcp && npm install && npm run build
 ```
 
-When the reflection pipeline extracts facts from raw memories, it auto-classifies
-each fact into the appropriate category. The MCP `memory_add` tool also accepts
-`category` as an optional parameter. Unknown categories default to the global
-decay rate.
-
-## Re-ranking
-
-Anima includes a cross-encoder re-ranker that dramatically improves retrieval
-quality for natural language queries. Enabled by default. On first startup Anima
-downloads
-[bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) INT8
-(571 MB). The re-ranker scores the top candidates from the initial retrieval
-pass using a cross-encoder that sees query and document together, catching
-paraphrases and semantic matches that embedding similarity alone misses.
-
-Performance: high-confidence queries skip the re-ranker (about 55ms). Ambiguous
-queries use it (about 200ms). Average across mixed workloads is around 160ms.
-
-Tune `top_n` (default 10) to trade latency for quality — fewer candidates =
-faster, more = better ordering.
-
-## Confidence and Source Tracking
-
-Every memory has a `confidence` score (0.0–1.0) and a `source` field that
-tracks how it was created. Confidence affects search ranking — higher-confidence
-memories score higher for the same relevance.
-
-
-| Source           | Default confidence | When used                             |
-| ---------------- | ------------------ | ------------------------------------- |
-| `user_stated`    | 1.0                | User explicitly provided this fact    |
-| `promoted`       | 0.8                | Promoted from agent working memory    |
-| `agent_observed` | 0.7                | Agent noticed this from behavior      |
-| `reflected`      | 0.6 (calibrated)   | Extracted by the reflection pipeline  |
-| `deduced`        | 0.5 (calibrated)   | Inferred by combining reflected facts |
-| `inferred`       | 0.5                | General inference, not user-confirmed |
-
-
-```bash
-# Store with explicit source
-curl -X POST "$BASE_URL/api/v1/memories" \
-  -H "Content-Type: application/json" \
-  -H "X-Anima-Namespace: default" \
-  -d '{"content": "User seems to prefer dark mode", "source": "agent_observed"}'
-```
-
-When one memory supersedes another (via correction or reconsolidation), the
-conflict is logged in the contradiction ledger for auditability. The `/ask`
-endpoint automatically detects conflicts among retrieved memories and includes
-them in the response as a `conflicts` array. The web UI has a Conflicts page
-for inspecting supersession chains.
-
-## Advanced Search
-
-The `/search` endpoint supports several modes beyond basic hybrid search:
-
-```bash
-# Ask-grade retrieval without LLM — runs the full /ask pipeline
-# (keyword expansion, entity resolution, temporal supplement, episode expansion)
-# but returns search results instead of an LLM-generated answer.
-curl -X POST "$BASE_URL/api/v1/memories/search" \
-  -H "Content-Type: application/json" \
-  -H "X-Anima-Namespace: default" \
-  -d '{"query": "What does Zhen like to eat?", "search_mode": "ask_retrieval", "limit": 10}'
-
-# Query rewriting — extract keywords and expand the query before searching.
-# Works with hybrid, vector, or keyword modes.
-curl -X POST "$BASE_URL/api/v1/memories/search" \
-  -H "Content-Type: application/json" \
-  -H "X-Anima-Namespace: default" \
-  -d '{"query": "weekend hiking plans", "query_rewrite": true, "limit": 10}'
-
-# Discovery — find memories similar to examples (with optional negative examples)
-curl -X POST "$BASE_URL/api/v1/memories/discover" \
-  -H "Content-Type: application/json" \
-  -H "X-Anima-Namespace: default" \
-  -d '{"positive_ids": ["mem-id-1"], "negative_ids": [], "query": "optional topic bias", "limit": 10}'
-```
-
-## Embedding Backend
-
-The default embedding backend is a local ONNX model (Qwen3-Embedding-0.6B).
-To use a cloud embedding API instead, set the backend to `openai_compat` and
-point it at any OpenAI-compatible embedding endpoint:
-
-```toml
-[embedding]
-backend = "openai_compat"
-api_base_url = "https://api.cohere.com/compatibility/v1"
-api_model = "embed-v4.0"
-api_key = ""  # or set EMBEDDING_API_KEY env var
-dimension = 1024
-```
-
-Works with OpenAI, Cohere, Voyage, Together, vLLM, or any provider that
-implements the `/embeddings` endpoint. API key resolution: config value >
-`EMBEDDING_API_KEY` env > `OPENAI_API_KEY` env.
-
-## Interfaces
-
-### REST API
-
-The HTTP server exposes memory CRUD, search, revisions, audit events, chat,
-ask, graph, embeddings, planning, and conversation endpoints.
-
-Key routes:
-
-
-| Route                                 | Description                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------- |
-| `GET /health`                         | Liveness probe — always 200 if the process is alive                       |
-| `GET /health/ready`                   | Readiness probe — checks DB, embedder, processor; returns 503 if degraded |
-| `POST /api/v1/memories`               | Add a memory (supports `category` field)                                  |
-| `POST /api/v1/memories/search`        | Hybrid search (`ask_retrieval` mode, `query_rewrite` option)              |
-| `POST /api/v1/memories/discover`      | Example-based discovery with positive/negative IDs and optional query     |
-| `GET /api/v1/memories?category=X`     | List memories filtered by category                                        |
-| `GET /api/v1/memories/{id}/revisions` | Revision history                                                          |
-| `GET /api/v1/memories/{id}/history`   | Supersession chain (full conflict history for a memory)                   |
-| `GET /api/v1/audit/events`            | Audit trail                                                               |
-| `GET /api/v1/contradictions`          | Contradiction ledger (all supersessions with old/new content)             |
-| `POST /api/v1/ask`                    | Retrieval-augmented answer (includes `conflicts` and `degraded` fields)   |
-| `POST /api/v1/chat`                   | Conversational interface (graceful degradation when LLM is down)          |
-| `GET /api/v1/profiles`                | Resolved LLM provider profiles and operation routing                      |
-| `GET /api/v1/calibration/weights`     | Current hybrid search weights (auto-tuned from observations)              |
-| `GET /api/v1/processor/status`        | Background processor metrics                                              |
-
-
-### MCP bridge
-
-The MCP server wraps Anima as tools such as `memory_search`, `memory_add`,
-`memory_update`, `memory_delete`, `memory_stats`, `memory_ask`, and
-`memory_reflect`. To use with Claude Code or Claude Desktop, add to your MCP
-config:
+Then add it to your MCP config:
 
 ```json
 {
@@ -401,18 +169,164 @@ config:
       "args": ["path/to/mcp/dist/index.js"],
       "env": {
         "ANIMA_BASE_URL": "http://localhost:3000",
-        "ANIMA_NAMESPACE": "default"
+        "ANIMA_NAMESPACE": "default",
+        "ANIMA_API_KEY": "only-if-the-server-requires-one"
       }
     }
   }
 }
 ```
 
+Tools: `memory_search`, `memory_add`, `memory_update`, `memory_delete`,
+`memory_list`, `memory_stats`, `memory_ask`, `memory_reflect`, and
+`memory_discover`.
+
 ### Web UI
 
-The web app gives you a visual surface for memories, search results, graph
-relationships, conflicts, chat, and namespace-aware inspection. Open
-`http://localhost:3000` in your browser after starting the server.
+Open `http://localhost:3000` to browse and edit memories, run searches, chat,
+explore the memory graph, inspect conflicts and embeddings, and change
+settings.
+
+### REST API
+
+Every `/api/v1/` request takes an `X-Anima-Namespace` header. The full
+reference is in [docs/api-reference](docs/api-reference). Key routes:
+
+| Route                                 | Description                                              |
+| ------------------------------------- | -------------------------------------------------------- |
+| `POST /api/v1/memories`               | Add a memory                                             |
+| `GET /api/v1/memories`                | List memories, with `category` filter and cursor paging  |
+| `POST /api/v1/memories/search`        | Hybrid search                                            |
+| `POST /api/v1/memories/discover`      | Find memories similar to positive and negative examples  |
+| `GET /api/v1/memories/{id}/revisions` | Revision history                                         |
+| `GET /api/v1/memories/{id}/history`   | Supersession chain for a memory                          |
+| `POST /api/v1/ask`                    | Retrieval-augmented answer, with `conflicts`             |
+| `POST /api/v1/chat`                   | Conversational interface                                 |
+| `GET /api/v1/contradictions`          | Contradiction ledger                                     |
+| `GET /api/v1/audit/events`            | Audit trail                                              |
+| `GET /api/v1/profiles`                | Resolved LLM profiles and routing                        |
+| `GET /api/v1/calibration/weights`     | Current auto-tuned search weights                        |
+| `GET /api/v1/processor/status`        | Background processor metrics                             |
+| `GET /health`, `GET /health/ready`    | Liveness and readiness probes                            |
+
+## Concepts
+
+### Memory categories
+
+Each memory has a `category` that sets how fast it decays in ranking. Set it on
+ingestion, or let the reflection pipeline classify extracted facts.
+
+| Category      | Half-life   | Use case                                          |
+| ------------- | ----------- | ------------------------------------------------- |
+| `identity`    | ~2,888 days | Who the user is, names, relationships             |
+| `preference`  | ~289 days   | Likes, dislikes, communication style              |
+| `routine`     | ~96 days    | Recurring tasks, schedules, habits                |
+| `environment` | ~58 days    | Ports, paths, services, technical infrastructure  |
+| `inferred`    | ~29 days    | Conclusions Anima drew, not confirmed by the user |
+| `general`     | ~29 days    | Default for uncategorized memories                |
+| `task`        | ~6 days     | Current work, temporary context                   |
+
+Define your own in `config.toml`:
+
+```toml
+[categories.health]
+half_life_days = 144
+```
+
+Unknown categories use the global decay rate.
+
+### Confidence and source
+
+Each memory carries a `confidence` score (0.0 to 1.0) and a `source`. Higher
+confidence ranks higher at equal relevance.
+
+| Source           | Default confidence | When used                             |
+| ---------------- | ------------------ | ------------------------------------- |
+| `user_stated`    | 1.0                | The user explicitly provided the fact |
+| `promoted`       | 0.8                | Promoted from agent working memory    |
+| `agent_observed` | 0.7                | The agent noticed it from behavior    |
+| `reflected`      | 0.6 (calibrated)   | Extracted by the reflection pipeline  |
+| `deduced`        | 0.5 (calibrated)   | Inferred by combining reflected facts |
+| `inferred`       | 0.5                | General inference, not user-confirmed |
+
+When one memory supersedes another, the change is recorded in the contradiction
+ledger. `/ask` reports conflicts among the memories it retrieved in a
+`conflicts` array, and the web UI has a Conflicts page for supersession chains.
+
+### Retrieval
+
+Search blends vector similarity, keyword match, and temporal decay, with
+weights auto-tuned from observations. Beyond the default hybrid mode:
+
+- **`search_mode: "ask_retrieval"`** runs the full `/ask` retrieval pipeline
+  (keyword expansion, entity resolution, temporal supplement, episode
+  expansion) and returns results without calling an answer LLM.
+- **`query_rewrite: true`** extracts keywords and expands the query first.
+- **`group_by`** deduplicates results by episode, category, or source.
+- **`/memories/discover`** finds memories similar to example IDs, with optional
+  negative examples and a query bias.
+- **Named vectors** store several embeddings per memory (for example content
+  and summary) and blend them at query time. See `[[vectors]]` in
+  `config.default.toml`.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories/search \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"query": "What does Zhen like to eat?", "search_mode": "ask_retrieval", "limit": 10}'
+```
+
+### Re-ranking
+
+A cross-encoder
+([bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3), INT8)
+re-scores the top candidates, catching paraphrases that embedding similarity
+misses. It is enabled by default. High-confidence queries skip it (about
+55 ms); ambiguous ones use it (about 200 ms). Tune `top_n` under `[reranker]`
+to trade latency for ordering quality, or set `enabled = false`.
+
+### Embeddings
+
+The default embedder is BGE-M3 (1024 dimensions) running locally through ONNX.
+`config.default.toml` includes ready-made alternatives, including
+Qwen3-Embedding-0.6B. To use a hosted embedding API instead:
+
+```toml
+[embedding]
+backend = "openai_compat"
+api_base_url = "https://api.cohere.com/compatibility/v1"
+api_model = "embed-v4.0"
+api_key = ""  # or set EMBEDDING_API_KEY
+dimension = 1024
+```
+
+This works with OpenAI, Cohere, Voyage, Together, vLLM, or any provider with an
+OpenAI-style `/embeddings` endpoint. Changing the model or dimension requires
+re-embedding existing memories.
+
+## Security
+
+Anima's defaults assume a single trusted machine.
+
+- **Loopback, no key (default)**: the server binds `127.0.0.1` and accepts
+  unauthenticated requests, but only when the request `Host` is a loopback
+  name. This blocks DNS-rebinding attacks from web pages in your browser.
+- **API key**: set `ANIMA_API_KEY` (or `api_key` under `[server]`) and every
+  `/api/*` request must send `Authorization: Bearer <key>` or
+  `X-Anima-Api-Key`. `/health` and the static web UI stay public; the UI
+  prompts for the key on first use.
+- **Non-loopback binds require a key**: with `host = "0.0.0.0"` (Docker, LAN)
+  the server refuses to start without one, unless you set
+  `allow_unauthenticated = true` because a reverse proxy handles auth.
+- **CORS is closed by default**: other origins cannot call the API from a
+  browser. Allow specific ones with
+  `cors_allowed_origins = ["https://app.example.com"]`.
+
+Namespaces isolate data, and `ANIMA_NAMESPACE_ACL` can restrict which principal
+reads or writes each namespace. The principal comes from the
+`X-Anima-Principal` header, which the caller sets itself. Rely on namespace
+ACLs only when every holder of the API key is trusted to identify itself
+honestly, or when a gateway sets the header.
 
 ## Deployment
 
@@ -420,96 +334,96 @@ relationships, conflicts, chat, and namespace-aware inspection. Open
 
 ```bash
 docker build -t anima-server .
-docker run -p 3000:3000 -v ./anima.db:/app/anima.db anima-server
+docker run -p 3000:3000 -e ANIMA_API_KEY=your-secret-key \
+  -v ./anima.db:/app/anima.db anima-server
 ```
 
-The Dockerfile uses a multi-stage build (Rust compile → Debian slim runtime).
-The default config is patched to bind `0.0.0.0:3000` and point Ollama URLs at
+The image binds `0.0.0.0:3000` and points the default Ollama URLs at
 `host.docker.internal`.
 
-### Running as a Service
-
-Anima can install itself as a system service that starts on boot.
+### System service
 
 ```bash
-# Install (auto-detects platform)
-anima-server --install
-
-# Check status
+anima-server --install          # auto-detects the platform
 anima-server --service-status
-
-# Uninstall
 anima-server --uninstall
 ```
 
+| Platform | Backend | Details                                                                   |
+| -------- | ------- | ------------------------------------------------------------------------- |
+| Linux    | systemd | Unit at `/etc/systemd/system/anima-server.service`, logs via `journalctl` |
+| macOS    | launchd | Plist at `~/Library/LaunchAgents/dev.anima.server.plist`, starts on login |
 
-| Platform | Backend | Details                                                                                   |
-| -------- | ------- | ----------------------------------------------------------------------------------------- |
-| Linux    | systemd | Unit at `/etc/systemd/system/anima-server.service`, logs via `journalctl -u anima-server` |
-| macOS    | launchd | Plist at `~/Library/LaunchAgents/dev.anima.server.plist`, starts on login                 |
+Run `--install` from the directory that holds your `config.toml` and
+`anima.db`: the service uses the current working directory and binary path.
+Templates for manual setup are in [service/](service).
 
+## Benchmarks
 
-The install command uses the current working directory and binary path, so run
-it from the directory where your `config.toml` and `anima.db` live.
+On [LoCoMo](https://github.com/snap-research/locomo), the academic benchmark
+for long-term conversational memory:
 
-A pre-built systemd unit template is also available at  
-[service/anima-server.service](service/anima-server.service) for manual setup.
+| Run                                             | Accuracy  | Answer model  | Judge model   |
+| ----------------------------------------------- | --------- | ------------- | ------------- |
+| Full dataset, 10 conversations, 1,540 questions | **87.7%** | Qwen3.5-27B   | Qwen3.5-27B   |
+| Full dataset, curated report run                | 86.0%     | qwen3-32b     | llama-3.3-70b |
+| `conv-26` only, 152 questions                   | 93.4%     | llama-3.3-70b | qwen3-32b     |
+
+Read these with care. LoCoMo scores move by many points with the answer and
+judge models, so numbers from different systems are only comparable when run
+under the same setup. The single-conversation figure comes from the
+conversation used during development and should not be read as a full-dataset
+result. Temporal questions are the weakest category (54% in the best full run).
+
+Per-category results and run history are in
+[benchmarks/locomo](benchmarks/locomo); methodology is in
+[Anima-Benchmarks](https://github.com/AnimaLab/Anima-Benchmarks). A
+LongMemEval harness is included in
+[benchmarks/longmemeval](benchmarks/longmemeval), with no published score yet.
+See [DATASETS.md](DATASETS.md) for dataset sources.
 
 ## Development
 
-### Rust
-
 ```bash
-cargo test --workspace
+cargo test --workspace                 # Rust
+cd web && npm install && npm run build # web UI
+cd mcp && npm install && npm run build # MCP bridge
 ```
 
-### Web UI
+Repository layout:
 
-```bash
-cd web
-npm install
-npm run build
-```
+- [crates/](crates): Rust workspace (core types, database, embeddings,
+  consolidation, server)
+- [web/](web): React web UI
+- [mcp/](mcp): TypeScript MCP server
+- [docs/](docs): documentation site sources
+- [benchmarks/](benchmarks): benchmark harnesses and results
+- [scripts/](scripts), [service/](service): local startup helpers and service
+  templates
 
-### MCP bridge
-
-```bash
-cd mcp
-npm install
-npm run build
-```
-
-## Repository Map
-
-- [crates/](crates): Rust workspace — core types, database, embeddings, consolidation, server
-- [mcp/](mcp): TypeScript MCP server for tool-based integrations
-- [web/](web): React frontend for memory browsing and inspection
-- [scripts/](scripts): local startup helpers
-- [service/](service): systemd and launchd service templates
-- [benchmarks/](benchmarks): benchmark harnesses and curated notes
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and pull request expectations.
 
 ## Telemetry
 
-Anima collects anonymous usage analytics to help improve the product. This
-includes model names (not keys), memory counts (not content), OS and
-architecture info, and feature flag settings. No personal data, namespace
-names, or memory content is ever transmitted.
+Anima sends anonymous usage analytics once a day: model names, memory counts,
+OS and architecture, and feature flags. It never sends memory content,
+namespace names, or API keys.
 
-Telemetry is enabled by default. To opt out permanently, set `enabled = false`
-in `config.toml`:
+Telemetry is **on by default**. To turn it off, set this in `config.toml`:
 
 ```toml
 [telemetry]
 enabled = false
 ```
 
-The web UI Settings page can also toggle telemetry off, but that only lasts
-until the next restart. Edit the config file for a persistent opt-out.
+The Settings page in the web UI can also switch it off, but only until the
+next restart.
 
 ## Contact
 
-For partnerships, pilots, or product questions: [contact@runanima.com](mailto:contact@runanima.com)
+Partnerships, pilots, or product questions:
+[contact@runanima.com](mailto:contact@runanima.com)
 
 ## License
 
-This project is released under the Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

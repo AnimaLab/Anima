@@ -8,6 +8,8 @@ Thanks for your interest in Anima.
 - Node.js 22+ for `web/` and `mcp/`
 - Python 3.11+ for benchmark harnesses
 - Optional local Ollama instance for full cognitive-mode testing
+- On Windows, clone into a short path (or set `CARGO_TARGET_DIR` to one): deep
+  paths exceed the 260-character limit and the linker fails with `LNK1104`
 
 ## Common Checks
 
