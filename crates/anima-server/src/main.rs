@@ -1,5 +1,6 @@
 mod app;
 mod auth;
+mod briefing;
 mod cli;
 mod config;
 mod dto;
@@ -7,6 +8,7 @@ mod handlers;
 mod processor;
 mod prompts;
 mod service;
+mod skills;
 mod telemetry;
 
 use std::net::SocketAddr;

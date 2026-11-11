@@ -1,9 +1,25 @@
 use rusqlite::Connection;
 
+/// Skills: named instructions loaded on demand. See `crate::skills`.
+pub const SKILLS_SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS skills (
+        id           TEXT PRIMARY KEY,
+        namespace    TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        description  TEXT NOT NULL,
+        content      TEXT NOT NULL,
+        version      INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        UNIQUE(namespace, name)
+    );
+";
+
 pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+    conn.execute_batch(SKILLS_SCHEMA)?;
 
     conn.execute_batch(
         "
