@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, getNamespace } from '../api/client'
-import { Trash2, Plus, Tag, Flame, Pencil, Check, X, Database } from 'lucide-react'
+import { Trash2, Plus, Tag, Flame, Pencil, Check, Database } from 'lucide-react'
+import { CATEGORIES, categoryColor, provenanceText } from '../lib/memoryMeta'
+import { useToast } from '../hooks/useToast'
 
 const STATUS_TABS = ['all', 'active', 'superseded', 'deleted'] as const
 const TYPE_TABS = ['all', 'raw', 'reflected', 'deduced', 'induced'] as const
@@ -14,9 +16,9 @@ const typeColor: Record<string, string> = {
 }
 
 const statusColor: Record<string, string> = {
-  active: 'bg-green-500/15 text-green-700',
-  superseded: 'bg-amber-500/15 text-amber-700',
-  deleted: 'bg-red-500/15 text-red-700',
+  active: 'badge-success',
+  superseded: 'badge-warning',
+  deleted: 'badge-danger',
 }
 
 function relativeDate(dateStr: string): string {
@@ -34,6 +36,8 @@ function relativeDate(dateStr: string): string {
 export function MemoriesPage() {
   const [status, setStatus] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [category, setCategory] = useState<string>('all')
+  const [newCategory, setNewCategory] = useState<string>('')
   const [offset, setOffset] = useState(0)
   const [showAdd, setShowAdd] = useState(false)
   const [newContent, setNewContent] = useState('')
@@ -44,10 +48,25 @@ export function MemoriesPage() {
   const [editImportance, setEditImportance] = useState(5)
   const limit = 20
   const queryClient = useQueryClient()
+  const toast = useToast()
+
+  // Counts in the filter tabs and sidebar come from stats, so refresh both.
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['memories'] })
+    queryClient.invalidateQueries({ queryKey: ['stats'] })
+    queryClient.invalidateQueries({ queryKey: ['namespaces'] })
+  }
+  const onError = (action: string) => (e: Error) => toast.show(`${action} failed: ${e.message}`, true)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['memories', getNamespace(), status, typeFilter, offset],
-    queryFn: () => api.listMemories(offset, limit, status === 'all' ? undefined : status, typeFilter === 'all' ? undefined : typeFilter),
+    queryKey: ['memories', getNamespace(), status, typeFilter, category, offset],
+    queryFn: () => api.listMemories(
+      offset,
+      limit,
+      status === 'all' ? undefined : status,
+      typeFilter === 'all' ? undefined : typeFilter,
+      category === 'all' ? undefined : category,
+    ),
   })
 
   // Fetch stats for filter counts
@@ -59,12 +78,14 @@ export function MemoriesPage() {
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deleteMemory(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['memories'] }),
+    onSuccess: () => { refresh(); toast.show('Memory moved to Deleted') },
+    onError: onError('Delete'),
   })
 
   const purgeMut = useMutation({
     mutationFn: () => api.purgeDeletedMemories(),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['memories'] }),
+    onSuccess: refresh,
+    onError: onError('Purge'),
   })
 
   const addMut = useMutation({
@@ -72,13 +93,16 @@ export function MemoriesPage() {
       content: newContent,
       consolidate,
       tags: newTags.split(',').map(t => t.trim()).filter(Boolean),
+      category: newCategory || undefined,
     }),
     onSuccess: () => {
       setNewContent('')
       setNewTags('')
+      setNewCategory('')
       setShowAdd(false)
-      queryClient.invalidateQueries({ queryKey: ['memories'] })
+      refresh()
     },
+    onError: onError('Save'),
   })
 
   const updateMut = useMutation({
@@ -86,8 +110,9 @@ export function MemoriesPage() {
       api.updateMemory(id, data),
     onSuccess: () => {
       setEditingId(null)
-      queryClient.invalidateQueries({ queryKey: ['memories'] })
+      refresh()
     },
+    onError: onError('Update'),
   })
 
   const startEdit = (m: { id: string; content: string; importance: number }) => {
@@ -105,63 +130,77 @@ export function MemoriesPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="page space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-ink">Memories</h2>
-          {data && (
-            <p className="text-xs text-ink-muted mt-0.5">{total} total</p>
-          )}
+          <h1 className="page-title">Memories</h1>
+          <p className="page-description">
+            {data ? `${total} ${total === 1 ? 'memory' : 'memories'} match the current filters` : 'Everything stored in this namespace'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {status === 'deleted' && (data?.memories?.length ?? 0) > 0 && (
             <button
               onClick={() => purgeMut.mutate()}
               disabled={purgeMut.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#C25B4E] hover:bg-[#B5503F] disabled:opacity-50 rounded-lg text-sm text-white transition-colors"
+              className="btn btn-danger"
+              title="Permanently remove all deleted memories. This cannot be undone."
             >
-              <Flame size={14} />
+              <Flame size={15} />
               {purgeMut.isPending ? 'Purging...' : 'Purge deleted'}
             </button>
           )}
-          <button onClick={() => setShowAdd(!showAdd)} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover rounded-lg text-sm text-white transition-colors">
-            <Plus size={16} /> Add Memory
+          <button onClick={() => setShowAdd(!showAdd)} aria-expanded={showAdd} className="btn btn-primary">
+            <Plus size={15} /> Add memory
           </button>
         </div>
       </div>
 
       {/* Add memory form */}
       {showAdd && (
-        <div className="bg-card border border-warm-border rounded-xl p-4 space-y-3">
+        <div className="card p-4 space-y-3">
+          <label htmlFor="new-memory" className="text-[13px] font-medium text-ink">New memory</label>
           <textarea
+            id="new-memory"
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
             placeholder="What do you want to remember?"
-            className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink resize-none h-20 focus:outline-none focus:ring-1 focus:ring-accent placeholder:text-ink-faint"
+            className="field resize-y min-h-20"
             autoFocus
           />
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
-              <Tag size={12} className="text-ink-faint shrink-0" />
+            <div className="relative flex-1 min-w-[200px]">
+              <Tag size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none" />
               <input
                 type="text"
                 value={newTags}
                 onChange={(e) => setNewTags(e.target.value)}
-                placeholder="Tags (comma-separated)"
-                className="flex-1 bg-transparent text-sm text-ink focus:outline-none placeholder:text-ink-faint"
+                placeholder="Tags, comma-separated"
+                aria-label="Tags"
+                className="field pl-8"
               />
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-ink-muted cursor-pointer" title="Check for duplicates and merge if similar">
+            <select
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              aria-label="Category"
+              title="Category sets how fast the memory fades from ranking"
+              className="field w-auto capitalize"
+            >
+              <option value="">Auto category</option>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <label className="flex items-center gap-2 text-[13px] text-ink-light min-h-8" title="Check for duplicates and merge if similar">
               <input type="checkbox" checked={consolidate} onChange={(e) => setConsolidate(e.target.checked)} className="rounded" />
               Deduplicate
             </label>
             <div className="flex gap-1.5 ml-auto">
-              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink transition-colors">
+              <button onClick={() => setShowAdd(false)} className="btn btn-ghost">
                 Cancel
               </button>
-              <button onClick={() => addMut.mutate()} disabled={!newContent.trim()} className="px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:opacity-50 rounded-lg text-sm text-white">
-                Save
+              <button onClick={() => addMut.mutate()} disabled={!newContent.trim() || addMut.isPending} className="btn btn-primary">
+                {addMut.isPending ? 'Saving…' : 'Save memory'}
               </button>
             </div>
           </div>
@@ -169,68 +208,75 @@ export function MemoriesPage() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-        <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="segmented" role="group" aria-label="Filter by status">
           {STATUS_TABS.map(tab => {
             const count = statusCounts[tab]
             return (
-              <button key={tab} onClick={() => { setStatus(tab); setOffset(0) }}
-                className={`px-2.5 py-1 rounded-md text-xs capitalize transition-colors ${
-                  status === tab ? 'bg-paper-deep text-ink font-medium' : 'text-ink-muted hover:text-ink'
-                }`}>
-                {tab}{count > 0 && tab !== 'all' ? ` (${count})` : ''}
+              <button key={tab} onClick={() => { setStatus(tab); setOffset(0) }} aria-pressed={status === tab}>
+                {tab}{count > 0 && tab !== 'all' ? <span className="ml-1.5 text-ink-faint tabular-nums">{count}</span> : null}
               </button>
             )
           })}
         </div>
-        <div className="hidden sm:block w-px h-4 bg-warm-border" />
-        <div className="flex flex-wrap gap-1">
+        <div className="segmented flex-wrap" role="group" aria-label="Filter by type">
           {TYPE_TABS.map(t => (
-            <button key={t} onClick={() => { setTypeFilter(t); setOffset(0) }}
-              className={`px-2.5 py-1 rounded-md text-xs capitalize transition-colors ${
-                typeFilter === t ? 'bg-paper-deep text-ink font-medium' : 'text-ink-muted hover:text-ink'
-              }`}>
-              {t}
+            <button key={t} onClick={() => { setTypeFilter(t); setOffset(0) }} aria-pressed={typeFilter === t}>
+              {t === 'all' ? 'All types' : t}
             </button>
           ))}
         </div>
+        <select
+          value={category}
+          onChange={(e) => { setCategory(e.target.value); setOffset(0) }}
+          aria-label="Filter by category"
+          className={`field w-auto sm:ml-auto capitalize ${category === 'all' ? '' : 'font-medium'}`}
+        >
+          <option value="all">All categories</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
       </div>
 
       {/* Memory list */}
       {isLoading ? (
-        <p className="text-ink-muted text-sm py-8 text-center">Loading...</p>
+        <div className="space-y-2" aria-busy="true" aria-label="Loading memories">
+          {[0, 1, 2, 3].map(i => <div key={i} className="card h-[68px] animate-pulse bg-paper-warm" />)}
+        </div>
       ) : (data?.memories?.length ?? 0) === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Database size={28} className="text-ink-faint mb-3" />
-          <p className="text-sm text-ink-muted">No memories found</p>
-          <p className="text-xs text-ink-faint mt-1">
-            {status !== 'all' || typeFilter !== 'all'
+        <div className="card flex flex-col items-center justify-center py-16 px-6 text-center">
+          <div className="w-11 h-11 rounded-full bg-paper-deep text-ink-muted flex items-center justify-center mb-3">
+            <Database size={20} />
+          </div>
+          <p className="text-sm font-medium text-ink">No memories found</p>
+          <p className="text-[13px] text-ink-muted mt-1">
+            {status !== 'all' || typeFilter !== 'all' || category !== 'all'
               ? 'Try changing the filters'
               : 'Add your first memory to get started'}
           </p>
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <ul className="card divide-y divide-warm-border overflow-hidden">
           {(data?.memories || []).map(m => (
-            <div key={m.id} className="bg-card border border-warm-border rounded-lg px-4 py-3">
+            <li key={m.id} className="group px-4 sm:px-5 py-3.5 hover:bg-paper/60 transition-colors">
               {editingId === m.id ? (
                 <div className="space-y-3">
                   <textarea
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink resize-y min-h-[60px] focus:outline-none focus:ring-1 focus:ring-accent"
+                    aria-label="Memory content"
+                    className="field resize-y min-h-[60px]"
                     rows={3}
                   />
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-ink-muted">Importance:</span>
+                      <span className="text-[13px] text-ink-muted">Importance</span>
                       <input type="range" min="1" max="10" value={editImportance}
                         onChange={(e) => setEditImportance(parseInt(e.target.value))}
-                        className="w-20 accent-accent" />
-                      <span className="text-xs text-ink-muted tabular-nums">{editImportance}/10</span>
+                        aria-label="Importance" className="w-24" />
+                      <span className="text-[13px] text-ink-muted tabular-nums">{editImportance}/10</span>
                     </div>
                     <div className="flex gap-1.5 ml-auto">
-                      <button onClick={() => setEditingId(null)} className="px-2.5 py-1 text-xs text-ink-muted hover:text-ink transition-colors">Cancel</button>
+                      <button onClick={() => setEditingId(null)} className="btn btn-ghost">Cancel</button>
                       <button
                         onClick={() => updateMut.mutate({
                           id: m.id,
@@ -240,9 +286,9 @@ export function MemoriesPage() {
                           }
                         })}
                         disabled={updateMut.isPending}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs rounded-lg"
+                        className="btn btn-primary"
                       >
-                        <Check size={12} /> Save
+                        <Check size={15} /> Save
                       </button>
                     </div>
                   </div>
@@ -251,63 +297,77 @@ export function MemoriesPage() {
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-ink leading-relaxed">{m.content}</p>
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      {/* Only show status badge if not filtering by a specific status, or if status != active */}
-                      {(status === 'all' || m.status !== 'active') && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${statusColor[m.status] || ''}`}>{m.status}</span>
+                    <div className="flex items-center gap-x-2 gap-y-1 mt-2 flex-wrap text-xs text-ink-faint">
+                      {/* Active and raw are the defaults: only the exceptions get a badge */}
+                      {m.status !== 'active' && (
+                        <span className={`badge ${statusColor[m.status] || 'badge-neutral'}`}>{m.status}</span>
                       )}
-                      {/* Only show type badge if not filtering by a specific type */}
-                      {typeFilter === 'all' && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${typeColor[m.memory_type] || typeColor.raw}`}>{m.memory_type}</span>
+                      {m.memory_type !== 'raw' && (
+                        <span className={`badge ${typeColor[m.memory_type] || 'badge-neutral'}`}>{m.memory_type}</span>
+                      )}
+                      {m.category && m.category !== 'general' && (
+                        <button
+                          type="button"
+                          onClick={() => { setCategory(category === m.category ? 'all' : m.category!); setOffset(0) }}
+                          title={`Filter by ${m.category}`}
+                          className={`badge hover:opacity-80 transition-opacity ${categoryColor(m.category)}`}
+                        >
+                          {m.category}
+                        </button>
+                      )}
+                      {provenanceText(m.source, m.confidence) && (
+                        <span className="text-xs text-ink-muted" title="How this memory was created and how much it is trusted">
+                          {provenanceText(m.source, m.confidence)}
+                        </span>
                       )}
                       {/* Only show importance when non-default */}
                       {m.importance !== 5 && (
-                        <span className={`text-[10px] ${m.importance >= 7 ? 'text-amber-600' : 'text-ink-faint'}`}>
+                        <span className={`text-xs ${m.importance >= 7 ? 'text-amber-600' : 'text-ink-faint'}`}>
                           {m.importance >= 9 ? 'Critical' : m.importance >= 7 ? 'Important' : `imp ${m.importance}`}
                         </span>
                       )}
                       {m.tags.length > 0 && m.tags.map(tag => (
-                        <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-paper-deep text-ink-muted flex items-center gap-0.5">
-                          <Tag size={8} />{tag}
+                        <span key={tag} className="badge badge-neutral normal-case">
+                          <Tag size={11} />{tag}
                         </span>
                       ))}
-                      <span className="text-[10px] text-ink-faint">{relativeDate(m.created_at)}</span>
+                      <span className="text-xs text-ink-faint">{relativeDate(m.created_at)}</span>
                       {/* Only show access count when > 0 */}
                       {m.access_count > 0 && (
-                        <span className="text-[10px] text-accent">{m.access_count}x accessed</span>
+                        <span className="text-xs text-accent">{m.access_count}x accessed</span>
                       )}
                     </div>
                   </div>
                   {m.status === 'active' && (
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button onClick={() => startEdit(m)} className="text-ink-faint hover:text-accent transition-colors p-1.5" title="Edit">
-                        <Pencil size={14} />
+                    <div className="flex items-center gap-0.5 shrink-0 -mr-1.5 -mt-1">
+                      <button onClick={() => startEdit(m)} className="btn btn-ghost btn-icon" title="Edit" aria-label="Edit memory">
+                        <Pencil size={15} />
                       </button>
-                      <button onClick={() => deleteMut.mutate(m.id)} className="text-ink-faint hover:text-[#C25B4E] transition-colors p-1.5" title="Delete">
-                        <Trash2 size={14} />
+                      <button onClick={() => deleteMut.mutate(m.id)} disabled={deleteMut.isPending} className="btn btn-ghost btn-icon hover:text-danger" title="Delete" aria-label="Delete memory">
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   )}
                 </div>
               )}
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {/* Pagination */}
       {data && data.total > limit && (
-        <div className="flex items-center gap-3 justify-center pt-2">
+        <nav aria-label="Pagination" className="flex items-center gap-3 justify-center pt-1">
           <button onClick={() => setOffset(Math.max(0, offset - limit))} disabled={offset === 0}
-            className="px-3 py-1 rounded-md text-xs text-ink-muted hover:text-ink hover:bg-paper-deep disabled:opacity-30 transition-colors">
-            Prev
+            className="btn btn-secondary">
+            Previous
           </button>
           <span className="text-xs text-ink-muted tabular-nums">{offset + 1}–{Math.min(offset + limit, Number(data.total))} of {data.total}</span>
           <button onClick={() => setOffset(offset + limit)} disabled={offset + limit >= Number(data.total)}
-            className="px-3 py-1 rounded-md text-xs text-ink-muted hover:text-ink hover:bg-paper-deep disabled:opacity-30 transition-colors">
+            className="btn btn-secondary">
             Next
           </button>
-        </div>
+        </nav>
       )}
     </div>
   )

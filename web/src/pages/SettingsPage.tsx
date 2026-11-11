@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, RefreshCw, ChevronDown, ChevronRight, Loader2, Brain, Download, Upload, Database, X, AlertTriangle, Check, Pencil } from 'lucide-react'
+import { Plus, RefreshCw, Loader2, Download, Upload, X, AlertTriangle, Check, Pencil, Trash2 } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -41,9 +41,92 @@ interface ModelInfo {
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <div className="relative shrink-0">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} disabled={disabled} className="sr-only peer" />
-      <div className={`w-8 h-[18px] rounded-full transition-colors ${disabled ? 'bg-accent opacity-60' : 'bg-paper-deep peer-checked:bg-accent'}`} />
-      <div className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full transition-all ${disabled ? 'translate-x-[14px] bg-white opacity-60' : 'bg-ink-faint peer-checked:translate-x-[14px] peer-checked:bg-white'}`} />
+      <input type="checkbox" role="switch" checked={checked} onChange={e => onChange(e.target.checked)} disabled={disabled} className="sr-only peer" />
+      <div className={`w-9 h-5 rounded-full transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent ${disabled ? 'bg-accent opacity-60' : 'bg-warm-border-strong peer-checked:bg-accent'}`} />
+      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-card shadow-sm transition-transform ${disabled ? 'translate-x-4' : 'peer-checked:translate-x-4'}`} />
+    </div>
+  )
+}
+
+/** One settings section: header, body and an optional footer bar for actions. */
+function Section({ id, title, description, action, footer, children }: {
+  id: string
+  title: string
+  description?: React.ReactNode
+  action?: React.ReactNode
+  footer?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section id={id} aria-labelledby={`${id}-title`} className="card scroll-mt-4 overflow-hidden">
+      <div className="flex items-start justify-between gap-3 px-5 pt-5">
+        <div className="min-w-0">
+          <h2 id={`${id}-title`} className="text-sm font-semibold text-ink">{title}</h2>
+          {description && <p className="text-[13px] text-ink-muted mt-0.5">{description}</p>}
+        </div>
+        {action}
+      </div>
+      <div className="p-5 space-y-4">{children}</div>
+      {footer && (
+        <div className="border-t border-warm-border px-5 py-3 flex flex-wrap justify-end gap-2">{footer}</div>
+      )}
+    </section>
+  )
+}
+
+/** Label and description on the left, switch on the right. The whole row toggles. */
+function ToggleRow({ label, description, checked, onChange, disabled }: {
+  label: string
+  description: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <label className={`flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-ink">{label}</span>
+        <span className="block text-[13px] text-ink-muted">{description}</span>
+      </span>
+      <Toggle checked={checked} onChange={onChange} disabled={disabled} />
+    </label>
+  )
+}
+
+const fieldLabel = 'block text-[13px] font-medium text-ink mb-1.5'
+const helpText = 'text-xs text-ink-muted mt-1.5'
+
+/** Modal shell shared by the confirmation dialogs. */
+function Dialog({ titleId, title, icon, onClose, children, footer, wide }: {
+  titleId: string
+  title: string
+  icon: React.ReactNode
+  onClose: () => void
+  children: React.ReactNode
+  footer: React.ReactNode
+  wide?: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`bg-card border border-warm-border rounded-xl shadow-[var(--shadow-overlay)] w-full ${wide ? 'max-w-md' : 'max-w-sm'} overflow-hidden`}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {icon}
+            <h2 id={titleId} className="text-base font-semibold text-ink truncate">{title}</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="btn btn-ghost btn-icon -mr-2">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-5 pb-5 space-y-4">{children}</div>
+        <div className="flex flex-wrap justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-warm">{footer}</div>
+      </div>
     </div>
   )
 }
@@ -69,7 +152,6 @@ export function SettingsPage() {
   const [modelError, setModelError] = useState<string | null>(null)
   const [cognitive, setCognitiveState] = useState<CognitiveConfig>(loadCognitiveConfig)
   const [telemetryEnabled, setTelemetryEnabled] = useState(true)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [profiles, setProfiles] = useState<ProfilesResponse | null>(null)
   const setCognitive = (cfg: CognitiveConfig) => {
     setCognitiveState(cfg)
@@ -284,560 +366,598 @@ export function SettingsPage() {
     }
   }
 
-  return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <h2 className="text-lg font-semibold text-ink">Settings</h2>
+  const hasProfiles = !!profiles && Object.keys(profiles.profiles).length > 1
+  const sections = [
+    { id: 'namespaces', label: 'Namespaces' },
+    { id: 'identity', label: 'Identity' },
+    { id: 'model', label: 'Chat model' },
+    { id: 'capabilities', label: 'Capabilities' },
+    { id: 'tiers', label: 'Search tiers' },
+    { id: 'processing', label: 'Background processing' },
+    ...(hasProfiles ? [{ id: 'profiles', label: 'Server profiles' }] : []),
+    { id: 'privacy', label: 'Privacy' },
+    { id: 'backup', label: 'Backup and restore' },
+    { id: 'danger', label: 'Danger zone' },
+  ]
+  const currentNs = namespaces.find(n => n.namespace === namespace)
+    ?? { namespace, total_count: 0, active_count: 0 }
+  const importIsDestructive = !!importModal && (importMode === 'replace' || importModal.format === 'sqlite')
 
-      {/* ── Namespaces (most commonly accessed) ── */}
-      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-ink-light">Namespaces</h3>
-          <button onClick={refreshNamespaces} disabled={loadingNs}
-            className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors">
-            <RefreshCw size={10} className={loadingNs ? 'animate-spin' : ''} />
-          </button>
-        </div>
-        <div className="flex gap-2 pb-3 border-b border-warm-border">
-          <input type="text" value={newNs} onChange={e => setNewNs(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && createNamespace()}
-            placeholder="new-namespace"
-            className="flex-1 bg-input border border-warm-border rounded-lg px-3 py-1.5 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
-          <button onClick={createNamespace} disabled={!newNs.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white text-sm rounded-lg transition-colors">
-            <Plus size={14} /> Add
-          </button>
-        </div>
-        <div className="relative">
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {namespaces.map(ns => (
-              <div key={ns.namespace} onClick={() => setNamespace(ns.namespace)} className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
-                  namespace === ns.namespace
-                    ? 'bg-accent-light text-accent font-medium'
-                    : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
-                }`}>
-                <span className="truncate">{ns.namespace}</span>
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="text-[11px] text-ink-faint tabular-nums">{ns.active_count}/{ns.total_count}</span>
-                  <button
-                    onClick={e => { e.stopPropagation(); setRenameNsModal(ns); setRenameNewName(ns.namespace) }}
-                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-accent transition-all p-0.5"
-                    title="Rename namespace"
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  <button
-                    onClick={e => { e.stopPropagation(); setDeleteNsModal(ns); setDeleteConfirmText('') }}
-                    className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-500 transition-all p-0.5"
-                    title="Delete namespace"
-                  >
-                    <X size={12} />
+  return (
+    <div className="page">
+      <div className="mb-6">
+        <h1 className="page-title">Settings</h1>
+        <p className="page-description">Namespaces, assistant identity, model, memory pipeline and data.</p>
+      </div>
+
+      <div className="lg:grid lg:grid-cols-[200px_minmax(0,720px)] lg:gap-10">
+        {/* In-page navigation: sticky list on desktop, scrollable row below */}
+        <nav aria-label="Settings sections" className="mb-4 lg:mb-0 lg:sticky lg:top-0 lg:self-start">
+          <ul className="flex lg:flex-col gap-1 overflow-x-auto pb-1 lg:pb-0">
+            {sections.map(s => (
+              <li key={s.id} className="shrink-0">
+                <a
+                  href={`#${s.id}`}
+                  className={`flex items-center min-h-8 px-3 rounded-lg text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-paper-deep ${
+                    s.id === 'danger' ? 'text-danger' : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  {s.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="space-y-6 min-w-0">
+          {/* Index warnings come first: they affect search quality right now */}
+          {vecStatus?.needs_reindex && (
+            <div role="alert" className="rounded-xl border border-warm-border bg-warning-light p-5">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-warning shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-semibold text-ink">Embedding model changed</h2>
+                  <p className="text-[13px] text-ink-light mt-1">
+                    The vector index uses {vecStatus.existing_dimension}d embeddings but the current model produces {vecStatus.requested_dimension}d.
+                    Search results may be degraded. Re-index to re-embed all memories with the new model.
+                  </p>
+                  <button onClick={runReindex} disabled={reindexing} className="btn btn-primary mt-3">
+                    {reindexing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                    {reindexing ? 'Re-indexing…' : 'Re-index all memories'}
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-          {namespaces.length > 4 && (
-            <div className="absolute bottom-0 left-0 right-0 h-6 bg-linear-to-t from-card to-transparent pointer-events-none rounded-b-lg" />
+            </div>
           )}
-        </div>
-      </section>
 
-      {/* ── Identity ── */}
-      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-        <h3 className="text-sm font-medium text-ink-light">Identity</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-ink-muted mb-1">Your name</label>
-            <input type="text" value={userName}
-              onChange={e => setUserName(e.target.value)}
-              placeholder="e.g. Zhen"
-              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
-          </div>
-          <div>
-            <label className="block text-xs text-ink-muted mb-1">Agent name</label>
-            <input type="text" value={agentName}
-              onChange={e => setAgentName(e.target.value)}
-              placeholder="e.g. Anima"
-              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
-          </div>
-        </div>
-        <div>
-          <label className="block text-xs text-ink-muted mb-1">Instructions</label>
-          <textarea value={agentPersona}
-            onChange={e => setAgentPersona(e.target.value)}
-            placeholder="e.g. You are a warm, thoughtful personal assistant who helps me reflect on my life and remember what matters."
-            rows={3}
-            className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y min-h-16" />
-          <p className="text-[11px] text-ink-faint mt-1">Persona, tone, and behavior. Sent as the system prompt with every message.</p>
-        </div>
-        <div className="flex justify-end">
-          <button onClick={saveIdentity}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent-hover text-white text-sm rounded-lg transition-colors">
-            <Check size={14} /> Save
-          </button>
-        </div>
-      </section>
-
-      {/* ── Chat Model ── */}
-      <section className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-        <h3 className="text-sm font-medium text-ink-light">Chat Model</h3>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-ink-muted mb-1">API Base URL</label>
-            <input type="text" value={config.base_url} onChange={e => setConfig({ ...config, base_url: e.target.value })}
-              placeholder="http://localhost:11434/v1"
-              className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-ink-muted">Model</label>
-              <button onClick={fetchModels} disabled={loadingModels}
-                className="text-[11px] text-ink-faint hover:text-ink transition-colors">
-                {loadingModels ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-              </button>
-            </div>
-            {models.length > 0 ? (
-              <div className="relative">
-                <select value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
-                  className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink appearance-none focus:outline-none focus:ring-1 focus:ring-accent/50 cursor-pointer">
-                  {!models.find(m => m.id === config.model) && <option value={config.model}>{config.model}</option>}
-                  {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
-                </select>
-                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none" />
+          {vecStatus && !vecStatus.needs_reindex && vecStatus.sparse_indexed === false && (
+            <div role="alert" className="rounded-xl border border-warm-border bg-warning-light p-5">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-warning shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-semibold text-ink">Sparse vectors not indexed</h2>
+                  <p className="text-[13px] text-ink-light mt-1">
+                    {vecStatus.sparse_count ?? 0} of {vecStatus.memory_count ?? 0} memories have sparse vectors.
+                    Re-index to enable improved keyword-semantic matching.
+                  </p>
+                  <button onClick={runReindex} disabled={reindexing} className="btn btn-primary mt-3">
+                    {reindexing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                    {reindexing ? 'Re-indexing…' : 'Re-index all memories'}
+                  </button>
+                </div>
               </div>
-            ) : (
-              <input type="text" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
-                placeholder="model name"
-                className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
+            </div>
+          )}
+
+          {/* ── Namespaces ── */}
+          <Section
+            id="namespaces"
+            title="Namespaces"
+            description="Each namespace is an isolated set of memories. Select one to work in it."
+            action={
+              <button onClick={refreshNamespaces} disabled={loadingNs} aria-label="Refresh namespaces" title="Refresh" className="btn btn-ghost btn-icon -mr-2 -mt-1">
+                <RefreshCw size={15} className={loadingNs ? 'animate-spin' : ''} />
+              </button>
+            }
+          >
+            <div>
+              <label htmlFor="new-namespace" className={fieldLabel}>New namespace</label>
+              <div className="flex gap-2">
+                <input id="new-namespace" type="text" value={newNs} onChange={e => setNewNs(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createNamespace()}
+                  placeholder="e.g. work/project-x"
+                  className="field flex-1 min-w-0" />
+                <button onClick={createNamespace} disabled={!newNs.trim()} className="btn btn-primary shrink-0">
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+            </div>
+
+            {namespaces.length > 0 && (
+              <ul className="border border-warm-border rounded-lg divide-y divide-warm-border max-h-72 overflow-y-auto">
+                {namespaces.map(ns => {
+                  const isCurrent = namespace === ns.namespace
+                  return (
+                    <li key={ns.namespace} className="flex items-center gap-2 pl-1 pr-2 hover:bg-paper transition-colors">
+                      <button
+                        onClick={() => setNamespace(ns.namespace)}
+                        aria-current={isCurrent ? 'true' : undefined}
+                        title={isCurrent ? 'Current namespace' : `Switch to ${ns.namespace}`}
+                        className="flex-1 min-w-0 flex items-center gap-2 min-h-11 px-2 text-left rounded-md"
+                      >
+                        <span className={`truncate text-sm ${isCurrent ? 'font-semibold text-ink' : 'text-ink-light'}`}>{ns.namespace}</span>
+                        {isCurrent && <span className="badge badge-success shrink-0">current</span>}
+                      </button>
+                      <span className="badge badge-neutral tabular-nums shrink-0 normal-case" title={`${ns.active_count} active of ${ns.total_count} memories`}>
+                        {ns.active_count} / {ns.total_count}
+                      </span>
+                      <button
+                        onClick={() => { setRenameNsModal(ns); setRenameNewName(ns.namespace) }}
+                        className="btn btn-ghost btn-icon shrink-0"
+                        aria-label={`Rename namespace ${ns.namespace}`}
+                        title="Rename"
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button
+                        onClick={() => { setDeleteNsModal(ns); setDeleteConfirmText('') }}
+                        className="btn btn-ghost btn-icon shrink-0 hover:text-danger"
+                        aria-label={`Delete namespace ${ns.namespace}`}
+                        title="Delete"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
             )}
-            {modelError && <p className="text-[11px] text-amber-600 mt-1">Could not fetch models — enter manually</p>}
-          </div>
-        </div>
+          </Section>
 
-        <div>
-          <label className="block text-xs text-ink-muted mb-1">API Key</label>
-          <input type="password" value={config.api_key || ''} onChange={e => setConfig({ ...config, api_key: e.target.value || undefined })}
-            placeholder="Optional — leave empty for local models"
-            className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/50" />
-        </div>
-
-        {/* Temperature + Max Tokens */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="flex items-center justify-between text-xs text-ink-muted mb-1.5">
-              <span>Temperature</span>
-              <span className="text-accent font-mono tabular-nums text-[11px]">{(config.temperature ?? 0.7).toFixed(2)}</span>
-            </label>
-            <input type="range" min="0" max="2" step="0.05" value={config.temperature ?? 0.7}
-              onChange={e => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
-              className="w-full accent-accent h-1.5" />
-            <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
-              <span>Precise</span><span>Creative</span>
+          {/* ── Identity ── */}
+          <Section
+            id="identity"
+            title="Identity"
+            description="How the assistant addresses you and how it behaves in chat."
+            footer={
+              <button onClick={saveIdentity} className="btn btn-primary">
+                <Check size={15} /> Save identity
+              </button>
+            }
+          >
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="user-name" className={fieldLabel}>Your name</label>
+                <input id="user-name" type="text" value={userName}
+                  onChange={e => setUserName(e.target.value)}
+                  placeholder="e.g. Zhen"
+                  className="field" />
+              </div>
+              <div>
+                <label htmlFor="agent-name" className={fieldLabel}>Agent name</label>
+                <input id="agent-name" type="text" value={agentName}
+                  onChange={e => setAgentName(e.target.value)}
+                  placeholder="e.g. Anima"
+                  className="field" />
+              </div>
             </div>
-          </div>
-          <div>
-            <label className="flex items-center justify-between text-xs text-ink-muted mb-1.5">
-              <span>Max Tokens</span>
-              <span className="text-accent font-mono tabular-nums text-[11px]">{config.max_tokens ?? 4096}</span>
-            </label>
-            <input type="range" min="256" max="16384" step="256" value={config.max_tokens ?? 4096}
-              onChange={e => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
-              className="w-full accent-accent h-1.5" />
-            <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
-              <span>256</span><span>16384</span>
+            <div>
+              <label htmlFor="agent-persona" className={fieldLabel}>Instructions</label>
+              <textarea id="agent-persona" value={agentPersona}
+                onChange={e => setAgentPersona(e.target.value)}
+                placeholder="e.g. You are a warm, thoughtful personal assistant who helps me reflect on my life and remember what matters."
+                rows={3}
+                aria-describedby="agent-persona-help"
+                className="field resize-y min-h-20" />
+              <p id="agent-persona-help" className={helpText}>Persona, tone, and behavior. Sent as the system prompt with every message.</p>
             </div>
-          </div>
-        </div>
-      </section>
+          </Section>
 
-      {/* ── Advanced ── */}
-      <section>
-        <button onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink transition-colors mb-3">
-          {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          Advanced
-        </button>
+          {/* ── Chat model ── */}
+          <Section
+            id="model"
+            title="Chat model"
+            description="The model that answers in chat. Changes are saved as you make them."
+          >
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="base-url" className={fieldLabel}>API base URL</label>
+                <input id="base-url" type="text" value={config.base_url} onChange={e => setConfig({ ...config, base_url: e.target.value })}
+                  placeholder="http://localhost:11434/v1"
+                  className="field" />
+              </div>
+              <div>
+                <label htmlFor="model-name" className={fieldLabel}>Model</label>
+                <div className="flex gap-2">
+                  {models.length > 0 ? (
+                    <select id="model-name" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+                      className="field flex-1 min-w-0">
+                      {!models.find(m => m.id === config.model) && <option value={config.model}>{config.model}</option>}
+                      {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+                    </select>
+                  ) : (
+                    <input id="model-name" type="text" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+                      placeholder="model name"
+                      className="field flex-1 min-w-0" />
+                  )}
+                  <button onClick={fetchModels} disabled={loadingModels} aria-label="Refresh model list" title="Refresh model list"
+                    className="btn btn-secondary btn-icon shrink-0">
+                    {loadingModels ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                  </button>
+                </div>
+                {modelError && <p className="text-xs text-warning mt-1.5">Could not fetch models. Enter the name manually.</p>}
+              </div>
+            </div>
 
-        {showAdvanced && (
-          <div className="space-y-4">
-            {/* Capabilities */}
-            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-medium text-ink-light">Capabilities</h3>
+            <div>
+              <label htmlFor="api-key" className={fieldLabel}>API key</label>
+              <input id="api-key" type="password" value={config.api_key || ''} onChange={e => setConfig({ ...config, api_key: e.target.value || undefined })}
+                placeholder="Optional"
+                autoComplete="off"
+                aria-describedby="api-key-help"
+                className="field" />
+              <p id="api-key-help" className={helpText}>Leave empty for local models. Stored in this browser only.</p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-x-4 gap-y-5 pt-1">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="temperature" className="text-[13px] font-medium text-ink">Temperature</label>
+                  <span className="text-[13px] text-ink font-mono tabular-nums">{(config.temperature ?? 0.7).toFixed(2)}</span>
+                </div>
+                <input id="temperature" type="range" min="0" max="2" step="0.05" value={config.temperature ?? 0.7}
+                  onChange={e => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                  className="w-full" />
+                <div className="flex justify-between text-xs text-ink-muted mt-1">
+                  <span>Precise</span><span>Creative</span>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="max-tokens" className="text-[13px] font-medium text-ink">Max tokens</label>
+                  <span className="text-[13px] text-ink font-mono tabular-nums">{config.max_tokens ?? 4096}</span>
+                </div>
+                <input id="max-tokens" type="range" min="256" max="16384" step="256" value={config.max_tokens ?? 4096}
+                  onChange={e => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
+                  className="w-full" />
+                <div className="flex justify-between text-xs text-ink-muted mt-1 tabular-nums">
+                  <span>256</span><span>16384</span>
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Capabilities ── */}
+          <Section id="capabilities" title="Capabilities" description="What the chat model is allowed to do.">
+            <div className="divide-y divide-warm-border">
               {([
                 { key: 'vision' as const, label: 'Vision', desc: 'Send images to the model', defaultVal: false },
-                { key: 'tool_use' as const, label: 'Tool Use', desc: 'Allow function calling (memory search/add)', defaultVal: true },
-                { key: 'streaming' as const, label: 'Streaming', desc: 'Stream responses token-by-token', defaultVal: true },
+                { key: 'tool_use' as const, label: 'Tool use', desc: 'Allow function calling (memory search and add)', defaultVal: true },
+                { key: 'streaming' as const, label: 'Streaming', desc: 'Stream responses token by token', defaultVal: true },
               ]).map(cap => (
-                <label key={cap.key} className="flex items-center gap-3 cursor-pointer group">
-                  <Toggle checked={config[cap.key] ?? cap.defaultVal} onChange={v => setConfig({ ...config, [cap.key]: v })} />
-                  <div>
-                    <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{cap.label}</span>
-                    <p className="text-[11px] text-ink-faint">{cap.desc}</p>
-                  </div>
-                </label>
+                <ToggleRow
+                  key={cap.key}
+                  label={cap.label}
+                  description={cap.desc}
+                  checked={config[cap.key] ?? cap.defaultVal}
+                  onChange={v => setConfig({ ...config, [cap.key]: v })}
+                />
               ))}
             </div>
+          </Section>
 
-            {/* Search Tiers */}
-            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-medium text-ink-light">Search Tiers</h3>
-              <p className="text-[11px] text-ink-faint">Which memory tiers to include in search results.</p>
+          {/* ── Search tiers ── */}
+          <Section id="tiers" title="Search tiers" description="Which memory tiers search results may include. Each tier builds on the one before it.">
+            <div className="divide-y divide-warm-border">
               {([
-                { tier: 1, label: 'Raw', desc: 'Original input' },
+                { tier: 1, label: 'Raw', desc: 'Original input. Always included.' },
                 { tier: 2, label: 'Reflected', desc: 'Extracted facts' },
                 { tier: 3, label: 'Deduced', desc: 'Cross-memory inferences' },
                 { tier: 4, label: 'Induced', desc: 'Synthesized patterns' },
               ] as const).map(({ tier, label, desc }) => (
-                <label key={tier} className="flex items-center gap-3 cursor-pointer group">
-                  <Toggle
-                    checked={cognitive.max_tier >= tier}
-                    onChange={() => {
-                      const newMaxTier = cognitive.max_tier >= tier ? tier - 1 : tier
-                      setCognitive({ ...cognitive, max_tier: Math.max(1, newMaxTier) })
-                    }}
-                    disabled={tier === 1}
-                  />
-                  <div>
-                    <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{label}</span>
-                    <span className="text-[11px] text-ink-faint ml-1.5">{desc}</span>
-                  </div>
-                </label>
+                <ToggleRow
+                  key={tier}
+                  label={label}
+                  description={desc}
+                  checked={cognitive.max_tier >= tier}
+                  onChange={() => {
+                    const newMaxTier = cognitive.max_tier >= tier ? tier - 1 : tier
+                    setCognitive({ ...cognitive, max_tier: Math.max(1, newMaxTier) })
+                  }}
+                  disabled={tier === 1}
+                />
               ))}
             </div>
+          </Section>
 
-            {/* Background Processing */}
-            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-medium text-ink-light">Background Processing</h3>
+          {/* ── Background processing ── */}
+          <Section id="processing" title="Background processing" description="Pipelines that derive new memories from existing ones.">
+            <div className="divide-y divide-warm-border">
               {([
                 { key: 'reflection_enabled' as const, label: 'Reflection', desc: 'Extract facts from raw memories' },
                 { key: 'deduction_enabled' as const, label: 'Deduction', desc: 'Infer new facts by combining reflected facts' },
-                { key: 'induction_enabled' as const, label: 'Induction', desc: 'Synthesize patterns from 3+ facts' },
+                { key: 'induction_enabled' as const, label: 'Induction', desc: 'Synthesize patterns from 3 or more facts' },
               ]).map(({ key, label, desc }) => (
-                <label key={key} className="flex items-center gap-3 cursor-pointer group">
-                  <Toggle checked={cognitive[key]} onChange={v => setCognitive({ ...cognitive, [key]: v })} />
-                  <div>
-                    <span className="text-sm text-ink-light group-hover:text-ink transition-colors">{label}</span>
-                    <p className="text-[11px] text-ink-faint">{desc}</p>
-                  </div>
-                </label>
+                <ToggleRow
+                  key={key}
+                  label={label}
+                  description={desc}
+                  checked={cognitive[key]}
+                  onChange={v => setCognitive({ ...cognitive, [key]: v })}
+                />
               ))}
             </div>
+          </Section>
 
-            {/* Server Profiles (read-only) */}
-            {profiles && Object.keys(profiles.profiles).length > 1 && (
-              <div className="bg-card border border-warm-border rounded-xl p-5 space-y-3">
-                <h3 className="text-sm font-medium text-ink-light">Server Profiles</h3>
-                <p className="text-[11px] text-ink-faint">Configured in <code className="bg-paper-deep px-1 rounded">config.toml</code></p>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(profiles.profiles).map(([name, p]) => (
-                    <div key={name} className="bg-paper-deep rounded-lg px-3 py-2">
-                      <div className="text-xs font-medium text-ink">{name}</div>
-                      <div className="text-[11px] text-ink-muted truncate">{p.model}</div>
+          {/* ── Server profiles (read-only) ── */}
+          {hasProfiles && profiles && (
+            <Section
+              id="profiles"
+              title="Server profiles"
+              description={<>Read-only. Configured in <code className="bg-paper-deep px-1 py-0.5 rounded text-xs">config.toml</code>.</>}
+            >
+              <ul className="grid sm:grid-cols-2 gap-2">
+                {Object.entries(profiles.profiles).map(([name, p]) => (
+                  <li key={name} className="border border-warm-border rounded-lg px-3 py-2 min-w-0">
+                    <div className="text-[13px] font-medium text-ink truncate">{name}</div>
+                    <div className="text-xs text-ink-muted font-mono truncate">{p.model}</div>
+                  </li>
+                ))}
+              </ul>
+              <div>
+                <p className="section-label mb-2">Routing</p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]">
+                  {(['ask', 'chat', 'processor', 'consolidation'] as const).map(op => profiles.routing[op] && (
+                    <div key={op} className="contents">
+                      <dt className="text-ink-muted">{op}</dt>
+                      <dd className="text-ink font-medium truncate">{profiles.routing[op]}</dd>
                     </div>
                   ))}
-                </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
-                  {profiles.routing.ask && <span><strong>ask</strong> → {profiles.routing.ask}</span>}
-                  {profiles.routing.chat && <span><strong>chat</strong> → {profiles.routing.chat}</span>}
-                  {profiles.routing.processor && <span><strong>processor</strong> → {profiles.routing.processor}</span>}
-                  {profiles.routing.consolidation && <span><strong>consolidation</strong> → {profiles.routing.consolidation}</span>}
-                </div>
+                </dl>
               </div>
-            )}
+            </Section>
+          )}
 
-            {/* Telemetry — compact */}
-            <div className="bg-card border border-warm-border rounded-xl px-5 py-4">
-              <label className="flex items-center gap-3 cursor-pointer group">
-                <Toggle checked={telemetryEnabled} onChange={toggleTelemetry} />
-                <div>
-                  <span className="text-sm text-ink-light group-hover:text-ink transition-colors">Anonymous Telemetry</span>
-                  <p className="text-[11px] text-ink-faint">Model names, memory counts, OS info. No personal data.</p>
-                </div>
+          {/* ── Privacy ── */}
+          <Section id="privacy" title="Privacy" description="What this server reports back to the Anima project.">
+            <ToggleRow
+              label="Anonymous telemetry"
+              description="Model names, memory counts, OS info. No personal data. Lasts until the server restarts; edit config.toml to make it permanent."
+              checked={telemetryEnabled}
+              onChange={toggleTelemetry}
+            />
+          </Section>
+
+          {/* ── Backup and restore ── */}
+          <Section
+            id="backup"
+            title="Backup and restore"
+            description={dbSize !== null ? `${dbSize.toLocaleString()} memories in the current namespace.` : 'Export your memories or bring a backup back in.'}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">Export</p>
+                <p className="text-[13px] text-ink-muted">JSON for the current namespace, SQLite for the whole database.</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => downloadBackup('json')} disabled={backupLoading !== null} className="btn btn-secondary">
+                  {backupLoading === 'json' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                  JSON
+                </button>
+                <button onClick={() => downloadBackup('sqlite')} disabled={backupLoading !== null} className="btn btn-secondary">
+                  {backupLoading === 'sqlite' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                  SQLite
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-warm-border">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">Import</p>
+                <p className="text-[13px] text-ink-muted">Accepts .json or .db files. You choose how to import before anything changes.</p>
+              </div>
+              <label className={`btn btn-secondary shrink-0 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent ${importLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+                {importLoading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                Choose file
+                <input type="file" accept=".json,.db,.sqlite" onChange={handleFileSelect} className="sr-only" disabled={importLoading} />
               </label>
             </div>
 
-            {/* Re-index — only show when dimension mismatch detected */}
-            {vecStatus?.needs_reindex && (
-              <div className="bg-amber-100 border border-amber-300 rounded-xl p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-700" />
-                  <h3 className="text-sm font-medium text-amber-900">Embedding Model Changed</h3>
-                </div>
-                <p className="text-xs text-amber-800">
-                  The vector index uses {vecStatus.existing_dimension}d embeddings but the current model produces {vecStatus.requested_dimension}d.
-                  Search results may be degraded. Re-index to re-embed all memories with the new model.
-                </p>
-                <button
-                  onClick={runReindex}
-                  disabled={reindexing}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {reindexing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  {reindexing ? 'Re-indexing...' : 'Re-index All Memories'}
-                </button>
-              </div>
-            )}
-
-            {vecStatus && !vecStatus.needs_reindex && vecStatus.sparse_indexed === false && (
-              <div className="bg-amber-100 border border-amber-300 rounded-xl p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-700" />
-                  <h3 className="text-sm font-medium text-amber-900">Sparse Vectors Not Indexed</h3>
-                </div>
-                <p className="text-xs text-amber-800">
-                  {vecStatus.sparse_count ?? 0} of {vecStatus.memory_count ?? 0} memories have sparse vectors.
-                  Re-index to enable improved keyword-semantic matching.
-                </p>
-                <button
-                  onClick={runReindex}
-                  disabled={reindexing}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-amber-700 hover:bg-amber-800 text-white rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {reindexing ? 'Re-indexing...' : 'Re-index All Memories'}
-                </button>
-              </div>
-            )}
-
-            {/* Backup & Restore */}
-            <div className="bg-card border border-warm-border rounded-xl p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-ink-faint" />
-                <h3 className="text-sm font-medium text-ink-light">Backup & Restore</h3>
-              </div>
-
-              {dbSize !== null && (
-                <p className="text-[11px] text-ink-faint">{dbSize.toLocaleString()} memories in database</p>
-              )}
-
-              <div className="space-y-2">
-                <p className="text-xs text-ink-muted">Export</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => downloadBackup('json')}
-                    disabled={backupLoading !== null}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    {backupLoading === 'json' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                    JSON
-                  </button>
-                  <button
-                    onClick={() => downloadBackup('sqlite')}
-                    disabled={backupLoading !== null}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    {backupLoading === 'sqlite' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                    SQLite
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-ink-muted">Import</p>
-                <label className={`flex items-center gap-1.5 px-3 py-1.5 text-xs bg-paper-deep hover:bg-warm-border text-ink-light rounded-lg transition-colors cursor-pointer w-fit ${importLoading ? 'opacity-50 pointer-events-none' : ''}`}>
-                  {importLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                  Import backup
-                  <input type="file" accept=".json,.db,.sqlite" onChange={handleFileSelect} className="hidden" disabled={importLoading} />
-                </label>
-                <p className="text-[11px] text-ink-faint">Accepts .json or .db files</p>
-              </div>
-
-              {importResult && (
-                <div className="text-xs text-green-900 bg-green-100 border border-green-300 rounded-lg px-3 py-2">
+            {importResult && (
+              <div role="status" className="flex items-start gap-2 text-[13px] text-success bg-success-light rounded-lg px-3 py-2">
+                <Check size={15} className="shrink-0 mt-0.5" />
+                <span>
                   {importResult.imported === -1
                     ? 'Database restored from SQLite backup. Reload the page to see changes.'
                     : importResult.imported > 0
                       ? `Imported ${importResult.imported} memories${importResult.skipped > 0 ? `, skipped ${importResult.skipped} duplicates` : ''} (${(importResult.elapsed_ms / 1000).toFixed(1)}s)`
-                      : `All ${importResult.skipped} memories already exist — nothing to import`
+                      : `All ${importResult.skipped} memories already exist. Nothing to import.`
                   }
-                </div>
-              )}
-
-              {backupError && (
-                <div className="text-xs text-red-900 bg-red-100 border border-red-300 rounded-lg px-3 py-2">
-                  {backupError}
-                </div>
-              )}
-            </div>
-
-            {/* Import Confirmation Modal */}
-            {importModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setImportModal(null)}>
-                <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Upload className="w-4 h-4 text-ink-faint" />
-                      <h3 className="text-sm font-semibold text-ink">Import Backup</h3>
-                    </div>
-                    <button onClick={() => setImportModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="px-5 pb-4 space-y-4">
-                    <div className="bg-paper-deep rounded-lg px-3 py-2.5">
-                      <div className="text-xs text-ink-light font-medium">{importModal.file.name}</div>
-                      <div className="text-[11px] text-ink-faint mt-0.5">
-                        {(importModal.file.size / 1024).toFixed(1)} KB · {importModal.format.toUpperCase()} format
-                      </div>
-                    </div>
-
-                    {importModal.format === 'json' && (
-                      <div className="space-y-2">
-                        <p className="text-xs text-ink-muted font-medium">Import mode</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setImportMode('merge')}
-                            className={`flex-1 px-3 py-2 text-xs rounded-lg border-2 transition-colors ${importMode === 'merge' ? 'border-accent bg-accent-light text-ink' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
-                          >
-                            <div className="font-medium">Merge</div>
-                            <div className="text-[11px] mt-0.5 opacity-70">Skip duplicates</div>
-                          </button>
-                          <button
-                            onClick={() => setImportMode('replace')}
-                            className={`flex-1 px-3 py-2 text-xs rounded-lg border-2 transition-colors ${importMode === 'replace' ? 'border-red-600 bg-red-100 text-red-800' : 'border-warm-border text-ink-muted hover:border-ink-faint'}`}
-                          >
-                            <div className="font-medium">Replace</div>
-                            <div className="text-[11px] mt-0.5 opacity-70">Delete existing first</div>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {(importMode === 'replace' || importModal.format === 'sqlite') && (
-                      <div className="flex items-start gap-2 bg-amber-100 text-amber-900 rounded-lg px-3 py-2.5 border border-amber-300">
-                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                        <p className="text-[11px]">
-                          {importModal.format === 'sqlite'
-                            ? 'This will replace your entire database. A backup of the current database will be created automatically.'
-                            : 'This will delete all existing memories in the current namespace before importing.'}
-                        </p>
-                      </div>
-                    )}
-
-                    {importModal.format === 'json' && importMode === 'merge' && (
-                      <p className="text-[11px] text-ink-faint">
-                        Memories will be added to the current namespace. Duplicates are detected by content and skipped. Embeddings are re-generated on import.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
-                    <button onClick={() => setImportModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
-                      Cancel
-                    </button>
-                    <button
-                      onClick={runImport}
-                      className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                        importMode === 'replace' || importModal.format === 'sqlite'
-                          ? 'bg-red-500 hover:bg-red-600 text-white'
-                          : 'bg-accent hover:bg-accent/90 text-white'
-                      }`}
-                    >
-                      {importModal.format === 'sqlite' ? 'Restore Database' : importMode === 'replace' ? 'Replace & Import' : 'Import'}
-                    </button>
-                  </div>
-                </div>
+                </span>
               </div>
             )}
-          </div>
-        )}
-      </section>
 
-      {/* Rename Namespace Modal */}
-      {renameNsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setRenameNsModal(null)}>
-          <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 pt-5 pb-3">
-              <div className="flex items-center gap-2">
-                <Pencil className="w-4 h-4 text-ink-faint" />
-                <h3 className="text-sm font-semibold text-ink">Rename Namespace</h3>
+            {backupError && (
+              <div role="alert" className="flex items-start gap-2 text-[13px] text-danger bg-danger-light rounded-lg px-3 py-2">
+                <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                <span>{backupError}</span>
               </div>
-              <button onClick={() => setRenameNsModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
-                <X className="w-4 h-4" />
-              </button>
+            )}
+          </Section>
+
+          {/* ── Danger zone ── */}
+          <section id="danger" aria-labelledby="danger-title" className="card scroll-mt-4 overflow-hidden border-danger/40">
+            <div className="px-5 pt-5">
+              <h2 id="danger-title" className="text-sm font-semibold text-danger">Danger zone</h2>
+              <p className="text-[13px] text-ink-muted mt-0.5">These actions cannot be undone.</p>
             </div>
-            <div className="px-5 pb-4 space-y-3">
-              <p className="text-xs text-ink-muted">
-                Renaming <strong className="text-ink">{renameNsModal.namespace}</strong> ({renameNsModal.total_count} memories)
+            <div className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink">Delete the current namespace</p>
+                  <p className="text-[13px] text-ink-muted">
+                    Permanently deletes <strong className="font-semibold text-ink">{currentNs.namespace}</strong> and its {currentNs.total_count} memories.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setDeleteNsModal(currentNs); setDeleteConfirmText('') }}
+                  className="btn btn-danger shrink-0"
+                >
+                  <Trash2 size={15} /> Delete namespace
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* Import confirmation */}
+      {importModal && (
+        <Dialog
+          titleId="import-dialog-title"
+          title="Import backup"
+          icon={<Upload size={16} className="text-ink-muted shrink-0" />}
+          onClose={() => setImportModal(null)}
+          wide
+          footer={
+            <>
+              <button onClick={() => setImportModal(null)} className="btn btn-secondary">Cancel</button>
+              <button onClick={runImport} className={`btn ${importIsDestructive ? 'btn-danger' : 'btn-primary'}`}>
+                {importModal.format === 'sqlite' ? 'Restore database' : importMode === 'replace' ? 'Replace and import' : 'Import'}
+              </button>
+            </>
+          }
+        >
+          <div className="border border-warm-border rounded-lg px-3 py-2.5">
+            <div className="text-[13px] text-ink font-medium break-all">{importModal.file.name}</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              {(importModal.file.size / 1024).toFixed(1)} KB · {importModal.format.toUpperCase()} format
+            </div>
+          </div>
+
+          {importModal.format === 'json' && (
+            <fieldset>
+              <legend className={fieldLabel}>Import mode</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setImportMode('merge')}
+                  aria-pressed={importMode === 'merge'}
+                  className={`px-3 py-2 text-left rounded-lg border-2 transition-colors ${importMode === 'merge' ? 'border-accent bg-accent-light' : 'border-warm-border hover:border-warm-border-strong'}`}
+                >
+                  <span className="block text-[13px] font-medium text-ink">Merge</span>
+                  <span className="block text-xs text-ink-muted mt-0.5">Skip duplicates</span>
+                </button>
+                <button
+                  onClick={() => setImportMode('replace')}
+                  aria-pressed={importMode === 'replace'}
+                  className={`px-3 py-2 text-left rounded-lg border-2 transition-colors ${importMode === 'replace' ? 'border-danger bg-danger-light' : 'border-warm-border hover:border-warm-border-strong'}`}
+                >
+                  <span className={`block text-[13px] font-medium ${importMode === 'replace' ? 'text-danger' : 'text-ink'}`}>Replace</span>
+                  <span className="block text-xs text-ink-muted mt-0.5">Delete existing first</span>
+                </button>
+              </div>
+            </fieldset>
+          )}
+
+          {importIsDestructive && (
+            <div role="alert" className="flex items-start gap-2 bg-warning-light rounded-lg px-3 py-2.5">
+              <AlertTriangle size={15} className="text-warning mt-0.5 shrink-0" />
+              <p className="text-[13px] text-ink-light">
+                {importModal.format === 'sqlite'
+                  ? 'This will replace your entire database. A backup of the current database will be created automatically.'
+                  : 'This will delete all existing memories in the current namespace before importing.'}
               </p>
-              <input
-                type="text"
-                value={renameNewName}
-                onChange={e => setRenameNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && renameNewName.trim() && renameNewName.trim() !== renameNsModal.namespace && confirmRenameNamespace()}
-                className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-accent/50"
-                autoFocus
-              />
             </div>
-            <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
-              <button onClick={() => setRenameNsModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
-                Cancel
-              </button>
+          )}
+
+          {importModal.format === 'json' && importMode === 'merge' && (
+            <p className="text-[13px] text-ink-muted">
+              Memories will be added to the current namespace. Duplicates are detected by content and skipped. Embeddings are re-generated on import.
+            </p>
+          )}
+        </Dialog>
+      )}
+
+      {/* Rename namespace */}
+      {renameNsModal && (
+        <Dialog
+          titleId="rename-dialog-title"
+          title="Rename namespace"
+          icon={<Pencil size={16} className="text-ink-muted shrink-0" />}
+          onClose={() => setRenameNsModal(null)}
+          footer={
+            <>
+              <button onClick={() => setRenameNsModal(null)} className="btn btn-secondary">Cancel</button>
               <button
                 onClick={confirmRenameNamespace}
                 disabled={!renameNewName.trim() || renameNewName.trim() === renameNsModal.namespace || renamingNs}
-                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="btn btn-primary"
               >
-                {renamingNs && <Loader2 className="w-3 h-3 animate-spin" />}
+                {renamingNs && <Loader2 size={15} className="animate-spin" />}
                 Rename
               </button>
-            </div>
+            </>
+          }
+        >
+          <div>
+            <label htmlFor="rename-namespace" className={fieldLabel}>New name</label>
+            <input
+              id="rename-namespace"
+              type="text"
+              value={renameNewName}
+              onChange={e => setRenameNewName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && renameNewName.trim() && renameNewName.trim() !== renameNsModal.namespace && confirmRenameNamespace()}
+              className="field"
+              autoFocus
+            />
+            <p className={helpText}>
+              Renaming <strong className="font-semibold text-ink">{renameNsModal.namespace}</strong> ({renameNsModal.total_count} memories)
+            </p>
           </div>
-        </div>
+        </Dialog>
       )}
 
-      {/* Delete Namespace Modal */}
+      {/* Delete namespace */}
       {deleteNsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDeleteNsModal(null)}>
-          <div className="bg-card border border-warm-border rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 pt-5 pb-3">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-                <h3 className="text-sm font-semibold text-ink">Delete Namespace</h3>
-              </div>
-              <button onClick={() => setDeleteNsModal(null)} className="text-ink-faint hover:text-ink transition-colors p-1 rounded-lg hover:bg-paper-deep">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="px-5 pb-4 space-y-4">
-              <p className="text-xs text-ink-muted">
-                This will permanently delete <strong className="text-ink">{deleteNsModal.namespace}</strong> and all <strong className="text-ink">{deleteNsModal.total_count}</strong> memories in it. This cannot be undone.
-              </p>
-
-              <div>
-                <label className="block text-[11px] text-ink-faint mb-1.5">
-                  Type <strong className="text-ink">{deleteNsModal.namespace}</strong> to confirm
-                </label>
-                <input
-                  type="text"
-                  value={deleteConfirmText}
-                  onChange={e => setDeleteConfirmText(e.target.value)}
-                  placeholder={deleteNsModal.namespace}
-                  className="w-full bg-input border border-warm-border rounded-lg px-3 py-2 text-sm text-ink placeholder-ink-faint focus:outline-none focus:ring-1 focus:ring-red-300"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 px-5 py-3 border-t border-warm-border bg-paper-deep/50">
-              <button onClick={() => setDeleteNsModal(null)} className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink rounded-lg transition-colors">
-                Cancel
-              </button>
+        <Dialog
+          titleId="delete-dialog-title"
+          title="Delete namespace"
+          icon={<AlertTriangle size={16} className="text-danger shrink-0" />}
+          onClose={() => setDeleteNsModal(null)}
+          footer={
+            <>
+              <button onClick={() => setDeleteNsModal(null)} className="btn btn-secondary">Cancel</button>
               <button
                 onClick={confirmDeleteNamespace}
                 disabled={deleteConfirmText !== deleteNsModal.namespace || deletingNs}
-                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="btn btn-danger"
               >
-                {deletingNs && <Loader2 className="w-3 h-3 animate-spin" />}
-                Delete Forever
+                {deletingNs && <Loader2 size={15} className="animate-spin" />}
+                Delete forever
               </button>
-            </div>
+            </>
+          }
+        >
+          <p className="text-[13px] text-ink-light">
+            This will permanently delete <strong className="font-semibold text-ink">{deleteNsModal.namespace}</strong> and all <strong className="font-semibold text-ink">{deleteNsModal.total_count}</strong> memories in it. This cannot be undone.
+          </p>
+          <div>
+            <label htmlFor="delete-confirm" className={fieldLabel}>
+              Type <strong className="font-semibold">{deleteNsModal.namespace}</strong> to confirm
+            </label>
+            <input
+              id="delete-confirm"
+              type="text"
+              value={deleteConfirmText}
+              onChange={e => setDeleteConfirmText(e.target.value)}
+              placeholder={deleteNsModal.namespace}
+              autoComplete="off"
+              className="field"
+              autoFocus
+            />
           </div>
-        </div>
+        </Dialog>
       )}
-
     </div>
   )
 }

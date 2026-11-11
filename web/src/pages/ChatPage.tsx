@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2, User } from 'lucide-react'
+import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -14,11 +14,11 @@ const typeColor: Record<string, string> = {
   fact: 'bg-blue-500/15 text-blue-700',
   event: 'bg-cyan-500/15 text-cyan-700',
   decision: 'bg-orange-500/15 text-orange-700',
-  story: 'bg-rose-500/15 text-rose-700',
+  story: 'bg-orange-500/15 text-orange-700',
   reflection: 'bg-indigo-500/15 text-indigo-700',
   context: 'bg-stone-500/15 text-stone-600',
   goal: 'bg-emerald-500/15 text-emerald-700',
-  relationship: 'bg-pink-500/15 text-pink-700',
+  relationship: 'bg-amber-500/15 text-amber-700',
   emotion: 'bg-red-500/15 text-red-700',
   habit: 'bg-teal-500/15 text-teal-700',
   belief: 'bg-amber-500/15 text-amber-700',
@@ -233,44 +233,61 @@ export function ChatPage() {
     }
   }
 
+  const hasConversation = messages.length > 0 || !!streamingContent
+  const title = conversationId
+    ? conversations.find(c => c.id === conversationId)?.title || 'Chat'
+    : 'New chat'
+  const featureHint = features.recall && features.tools
+    ? 'Memories are recalled automatically, and the model can search and store them itself.'
+    : features.recall
+    ? 'Your memories are searched automatically to help the conversation.'
+    : features.tools
+    ? 'The model can search and store memories using tools.'
+    : 'Plain chat: no memory features are enabled.'
+
+  const applySuggestion = (text: string) => {
+    setInput(text)
+    inputRef.current?.focus()
+  }
+
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-3rem)] md:max-h-[calc(100vh-3rem)]">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-warm-border shrink-0">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-ink truncate">
-              {conversationId
-                ? conversations.find(c => c.id === conversationId)?.title || 'Chat'
-                : 'New Chat'}
-            </h2>
-            {conversationId && messages.length > 0 && (
-              <button
-                onClick={async () => {
-                  if (regenningTitle) return
-                  setRegenningTitle(true)
-                  try {
-                    const { title } = await api.generateTitle(conversationId, config)
-                    if (title) {
-                      setConversations(prev => prev.map(c => c.id === conversationId ? { ...c, title } : c))
-                    }
-                  } catch { /* ignore */ }
-                  setRegenningTitle(false)
-                }}
-                className="text-ink-faint hover:text-ink-muted transition-colors shrink-0"
-                title="Regenerate title"
-              >
-                {regenningTitle ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3 border-b border-warm-border shrink-0">
+        <div className="flex items-center gap-1 min-w-0">
+          <h1 className="page-title truncate">{title}</h1>
+          {conversationId && messages.length > 0 && (
+            <button
+              onClick={async () => {
+                if (regenningTitle) return
+                setRegenningTitle(true)
+                try {
+                  const { title } = await api.generateTitle(conversationId, config)
+                  if (title) {
+                    setConversations(prev => prev.map(c => c.id === conversationId ? { ...c, title } : c))
+                  }
+                } catch { /* ignore */ }
+                setRegenningTitle(false)
+              }}
+              className="btn btn-ghost btn-icon shrink-0"
+              title="Regenerate title"
+              aria-label="Regenerate title"
+            >
+              {regenningTitle ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          {/* Model */}
+          <div className="flex items-center gap-0.5 min-w-0">
             {models.length > 0 ? (
               <select
                 value={config.model}
                 onChange={e => setConfig({ ...config, model: e.target.value })}
-                className="bg-transparent text-xs text-ink-muted hover:text-ink-light cursor-pointer focus:outline-none appearance-none pr-4 max-w-[240px] truncate"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0 center' }}
+                aria-label="Model"
+                title="Model"
+                className="field w-auto max-w-[200px] sm:max-w-[240px] truncate"
               >
                 {!models.find(m => m.id === config.model) && (
                   <option value={config.model}>{config.model}</option>
@@ -280,216 +297,250 @@ export function ChatPage() {
                 ))}
               </select>
             ) : (
-              <span className="text-xs text-ink-muted truncate max-w-[240px]">{config.model}</span>
+              <span className="text-[13px] text-ink-muted font-mono truncate max-w-[200px] sm:max-w-[240px] px-1" title="Model">
+                {config.model || 'No model set'}
+              </span>
             )}
             <button
               onClick={fetchModels}
               disabled={loadingModels}
-              className="text-ink-faint hover:text-ink-muted transition-colors shrink-0"
-              title="Refresh models"
+              className="btn btn-ghost btn-icon shrink-0"
+              title="Refresh model list"
+              aria-label="Refresh model list"
             >
-              {loadingModels ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+              {loadingModels ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
             </button>
           </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 cursor-pointer" title="Auto-retrieve relevant memories">
-              <input type="checkbox" checked={features.recall}
-                onChange={e => setFeatures({ ...features, recall: e.target.checked })}
-                className="sr-only peer" />
-              <div className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                features.recall ? 'bg-accent text-white' : 'bg-paper-deep text-ink-muted'
-              }`}>
-                <Brain size={13} />
-                Recall
-              </div>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer" title="Let the model use memory tools">
-              <input type="checkbox" checked={features.tools}
-                onChange={e => setFeatures({ ...features, tools: e.target.checked })}
-                className="sr-only peer" />
-              <div className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                features.tools ? 'bg-[#8B7DB8] text-white' : 'bg-paper-deep text-ink-muted'
-              }`}>
-                <Wrench size={13} />
-                Tools
-              </div>
-            </label>
+
+          {/* Memory features: independent toggles */}
+          <div className="segmented" role="group" aria-label="Memory features">
+            <button
+              type="button"
+              onClick={() => setFeatures({ ...features, recall: !features.recall })}
+              aria-pressed={features.recall}
+              title="Automatically retrieve relevant memories for each message"
+              className="inline-flex items-center gap-1.5"
+            >
+              <Brain size={14} /> Recall
+            </button>
+            <button
+              type="button"
+              onClick={() => setFeatures({ ...features, tools: !features.tools })}
+              aria-pressed={features.tools}
+              title="Let the model search and store memories with tools"
+              className="inline-flex items-center gap-1.5"
+            >
+              <Wrench size={14} /> Tools
+            </button>
           </div>
+
           {messages.length > 0 && (
             <button
               onClick={() => { setMessages([]); setConversationId(null) }}
-              className="p-2 text-ink-muted hover:bg-paper-deep hover:text-ink rounded-lg transition-colors"
+              className="btn btn-ghost btn-icon"
               title="Clear chat"
+              aria-label="Clear chat"
             >
               <X size={16} />
             </button>
           )}
         </div>
-      </div>
+      </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto mt-4 space-y-4 min-h-0 relative pr-2" ref={scrollContainerRef} onScroll={handleScroll}>
-        {messages.length === 0 && !streamingContent && (
-          <div className="flex flex-col items-center justify-center h-full text-ink-faint">
-            <Sparkles size={32} className="mb-3 text-ink-faint" />
-            <p className="text-base font-medium text-ink-muted">What's on your mind?</p>
-            <p className="text-sm text-ink-faint mt-1">
-              {features.recall && features.tools
-                ? 'Memories are recalled and the model can actively search and store'
-                : features.recall
-                ? 'Your memories are searched automatically to help the conversation'
-                : features.tools
-                ? 'The model can search and store memories using tools'
-                : 'Plain chat — no memory features enabled'}
-            </p>
+      <div className="relative flex-1 min-h-0">
+        <div
+          className="h-full overflow-y-auto"
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          role="log"
+          aria-label="Conversation"
+        >
+          <div className={`max-w-3xl mx-auto px-1 ${hasConversation ? 'py-6 space-y-6' : 'h-full'}`}>
+            {!hasConversation && (
+              <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                <div className="w-12 h-12 rounded-full bg-accent-light text-accent flex items-center justify-center mb-4">
+                  <Sparkles size={22} />
+                </div>
+                <p className="text-lg font-semibold text-ink tracking-tight">What's on your mind?</p>
+                <p className="text-sm text-ink-muted mt-1 max-w-md">{featureHint}</p>
+                <div className="flex flex-wrap justify-center gap-2 mt-5">
+                  {['What do you remember about me?', 'Summarise what I am working on', 'Remember that I prefer short answers'].map(s => (
+                    <button key={s} type="button" onClick={() => applySuggestion(s)} className="btn btn-secondary rounded-full font-normal">
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg, i) => (
+              <MessageBubble key={i} message={msg} />
+            ))}
+
+            {/* Streaming message */}
+            {streamingContent && (
+              <AssistantRow>
+                <div className="text-[15px] leading-relaxed text-ink">
+                  {streamingSegments.length > 1 ? (
+                    <SegmentedContent segments={streamingSegments.filter(s => s.type === 'action' || (s.type === 'text' && s.content))} />
+                  ) : (
+                    <AssistantContent content={streamingContent} />
+                  )}
+                </div>
+                {streamingMemories.length > 0 && (
+                  <p className="text-xs text-ink-faint mt-2">{streamingMemories.length} memories used</p>
+                )}
+              </AssistantRow>
+            )}
+
+            {loading && !streamingContent && (
+              <AssistantRow>
+                <div className="flex items-center gap-1 h-6" role="status" aria-label="Generating a reply">
+                  <span className="w-1.5 h-1.5 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </AssistantRow>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Scroll to bottom */}
+        {!isScrollPinned && hasConversation && (
+          <div className="absolute bottom-3 inset-x-0 flex justify-center pointer-events-none">
+            <button
+              onClick={() => { setIsScrollPinned(true); scrollToBottom() }}
+              className="btn btn-secondary rounded-full pointer-events-auto shadow-[var(--shadow-overlay)]"
+            >
+              <ArrowDown size={14} />
+              Scroll to bottom
+            </button>
           </div>
         )}
+      </div>
 
-        {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} />
-        ))}
-
-        {/* Streaming message */}
-        {streamingContent && (
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-accent-light flex items-center justify-center shrink-0">
-              <Brain size={16} className="text-accent" />
-            </div>
-            <div className="max-w-[90%] sm:max-w-[75%]">
-              <div className="bg-card border border-warm-border rounded-lg px-4 py-2.5 text-sm leading-relaxed text-ink">
-                {streamingSegments.length > 1 ? (
-                  <SegmentedContent segments={streamingSegments.filter(s => s.type === 'action' || (s.type === 'text' && s.content))} />
-                ) : (
-                  <AssistantContent content={streamingContent} />
+      {/* Composer */}
+      <div className="shrink-0 pt-3">
+        <div className="max-w-3xl mx-auto">
+          <div className="card rounded-xl p-2 focus-within:border-accent transition-colors">
+            {/* Attached files */}
+            {attachedFiles.length > 0 && (
+              <div className="px-1.5 pt-1 pb-2">
+                <ul className="flex flex-wrap gap-1.5">
+                  {attachedFiles.map((file, i) => (
+                    <li
+                      key={i}
+                      className="inline-flex items-center gap-1.5 bg-paper-deep text-ink-light text-[13px] pl-2 pr-0.5 py-0.5 rounded-md max-w-full"
+                    >
+                      {file.previewUrl ? (
+                        <img src={file.previewUrl} alt="" className="w-6 h-6 rounded object-cover shrink-0" />
+                      ) : file.type === 'image' ? (
+                        <ImageIcon size={14} className="text-ink-muted shrink-0" />
+                      ) : (
+                        <FileIcon size={14} className="text-ink-muted shrink-0" />
+                      )}
+                      <span className="truncate max-w-[200px]">{file.name}</span>
+                      <button
+                        onClick={() => removeFile(i)}
+                        className="w-6 h-6 flex items-center justify-center rounded text-ink-muted hover:text-ink hover:bg-paper-warm transition-colors shrink-0"
+                        title={`Remove ${file.name}`}
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {!(config.vision ?? false) && attachedFiles.some(f => f.type === 'image') && (
+                  <p className="text-xs text-warning mt-2">
+                    Vision is off, so images won't be sent to the model. Enable it in Settings.
+                  </p>
                 )}
               </div>
-              {streamingMemories.length > 0 && (
-                <p className="text-xs text-ink-faint mt-1">{streamingMemories.length} memories used</p>
-              )}
-            </div>
-          </div>
-        )}
+            )}
 
-        {loading && !streamingContent && (
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-accent-light flex items-center justify-center shrink-0">
-              <Brain size={16} className="text-accent" />
-            </div>
-            <div className="bg-card border border-warm-border rounded-lg px-4 py-3">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-ink-faint rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => {
+                setInput(e.target.value)
+                // Auto-resize to content, max 17 lines
+                const el = e.target
+                el.style.height = 'auto'
+                const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
+                const maxHeight = lineHeight * 17
+                el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={loading ? 'Type to queue a message…' : 'Message Anima…'}
+              aria-label="Message"
+              rows={1}
+              className="block w-full bg-transparent text-ink text-[15px] leading-6 resize-none px-2 py-1.5 placeholder:text-ink-faint focus:outline-none focus-visible:outline-none"
+              style={{ minHeight: '2.25rem' }}
+            />
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="flex items-center">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="text/*,application/json,application/pdf,image/*,.csv,.md,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rs,.go,.java,.c,.cpp,.h,.rb,.sh"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn btn-ghost btn-icon"
+                  title="Attach files"
+                  aria-label="Attach files"
+                >
+                  <Paperclip size={16} />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {loading && (
+                  <button
+                    onClick={stopGeneration}
+                    className="btn btn-danger btn-icon"
+                    title="Stop generating"
+                    aria-label="Stop generating"
+                  >
+                    <Square size={14} />
+                  </button>
+                )}
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() && attachedFiles.length === 0}
+                  className="btn btn-primary btn-icon"
+                  title={loading ? 'Queue message' : 'Send message'}
+                  aria-label={loading ? 'Queue message' : 'Send message'}
+                >
+                  <Send size={15} />
+                </button>
               </div>
             </div>
           </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Scroll to bottom button */}
-      {!isScrollPinned && (messages.length > 0 || streamingContent) && (
-        <div className="flex justify-center -mt-5 mb-1 relative z-10">
-          <button
-            onClick={() => { setIsScrollPinned(true); scrollToBottom() }}
-            className="flex items-center gap-1 px-3 py-1.5 bg-paper-deep border border-warm-border-strong text-ink-light text-xs rounded-full hover:bg-paper-deep hover:text-ink transition-colors shadow-lg"
-          >
-            <ArrowDown size={12} />
-            Scroll to bottom
-          </button>
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="py-3 shrink-0">
-        {/* Attached files */}
-        {attachedFiles.length > 0 && (
-          <div className="mb-2 px-1">
-            <div className="flex flex-wrap gap-1.5">
-              {attachedFiles.map((file, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1.5 bg-paper-deep border border-warm-border-strong text-ink-light text-xs px-2.5 py-1 rounded-md"
-                >
-                  {file.previewUrl ? (
-                    <img src={file.previewUrl} alt="" className="w-6 h-6 rounded object-cover shrink-0" />
-                  ) : file.type === 'image' ? (
-                    <ImageIcon size={12} className="text-ink-muted shrink-0" />
-                  ) : (
-                    <FileIcon size={12} className="text-ink-muted shrink-0" />
-                  )}
-                  <span className="truncate max-w-[200px]">{file.name}</span>
-                  <button
-                    onClick={() => removeFile(i)}
-                    className="text-ink-muted hover:text-ink-light transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-            {!(config.vision ?? false) && attachedFiles.some(f => f.type === 'image') && (
-              <p className="text-[11px] text-amber-600 mt-1.5">
-                Vision is off — images won't be sent to the model. Enable it in Settings.
-              </p>
-            )}
-          </div>
-        )}
-        <div className="flex gap-2 items-end bg-card border border-warm-border rounded-lg p-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="text/*,application/json,application/pdf,image/*,.csv,.md,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rs,.go,.java,.c,.cpp,.h,.rb,.sh"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2 text-ink-muted hover:text-ink hover:bg-paper-deep rounded-lg transition-colors shrink-0"
-            title="Attach files"
-          >
-            <Paperclip size={16} />
-          </button>
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={e => {
-              setInput(e.target.value)
-              // Auto-resize to content, max 17 lines
-              const el = e.target
-              el.style.height = 'auto'
-              const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
-              const maxHeight = lineHeight * 17
-              el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={loading ? "Type to queue a message..." : "Type a message..."}
-            rows={1}
-            className="flex-1 bg-transparent text-ink text-sm resize-none focus:outline-none py-1.5 px-2"
-            style={{ minHeight: '2rem' }}
-          />
-          {loading && (
-            <button
-              onClick={stopGeneration}
-              className="p-2 bg-[#C25B4E] hover:bg-[#B5503F] text-white rounded-lg transition-colors shrink-0"
-              title="Stop generating"
-            >
-              <Square size={14} />
-            </button>
-          )}
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() && attachedFiles.length === 0}
-            className="p-2 bg-accent hover:bg-accent-hover disabled:bg-paper-deep disabled:text-ink-faint text-white rounded-lg transition-colors shrink-0"
-          >
-            <Send size={16} />
-          </button>
+          <p className="hidden sm:block text-xs text-ink-faint text-center mt-2">
+            Enter to send · Shift + Enter for a new line
+          </p>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Assistant turn: a small marker in the gutter, content across the full column. */
+function AssistantRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <div className="w-7 h-7 rounded-full bg-accent-light text-accent flex items-center justify-center shrink-0 mt-0.5" aria-hidden="true">
+        <Brain size={14} />
+      </div>
+      <div className="flex-1 min-w-0">{children}</div>
     </div>
   )
 }
@@ -504,14 +555,15 @@ function CodeBlock({ language, children }: { language: string; children: string 
   }
 
   return (
-    <div className="relative group my-2">
-      <div className="flex items-center justify-between bg-paper-deep rounded-t-lg px-3 py-1 text-xs text-ink-muted">
+    <div className="relative group my-3 rounded-lg overflow-hidden border border-warm-border">
+      <div className="flex items-center justify-between bg-paper-deep pl-3 pr-1 text-xs text-ink-muted">
         <span>{language || 'code'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-ink transition-colors"
+          className="inline-flex items-center gap-1.5 min-h-8 px-2 rounded-md hover:text-ink transition-colors"
+          aria-live="polite"
         >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? <Check size={13} /> : <Copy size={13} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
@@ -519,7 +571,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
         style={oneDark}
         language={language || 'text'}
         PreTag="div"
-        customStyle={{ margin: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, fontSize: '0.8rem' }}
+        customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.8125rem' }}
       >
         {children}
       </SyntaxHighlighter>
@@ -556,17 +608,18 @@ function ThinkBlock({ content }: { content: string }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="my-2">
+    <div className="my-2 border border-warm-border rounded-lg text-[13px]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink-light transition-colors"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 w-full min-h-8 px-2.5 text-left text-ink-muted hover:text-ink transition-colors rounded-lg"
       >
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <span className="font-medium">Thinking</span>
-        {!open && <span className="text-ink-faint truncate max-w-[300px]">{content.slice(0, 80)}{content.length > 80 ? '...' : ''}</span>}
+        {open ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
+        <span className="font-medium shrink-0">Thinking</span>
+        {!open && <span className="text-ink-faint truncate min-w-0">{content.slice(0, 80)}{content.length > 80 ? '…' : ''}</span>}
       </button>
       {open && (
-        <div className="mt-1.5 pl-4 border-l-2 border-warm-border-strong text-xs text-ink-muted leading-relaxed whitespace-pre-wrap">
+        <div className="px-3 pb-2.5 pt-0.5 text-ink-muted leading-relaxed whitespace-pre-wrap break-words">
           {content}
         </div>
       )}
@@ -601,46 +654,46 @@ function MarkdownContent({ content }: { content: string }) {
             return <CodeBlock language={match[1]}>{codeStr}</CodeBlock>
           }
           return (
-            <code className="bg-paper-deep text-accent px-1.5 py-0.5 rounded text-xs" {...props}>
+            <code className="bg-paper-deep text-ink px-1.5 py-0.5 rounded text-[13px] break-words" {...props}>
               {children}
             </code>
           )
         },
         p({ children }) {
-          return <p className="mb-2 last:mb-0">{children}</p>
+          return <p className="mb-3 last:mb-0">{children}</p>
         },
         ul({ children }) {
-          return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>
+          return <ul className="list-disc pl-5 mb-3 last:mb-0 space-y-1">{children}</ul>
         },
         ol({ children }) {
-          return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>
+          return <ol className="list-decimal pl-5 mb-3 last:mb-0 space-y-1">{children}</ol>
         },
         h1({ children }) {
-          return <h1 className="text-lg font-bold mb-2">{children}</h1>
+          return <h2 className="text-lg font-semibold tracking-tight mt-4 first:mt-0 mb-2">{children}</h2>
         },
         h2({ children }) {
-          return <h2 className="text-base font-bold mb-2">{children}</h2>
+          return <h3 className="text-base font-semibold mt-4 first:mt-0 mb-2">{children}</h3>
         },
         h3({ children }) {
-          return <h3 className="text-sm font-bold mb-1">{children}</h3>
+          return <h4 className="text-[15px] font-semibold mt-3 first:mt-0 mb-1">{children}</h4>
         },
         blockquote({ children }) {
-          return <blockquote className="border-l-2 border-warm-border-strong pl-3 italic text-ink-muted my-2">{children}</blockquote>
+          return <blockquote className="border-l-2 border-warm-border-strong pl-3 text-ink-muted my-3">{children}</blockquote>
         },
         a({ href, children }) {
-          return <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{children}</a>
+          return <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:text-accent-hover">{children}</a>
         },
         table({ children }) {
-          return <table className="border-collapse my-2 text-xs w-full">{children}</table>
+          return <div className="my-3 overflow-x-auto"><table className="border-collapse text-[13px] w-full">{children}</table></div>
         },
         th({ children }) {
-          return <th className="border border-warm-border px-2 py-1 bg-paper-deep text-left font-medium">{children}</th>
+          return <th className="border border-warm-border px-2.5 py-1.5 bg-paper-deep text-left font-medium">{children}</th>
         },
         td({ children }) {
-          return <td className="border border-warm-border px-2 py-1">{children}</td>
+          return <td className="border border-warm-border px-2.5 py-1.5">{children}</td>
         },
         hr() {
-          return <hr className="border-warm-border my-3" />
+          return <hr className="border-warm-border my-4" />
         },
         pre({ children }) {
           return <>{children}</>
@@ -660,20 +713,22 @@ function ActionIndicator({ segment }: { segment: ChatSegment }) {
     memory_update: '✏️',
     send_message: '💬',
   }
+  const hasDetails = !!segment.details && segment.details.length > 0
   return (
-    <div className="py-1">
+    <div className="border border-warm-border rounded-lg text-[13px]">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-xs text-ink-faint hover:text-ink-muted transition-colors"
+        aria-expanded={hasDetails ? expanded : undefined}
+        className="flex items-center gap-2 w-full min-h-8 px-2.5 text-left text-ink-muted hover:text-ink transition-colors rounded-lg"
       >
-        <span>{icons[segment.tool || ''] || '⚙️'}</span>
-        <span>{segment.summary}</span>
-        {segment.details && segment.details.length > 0 && (
-          expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+        <span aria-hidden="true">{icons[segment.tool || ''] || '⚙️'}</span>
+        <span className="flex-1 min-w-0 truncate">{segment.summary}</span>
+        {hasDetails && (
+          expanded ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />
         )}
       </button>
       {expanded && segment.details && (
-        <div className="mt-1.5 ml-5 p-2 bg-paper-deep rounded-lg text-[11px] text-ink-muted space-y-1 max-h-40 overflow-y-auto">
+        <div className="px-3 pb-2.5 text-xs text-ink-muted space-y-1 max-h-40 overflow-y-auto">
           {segment.details.map((d, i) => (
             <div key={i} className="truncate">{typeof d === 'string' ? d : JSON.stringify(d)}</div>
           ))}
@@ -692,7 +747,7 @@ function SegmentedContent({ segments }: { segments: ChatSegment[] }) {
         }
         if (seg.type === 'text' && seg.content) {
           return (
-            <div key={i} className={i > 0 ? 'border-t border-warm-border pt-3' : ''}>
+            <div key={i}>
               <AssistantContent content={seg.content} />
             </div>
           )
@@ -706,108 +761,100 @@ function SegmentedContent({ segments }: { segments: ChatSegment[] }) {
 function MessageBubble({ message }: { message: DisplayMessage }) {
   const [showMemories, setShowMemories] = useState(false)
   const isUser = message.role === 'user'
-  const hasMemoryInfo =
-    (message.memoriesUsed && message.memoriesUsed.length > 0) ||
-    (message.memoriesAdded && message.memoriesAdded.length > 0)
+  const usedCount = message.memoriesUsed?.length || 0
+  const addedCount = message.memoriesAdded?.length || 0
+  const hasMemoryInfo = usedCount > 0 || addedCount > 0
+
+  if (isUser) {
+    const fileNames = (message.attachments ?? []).filter(name => !/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name))
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] sm:max-w-[80%] bg-paper-deep text-ink rounded-2xl rounded-br-md px-4 py-2.5 text-[15px] leading-relaxed">
+          {message.imageDataUrls && message.imageDataUrls.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {message.imageDataUrls.map((url, i) => (
+                <img key={i} src={url} alt="" className="max-w-[200px] max-h-[150px] rounded-lg object-contain" />
+              ))}
+            </div>
+          )}
+          {fileNames.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {fileNames.map((name, i) => (
+                <span key={i} className="inline-flex items-center gap-1 bg-card text-ink-light text-xs px-2 py-0.5 rounded-md max-w-full">
+                  <FileIcon size={12} className="shrink-0 text-ink-muted" />
+                  <span className="truncate">{name}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {message.content && <p className="whitespace-pre-wrap break-words">{message.content}</p>}
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-          isUser ? 'bg-paper-deep' : 'bg-accent-light'
-        }`}
-      >
-        {isUser ? (
-          <User size={14} className="text-ink-light" />
+    <AssistantRow>
+      <div className="text-[15px] leading-relaxed text-ink break-words">
+        {message.segments && message.segments.length > 1 ? (
+          <SegmentedContent segments={message.segments} />
         ) : (
-          <Brain size={16} className="text-accent" />
+          <AssistantContent content={message.content} />
         )}
       </div>
-      <div className={`max-w-[90%] sm:max-w-[75%] ${isUser ? 'text-right' : ''}`}>
-        <div
-          className={`rounded-lg px-4 py-2.5 text-sm leading-relaxed ${
-            isUser
-              ? 'bg-accent text-white'
-              : 'bg-card border border-warm-border text-ink'
-          }`}
-        >
-          {isUser ? (
-            <>
-              {message.imageDataUrls && message.imageDataUrls.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {message.imageDataUrls.map((url, i) => (
-                    <img key={i} src={url} alt="" className="max-w-[200px] max-h-[150px] rounded object-contain" />
-                  ))}
-                </div>
-              )}
-              {message.attachments && message.attachments.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-1.5">
-                  {message.attachments
-                    .filter(name => !/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name))
-                    .map((name, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 bg-accent/20 text-accent text-xs px-2 py-0.5 rounded">
-                        <FileIcon size={10} />
-                        {name}
-                      </span>
-                    ))}
-                </div>
-              )}
-              {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
-            </>
-          ) : (
-            <>
-              {message.segments && message.segments.length > 1 ? (
-                <SegmentedContent segments={message.segments} />
-              ) : (
-                <AssistantContent content={message.content} />
-              )}
-            </>
-          )}
-        </div>
 
-        {hasMemoryInfo && (
-          <div className="mt-1">
-            <button
-              onClick={() => setShowMemories(!showMemories)}
-              className="flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted transition-colors"
-            >
-              {showMemories ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              {message.memoriesUsed?.length || 0} memories used
-              {message.memoriesAdded && message.memoriesAdded.length > 0 &&
-                `, ${message.memoriesAdded.length} added`}
-            </button>
+      {hasMemoryInfo && (
+        <div className="mt-3 border border-warm-border rounded-lg text-[13px]">
+          <button
+            onClick={() => setShowMemories(!showMemories)}
+            aria-expanded={showMemories}
+            className="flex items-center gap-1.5 w-full min-h-8 px-2.5 text-left text-ink-muted hover:text-ink transition-colors rounded-lg"
+          >
+            {showMemories ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
+            <Brain size={13} className="shrink-0 text-ink-faint" />
+            <span>
+              {usedCount} {usedCount === 1 ? 'memory' : 'memories'} used
+              {addedCount > 0 && `, ${addedCount} added`}
+            </span>
+          </button>
 
-            {showMemories && (
-              <div className="mt-2 p-3 bg-card/80 border border-warm-border rounded-lg space-y-2 text-left">
-                {message.memoriesUsed && message.memoriesUsed.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-ink-muted mb-1">Memories Retrieved</p>
-                    {message.memoriesUsed.map((m, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-ink-muted py-1">
-                        <span className="text-accent/60 shrink-0">{m.score.toFixed(3)}</span>
-                        {m.memory_type && (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${typeColor[m.memory_type] || typeColor.fact}`}>
+          {showMemories && (
+            <div className="px-3 pb-3 pt-1 space-y-3">
+              {usedCount > 0 && (
+                <div>
+                  <p className="section-label mb-1.5">Retrieved</p>
+                  <ul className="space-y-1.5">
+                    {message.memoriesUsed!.map((m, i) => (
+                      <li key={i} className="flex items-baseline gap-2 text-ink-light">
+                        <span className="text-xs text-ink-muted font-mono tabular-nums shrink-0">{m.score.toFixed(3)}</span>
+                        {m.memory_type && m.memory_type !== 'raw' && (
+                          <span className={`badge shrink-0 ${typeColor[m.memory_type] || 'badge-neutral'}`}>
                             {m.memory_type}
                           </span>
                         )}
-                        <span>{m.content}</span>
-                      </div>
+                        <span className="min-w-0 break-words">{m.content}</span>
+                      </li>
                     ))}
-                  </div>
-                )}
-                {message.memoriesAdded && message.memoriesAdded.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-ink-muted mb-1">Memories Stored</p>
-                    {message.memoriesAdded.map((m, i) => (
-                      <p key={i} className="text-xs text-[#5B8C5A] py-0.5">+ {typeof m === 'string' ? m : m.content}</p>
+                  </ul>
+                </div>
+              )}
+              {addedCount > 0 && (
+                <div>
+                  <p className="section-label mb-1.5">Stored</p>
+                  <ul className="space-y-1">
+                    {message.memoriesAdded!.map((m, i) => (
+                      <li key={i} className="flex items-baseline gap-2 text-success">
+                        <span aria-hidden="true">+</span>
+                        <span className="min-w-0 break-words">{typeof m === 'string' ? m : m.content}</span>
+                      </li>
                     ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </AssistantRow>
   )
 }

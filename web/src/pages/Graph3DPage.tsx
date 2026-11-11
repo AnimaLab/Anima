@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
+import { cssVar } from '../lib/theme'
 import { useNamespace } from '../hooks/useNamespace'
 import type { EmbeddingPoint, GraphEdge } from '../api/types'
+import { X, Maximize2, Network, AlertTriangle } from 'lucide-react'
 
 const TIER_COLORS: Record<string, string> = {
-  raw:       '#9C9488',
+  raw:       '#8A94A0',
   reflected: '#8B7DB8',
   deduced:   '#5B9CA6',
   induced:   '#5BA88C',
@@ -118,7 +120,7 @@ export function Graph3DPage() {
     ctx.save()
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, cssW, cssH)
-    ctx.fillStyle = '#F5F0E8'
+    ctx.fillStyle = cssVar('color-paper')
     ctx.fillRect(0, 0, cssW, cssH)
 
     const cx = cssW / 2
@@ -178,7 +180,7 @@ export function Graph3DPage() {
       ctx.fillStyle = getColor(pp.point.memory_type)
       ctx.fill()
       if (isSel || isHov) {
-        ctx.strokeStyle = isSel ? '#2D2A26' : 'rgba(45,42,38,0.6)'
+        ctx.strokeStyle = cssVar(isSel ? 'color-ink' : 'color-ink-muted')
         ctx.lineWidth = isSel ? 1.5 : 1
         ctx.stroke()
       }
@@ -189,22 +191,22 @@ export function Graph3DPage() {
     if (hov) {
       const { sx, sy } = hov
       const text = hov.point.content.length > 72 ? hov.point.content.slice(0, 72) + '…' : hov.point.content
-      ctx.font = '11px system-ui, sans-serif'
+      ctx.font = '12px "Inter Variable", system-ui, sans-serif'
       const tw = ctx.measureText(text).width
       const pad = 6, th = 16
       let tx = sx + 10
       let ty = sy - 24
       if (tx + tw + pad * 2 > cssW) tx = sx - tw - pad * 2 - 10
       if (ty < 4) ty = sy + 10
-      ctx.fillStyle = 'rgba(255,255,255,0.95)'
-      ctx.strokeStyle = 'rgba(224,216,203,0.8)'
+      ctx.fillStyle = cssVar('color-card')
+      ctx.strokeStyle = cssVar('color-warm-border-strong')
       ctx.lineWidth = 1
       ctx.beginPath()
       const rx2 = 4
       ctx.roundRect(tx, ty, tw + pad * 2, th + pad, rx2)
       ctx.fill()
       ctx.stroke()
-      ctx.fillStyle = '#2D2A26'
+      ctx.fillStyle = cssVar('color-ink')
       ctx.fillText(text, tx + pad, ty + pad + th - 4)
     }
 
@@ -273,117 +275,184 @@ export function Graph3DPage() {
   const supEdgeCount = visibleEdges.filter(e => e.edge_type === 'superseded').length
   const tierTypes = ['reflected', 'deduced', 'induced', 'raw'] as const
 
+  const resetView = () => {
+    rotRef.current = { x: 0.35, y: 0.5 }
+    zoomRef.current = 1.0
+  }
+  const isEmpty = !loading && !error && points.length === 0
+
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div>
-          <h2 className="text-lg font-semibold text-ink">Embeddings</h2>
-          <p className="text-xs text-ink-muted">Vector space · drag to orbit · scroll to zoom · click to inspect</p>
+    <div className="h-full flex flex-col gap-4">
+      {/* Header */}
+      <div className="shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="page-title">Embeddings</h1>
+          {!loading && !error && (
+            <>
+              <span className="badge badge-neutral tabular-nums">{points.length} nodes</span>
+              <span className="badge badge-neutral tabular-nums">{visibleEdges.length} edges</span>
+            </>
+          )}
         </div>
-        {!loading && <span className="text-xs text-ink-faint">{points.length} nodes · {visibleEdges.length} edges</span>}
+        <p className="page-description">
+          Memories placed by meaning in vector space. Drag to orbit, scroll to zoom, click a point to inspect it.
+        </p>
       </div>
 
-      {loading && (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <div className="w-6 h-6 border-2 border-warm-border-strong border-t-accent rounded-full animate-spin" />
-          <span className="text-sm text-ink-muted">Loading graph…</span>
-        </div>
-      )}
-      {error && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-4 py-3">Error: {error}</div>}
-
-      {!loading && !error && (
-        <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
-          {/* Canvas */}
-          <div style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#F5F0E8', border: '1px solid #E0D8CB' }}>
-            <canvas
-              ref={canvasRef}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'grab' }}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseUp}
-              onClick={onClick}
-              onWheel={onWheel}
-            />
-          </div>
-
-          {/* Side panel */}
-          <div style={{ width: '180px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
-            {/* Threshold */}
-            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
-              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Edge Threshold</p>
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
+        {/* Canvas */}
+        <section className="card flex-1 min-w-0 min-h-[360px] flex flex-col overflow-hidden" aria-label="Embedding space">
+          {/* Toolbar: everything that changes what the canvas shows */}
+          <div className="border-b border-warm-border px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-2 shrink-0">
+            <label className="flex items-center gap-2 text-[13px] text-ink-muted min-h-8">
+              <span>Edge threshold</span>
               <input
                 type="range" min="0.4" max="0.95" step="0.05"
                 value={threshold}
                 onChange={e => setThreshold(parseFloat(e.target.value))}
-                className="w-full accent-[#C47B3B]"
+                className="w-28"
+                title="Minimum similarity for an edge to be drawn"
               />
-              <div className="flex justify-between mt-1">
-                <span className="text-[10px] text-ink-faint">0.40</span>
-                <span className="text-[10px] font-mono text-ink-light">{threshold.toFixed(2)}</span>
-                <span className="text-[10px] text-ink-faint">0.95</span>
+              <span className="font-mono text-xs text-ink tabular-nums w-8">{threshold.toFixed(2)}</span>
+            </label>
+            <label className="flex items-center gap-2 text-[13px] text-ink-muted min-h-8">
+              <input
+                type="checkbox"
+                checked={showSuperseded}
+                onChange={e => setShowSuperseded(e.target.checked)}
+              />
+              Show superseded
+            </label>
+            <button onClick={resetView} className="btn btn-secondary ml-auto">
+              <Maximize2 size={14} /> Reset view
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 relative overflow-hidden bg-paper">
+            {loading && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-ink-muted text-sm">
+                <div className="w-6 h-6 border-2 border-warm-border-strong border-t-accent rounded-full animate-spin" />
+                Loading embeddings…
               </div>
-              <label className="flex items-center gap-1.5 mt-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showSuperseded}
-                  onChange={e => setShowSuperseded(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-xs text-ink-muted">Show superseded</span>
-              </label>
-            </div>
+            )}
 
-            {/* Node types */}
-            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
-              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Nodes</p>
-              {tierTypes.map(type => {
-                const count = points.filter(p => p.memory_type === type).length
-                if (count === 0) return null
-                return (
-                  <div key={type} className="flex items-center gap-2 mb-1">
-                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(type) }} />
-                    <span className="text-xs text-ink-light flex-1 capitalize">{type}</span>
-                    <span className="text-xs text-ink-faint tabular-nums">{count}</span>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Edge types */}
-            <div className="bg-card rounded-xl p-3 border border-warm-border/60">
-              <p className="text-xs text-ink-muted mb-2 font-medium uppercase tracking-wider">Edges</p>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(139,125,184,0.8)' }} />
-                <span className="text-xs text-ink-light flex-1">Similarity</span>
-                <span className="text-xs text-ink-faint tabular-nums">{simEdgeCount}</span>
+            {error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6" role="alert">
+                <div className="w-11 h-11 rounded-full bg-danger-light text-danger flex items-center justify-center mb-3">
+                  <AlertTriangle size={20} />
+                </div>
+                <p className="text-sm font-medium text-ink">Could not load embeddings</p>
+                <p className="text-[13px] text-danger mt-1 break-words max-w-full">{error}</p>
               </div>
-              {supEdgeCount > 0 && (
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(196,154,60,0.8)' }} />
-                  <span className="text-xs text-ink-light flex-1">Superseded</span>
-                  <span className="text-xs text-ink-faint tabular-nums">{supEdgeCount}</span>
-                </div>
-              )}
-            </div>
+            )}
 
-            {/* Selected node */}
-            {selected && (
-              <div className="bg-card rounded-xl p-3 border border-warm-border/60 overflow-auto" style={{ maxHeight: '35%', minHeight: '80px' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-ink-muted uppercase tracking-wider font-medium">Selected</p>
-                  <button onClick={() => setSelected(null)} className="text-ink-faint hover:text-ink-muted text-sm leading-none">✕</button>
+            {!loading && !error && (
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
+                onMouseDown={onMouseDown}
+                onMouseMove={onMouseMove}
+                onMouseUp={onMouseUp}
+                onMouseLeave={onMouseUp}
+                onClick={onClick}
+                onWheel={onWheel}
+              />
+            )}
+
+            {isEmpty && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
+                <div className="w-11 h-11 rounded-full bg-paper-deep text-ink-muted flex items-center justify-center mb-3">
+                  <Network size={20} />
                 </div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(selected.memory_type) }} />
-                  <span className="text-xs text-ink-muted capitalize">{selected.memory_type}</span>
-                </div>
-                <p className="text-xs text-ink leading-relaxed">{selected.content}</p>
+                <p className="text-sm font-medium text-ink">Nothing to plot yet</p>
+                <p className="text-[13px] text-ink-muted mt-1 max-w-xs">
+                  Add a few memories and they will appear here, close together when their meaning is close.
+                </p>
+              </div>
+            )}
+
+            {/* Legend */}
+            {!loading && !error && !isEmpty && (
+              <div className="absolute bottom-3 left-3 card px-3 py-2 text-xs max-w-[calc(100%-1.5rem)] pointer-events-none">
+                <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {tierTypes.map(type => (
+                    <li key={type} className="flex items-center gap-1.5 text-ink-muted capitalize">
+                      <span className="w-2 h-2 rounded-full" style={{ background: getColor(type) }} aria-hidden="true" />
+                      {type}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
-        </div>
-      )}
+        </section>
+
+        {/* Details panel */}
+        <aside className="card lg:w-80 shrink-0 flex flex-col lg:min-h-0 overflow-hidden" aria-label="Details">
+          <div className="flex-1 lg:min-h-0 lg:overflow-y-auto p-4 space-y-5">
+            {/* Selection */}
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2 min-h-8">
+                <p className="section-label">Selected</p>
+                {selected && (
+                  <button onClick={() => setSelected(null)} className="btn btn-ghost btn-icon -mr-2" aria-label="Clear selection" title="Clear selection">
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+              {selected ? (
+                <>
+                  <span className="badge badge-neutral">
+                    <span className="w-2 h-2 rounded-full" style={{ background: getColor(selected.memory_type) }} aria-hidden="true" />
+                    {selected.memory_type}
+                  </span>
+                  <p className="mt-2 text-sm text-ink leading-relaxed break-words">{selected.content}</p>
+                </>
+              ) : (
+                <p className="text-[13px] text-ink-muted">Click a point to read the memory behind it.</p>
+              )}
+            </div>
+
+            {/* Node types */}
+            <div className="border-t border-warm-border pt-4">
+              <p className="section-label mb-2">Nodes</p>
+              <ul className="space-y-1.5">
+                {tierTypes.map(type => {
+                  const count = points.filter(p => p.memory_type === type).length
+                  if (count === 0) return null
+                  return (
+                    <li key={type} className="flex items-center gap-2 text-[13px]">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: getColor(type) }} aria-hidden="true" />
+                      <span className="text-ink-light flex-1 capitalize">{type}</span>
+                      <span className="text-ink-muted tabular-nums">{count}</span>
+                    </li>
+                  )
+                })}
+                {points.length === 0 && <li className="text-[13px] text-ink-muted">None</li>}
+              </ul>
+            </div>
+
+            {/* Edge types */}
+            <div className="border-t border-warm-border pt-4">
+              <p className="section-label mb-2">Edges</p>
+              <ul className="space-y-1.5">
+                <li className="flex items-center gap-2 text-[13px]">
+                  <span className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(139,125,184,0.8)' }} aria-hidden="true" />
+                  <span className="text-ink-light flex-1">Similarity</span>
+                  <span className="text-ink-muted tabular-nums">{simEdgeCount}</span>
+                </li>
+                {supEdgeCount > 0 && (
+                  <li className="flex items-center gap-2 text-[13px]">
+                    <span className="w-3 h-0.5 shrink-0 rounded" style={{ background: 'rgba(196,154,60,0.8)' }} aria-hidden="true" />
+                    <span className="text-ink-light flex-1">Superseded</span>
+                    <span className="text-ink-muted tabular-nums">{supEdgeCount}</span>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }

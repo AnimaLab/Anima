@@ -1,8 +1,10 @@
 import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, memo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, getNamespace } from '../api/client'
+import { cssVar } from '../lib/theme'
 import ForceGraph2D from 'react-force-graph-2d'
-import { X, Tag, Pencil, Trash2, Check } from 'lucide-react'
+import { X, Tag, Pencil, Trash2, Check, Maximize2, Share2 } from 'lucide-react'
+import { categoryColor, provenanceText } from '../lib/memoryMeta'
 import type { GraphData, Memory } from '../api/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -12,7 +14,7 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const TYPE_NODE_COLOR: Record<string, string> = {
-  raw:       '#9C9488',
+  raw:       '#8A94A0',
   reflected: '#8B7DB8',
   deduced:   '#5B9CA6',
   induced:   '#5BA88C',
@@ -26,9 +28,9 @@ const TYPE_COLOR: Record<string, string> = {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  active: 'bg-green-500/15 text-green-700',
-  superseded: 'bg-amber-500/15 text-amber-700',
-  deleted: 'bg-red-500/15 text-red-700',
+  active: 'badge-success',
+  superseded: 'badge-warning',
+  deleted: 'badge-danger',
 }
 
 /** Word-wrap text into lines that fit within maxWidth (canvas pixels). */
@@ -248,7 +250,7 @@ export function GraphPage() {
     const bgRadius = 2 / globalScale
     const bgX = node.x! - bgWidth / 2, bgY = labelY - padY
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)'
+    ctx.fillStyle = cssVar('color-card')
     ctx.beginPath()
     ctx.moveTo(bgX + bgRadius, bgY)
     ctx.lineTo(bgX + bgWidth - bgRadius, bgY)
@@ -262,150 +264,217 @@ export function GraphPage() {
     ctx.closePath()
     ctx.fill()
 
-    ctx.fillStyle = 'rgba(45, 42, 38, 0.9)'
+    ctx.fillStyle = cssVar('color-ink')
     lines.forEach((line, i) => { ctx.fillText(line, node.x!, labelY + i * lineHeight) })
   }, [])
 
+  const closePanel = () => { setSelectedMemory(null); setIsEditing(false); setShowDeleteConfirm(false) }
+  const panelOpen = !!selectedMemory || loadingMemory
+  const isEmpty = !isLoading && graphData.nodes.length === 0
+
   return (
-    <div className="space-y-4 h-full max-h-[calc(100vh-3rem)] flex flex-col">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-ink">Graph</h2>
-            {data && <span className="text-xs text-ink-faint">{data.nodes.length} nodes, {data.edges.length} edges</span>}
-          </div>
+    <div className="h-full flex flex-col gap-4">
+      {/* Header */}
+      <div className="shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="page-title">Graph</h1>
+          {data && (
+            <>
+              <span className="badge badge-neutral tabular-nums">{graphData.nodes.length} nodes</span>
+              <span className="badge badge-neutral tabular-nums">{graphData.links.length} edges</span>
+            </>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-          {/* Type legend */}
-          <div className="hidden sm:flex items-center gap-2">
-            {Object.entries(TYPE_NODE_COLOR).map(([type, color]) => (
-              <div key={type} className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full" style={{ background: color }} />
-                <span className="text-[10px] text-ink-faint capitalize">{type}</span>
-              </div>
-            ))}
-          </div>
-          <div className="hidden sm:block w-px h-3 bg-warm-border" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-ink-muted">Sim:</span>
-            <input type="range" min="0.3" max="0.9" step="0.05" value={threshold}
-              onChange={(e) => setThreshold(parseFloat(e.target.value))} className="w-20 accent-[#C47B3B]" />
-            <span className="text-xs text-ink-muted font-mono">{threshold.toFixed(2)}</span>
-          </div>
-          <label className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <input type="checkbox" checked={showSuperseded} onChange={(e) => setShowSuperseded(e.target.checked)} />
-            Superseded
-          </label>
-          <button onClick={() => graphRef.current?.zoomToFit(400, 40)} className="text-xs text-ink-muted hover:text-ink">
-            Fit
-          </button>
-        </div>
+        <p className="page-description">
+          Memories linked by similarity. Scroll to zoom, drag to pan, click a node to inspect it.
+        </p>
       </div>
 
-      <div ref={containerRef} className="flex-1 bg-card border border-warm-border rounded-xl overflow-hidden relative">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full text-ink-muted text-sm">Loading graph...</div>
-        ) : (
-          <MemoGraph
-            graphRef={graphRef}
-            graphData={graphData}
-            dimensions={dimensions}
-            nodeColor={nodeColor}
-            nodeSize={nodeSize}
-            linkColor={linkColor}
-            linkWidth={linkWidth}
-            nodeCanvasObject={nodeCanvasObject}
-            nodePointerAreaPaint={nodePointerAreaPaint}
-            onNodeClick={handleNodeClick}
-            onBackgroundClick={handleBackgroundClick}
-            onEngineStop={onEngineStop}
-          />
-        )}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
+        {/* Canvas */}
+        <section className="card flex-1 min-w-0 min-h-[360px] flex flex-col overflow-hidden" aria-label="Memory graph">
+          {/* Toolbar: everything that changes what the canvas shows */}
+          <div className="border-b border-warm-border px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-2 shrink-0">
+            <label className="flex items-center gap-2 text-[13px] text-ink-muted min-h-8">
+              <span>Similarity</span>
+              <input
+                type="range" min="0.3" max="0.9" step="0.05" value={threshold}
+                onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                className="w-28"
+                title="Minimum similarity for two memories to be linked"
+              />
+              <span className="font-mono text-xs text-ink tabular-nums w-8">{threshold.toFixed(2)}</span>
+            </label>
+            <label className="flex items-center gap-2 text-[13px] text-ink-muted min-h-8">
+              <input type="checkbox" checked={showSuperseded} onChange={(e) => setShowSuperseded(e.target.checked)} />
+              Show superseded
+            </label>
+            <button onClick={() => graphRef.current?.zoomToFit(400, 40)} className="btn btn-secondary ml-auto">
+              <Maximize2 size={14} /> Fit
+            </button>
+          </div>
 
-        {(selectedMemory || loadingMemory) && (
-          <div className="absolute top-3 right-3 w-80 max-w-[calc(100%-1.5rem)] bg-card border border-warm-border-strong rounded-xl shadow-2xl z-10">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-warm-border">
-              <span className="text-sm font-medium text-ink">Memory Detail</span>
-              <div className="flex items-center gap-1">
-                {selectedMemory && selectedMemory.status === 'active' && !isEditing && (
-                  <>
-                    <button onClick={() => { setEditContent(selectedMemory.content); setIsEditing(true) }} className="p-1 text-ink-muted hover:text-accent transition-colors" title="Edit">
-                      <Pencil size={14} />
-                    </button>
-                    <button onClick={() => setShowDeleteConfirm(true)} className="p-1 text-ink-muted hover:text-[#C25B4E] transition-colors" title="Delete">
-                      <Trash2 size={14} />
-                    </button>
-                  </>
-                )}
-                <button onClick={() => { setSelectedMemory(null); setIsEditing(false); setShowDeleteConfirm(false) }} className="p-1 text-ink-muted hover:text-ink transition-colors">
-                  <X size={14} />
-                </button>
+          <div ref={containerRef} className="flex-1 min-h-0 relative overflow-hidden">
+            {isLoading ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-ink-muted text-sm">
+                <div className="w-6 h-6 border-2 border-warm-border-strong border-t-accent rounded-full animate-spin" />
+                Loading graph…
               </div>
-            </div>
-            {loadingMemory ? (
-              <div className="px-4 py-6 text-center text-ink-muted text-sm">Loading...</div>
-            ) : selectedMemory && (
-              <div className="px-4 py-3 space-y-3 max-h-[60vh] overflow-y-auto">
-                {isEditing ? (
-                  <div className="space-y-2">
-                    <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
-                      className="w-full bg-card border border-warm-border-strong rounded-lg p-2 text-sm text-ink resize-y min-h-[80px] focus:outline-none focus:border-accent" rows={4} />
-                    <div className="flex gap-2">
-                      <button onClick={() => updateMutation.mutate({ id: selectedMemory.id, content: editContent })}
-                        disabled={updateMutation.isPending || editContent.trim() === ''}
-                        className="flex items-center gap-1 px-3 py-1 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs rounded-lg">
-                        <Check size={12} /> Save
-                      </button>
-                      <button onClick={() => setIsEditing(false)} className="px-3 py-1 bg-paper-deep hover:bg-paper-deep text-ink-light text-xs rounded-lg">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-ink leading-relaxed">{selectedMemory.content}</p>
-                )}
+            ) : (
+              <MemoGraph
+                graphRef={graphRef}
+                graphData={graphData}
+                dimensions={dimensions}
+                nodeColor={nodeColor}
+                nodeSize={nodeSize}
+                linkColor={linkColor}
+                linkWidth={linkWidth}
+                nodeCanvasObject={nodeCanvasObject}
+                nodePointerAreaPaint={nodePointerAreaPaint}
+                onNodeClick={handleNodeClick}
+                onBackgroundClick={handleBackgroundClick}
+                onEngineStop={onEngineStop}
+              />
+            )}
 
-                {showDeleteConfirm && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                    <p className="text-xs text-red-600">Delete this memory?</p>
-                    <div className="flex gap-2">
-                      <button onClick={() => deleteMutation.mutate(selectedMemory.id)} disabled={deleteMutation.isPending}
-                        className="px-3 py-1 bg-[#C25B4E] hover:bg-[#B5503F] disabled:opacity-50 text-white text-xs rounded-lg">
-                        {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-                      </button>
-                      <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1 bg-paper-deep hover:bg-paper-deep text-ink-light text-xs rounded-lg">Cancel</button>
-                    </div>
-                  </div>
-                )}
+            {isEmpty && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
+                <div className="w-11 h-11 rounded-full bg-paper-deep text-ink-muted flex items-center justify-center mb-3">
+                  <Share2 size={20} />
+                </div>
+                <p className="text-sm font-medium text-ink">Nothing to draw yet</p>
+                <p className="text-[13px] text-ink-muted mt-1 max-w-xs">
+                  Add a few memories and they will appear here, linked when their meaning is close.
+                </p>
+              </div>
+            )}
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_BADGE[selectedMemory.status] || ''}`}>{selectedMemory.status}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_COLOR[selectedMemory.memory_type] || TYPE_COLOR.raw}`}>{selectedMemory.memory_type}</span>
-                  {selectedMemory.tags.length > 0 && selectedMemory.tags.map(tag => (
-                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-paper-deep/50 text-ink-muted inline-flex items-center gap-0.5">
-                      <Tag size={8} />{tag}
-                    </span>
+            {/* Legend */}
+            {!isLoading && !isEmpty && (
+              <div className="absolute bottom-3 left-3 card px-3 py-2 text-xs max-w-[calc(100%-1.5rem)]">
+                <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {Object.entries(TYPE_NODE_COLOR).map(([type, color]) => (
+                    <li key={type} className="flex items-center gap-1.5 text-ink-muted capitalize">
+                      <span className="w-2 h-2 rounded-full" style={{ background: color }} aria-hidden="true" />
+                      {type}
+                    </li>
                   ))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                  <div><span className="text-ink-faint">Created</span><p className="text-ink-muted">{new Date(selectedMemory.created_at).toLocaleDateString()}</p></div>
-                  <div><span className="text-ink-faint">Updated</span><p className="text-ink-muted">{new Date(selectedMemory.updated_at).toLocaleDateString()}</p></div>
-                  <div><span className="text-ink-faint">Accessed</span><p className="text-ink-muted">{selectedMemory.access_count}x</p></div>
-                  <div><span className="text-ink-faint">Namespace</span><p className="text-ink-muted truncate">{selectedMemory.namespace}</p></div>
-                </div>
-
-                {selectedMemory.metadata && Object.keys(selectedMemory.metadata).length > 0 && (
-                  <div>
-                    <span className="text-[10px] text-ink-faint uppercase tracking-wider">Metadata</span>
-                    <pre className="mt-1 text-[11px] text-ink-muted bg-card rounded-lg p-2 overflow-x-auto">
-                      {JSON.stringify(selectedMemory.metadata, null, 2)}
-                    </pre>
-                  </div>
-                )}
-
-                <p className="text-[10px] text-ink-faint font-mono truncate" title={selectedMemory.id}>{selectedMemory.id}</p>
+                  <li className="flex items-center gap-1.5 text-ink-muted">
+                    <span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLORS.superseded }} aria-hidden="true" />
+                    Superseded
+                  </li>
+                </ul>
               </div>
             )}
           </div>
+        </section>
+
+        {/* Details panel */}
+        {panelOpen && (
+          <aside className="card lg:w-80 shrink-0 flex flex-col lg:min-h-0 overflow-hidden" aria-label="Memory details">
+            <div className="flex items-center justify-between gap-2 pl-4 pr-2 py-2 border-b border-warm-border shrink-0">
+              <h2 className="text-sm font-semibold text-ink">Memory</h2>
+              <button onClick={closePanel} className="btn btn-ghost btn-icon" aria-label="Close details" title="Close">
+                <X size={16} />
+              </button>
+            </div>
+
+            {loadingMemory ? (
+              <div className="p-4 space-y-2" aria-busy="true">
+                <div className="h-4 rounded bg-paper-warm animate-pulse" />
+                <div className="h-4 rounded bg-paper-warm animate-pulse w-4/5" />
+                <div className="h-4 rounded bg-paper-warm animate-pulse w-3/5" />
+              </div>
+            ) : selectedMemory && (
+              <>
+                <div className="flex-1 lg:min-h-0 lg:overflow-y-auto p-4 space-y-4">
+                  {isEditing ? (
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      aria-label="Memory content"
+                      className="field resize-y min-h-[96px]"
+                      rows={5}
+                      autoFocus
+                    />
+                  ) : (
+                    <p className="text-sm text-ink leading-relaxed break-words">{selectedMemory.content}</p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`badge ${STATUS_BADGE[selectedMemory.status] || 'badge-neutral'}`}>{selectedMemory.status}</span>
+                    <span className={`badge ${TYPE_COLOR[selectedMemory.memory_type] || TYPE_COLOR.raw}`}>{selectedMemory.memory_type}</span>
+                    {selectedMemory.category && (
+                      <span className={`badge ${categoryColor(selectedMemory.category)}`}>{selectedMemory.category}</span>
+                    )}
+                    {selectedMemory.tags.map(tag => (
+                      <span key={tag} className="badge badge-neutral normal-case">
+                        <Tag size={11} />{tag}
+                      </span>
+                    ))}
+                  </div>
+
+                  {provenanceText(selectedMemory.source, selectedMemory.confidence) && (
+                    <p className="text-xs text-ink-muted">{provenanceText(selectedMemory.source, selectedMemory.confidence)}</p>
+                  )}
+
+                  <div>
+                    <p className="section-label mb-2">Details</p>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[13px]">
+                      <div><dt className="text-xs text-ink-faint">Created</dt><dd className="text-ink-light">{new Date(selectedMemory.created_at).toLocaleDateString()}</dd></div>
+                      <div><dt className="text-xs text-ink-faint">Updated</dt><dd className="text-ink-light">{new Date(selectedMemory.updated_at).toLocaleDateString()}</dd></div>
+                      <div><dt className="text-xs text-ink-faint">Accessed</dt><dd className="text-ink-light tabular-nums">{selectedMemory.access_count}×</dd></div>
+                      <div className="min-w-0"><dt className="text-xs text-ink-faint">Namespace</dt><dd className="text-ink-light truncate" title={selectedMemory.namespace}>{selectedMemory.namespace}</dd></div>
+                    </dl>
+                  </div>
+
+                  {selectedMemory.metadata && Object.keys(selectedMemory.metadata).length > 0 && (
+                    <div>
+                      <p className="section-label mb-2">Metadata</p>
+                      <pre className="text-xs text-ink-muted bg-paper-warm border border-warm-border rounded-lg p-2.5 overflow-x-auto">
+                        {JSON.stringify(selectedMemory.metadata, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-ink-faint font-mono truncate" title={selectedMemory.id}>{selectedMemory.id}</p>
+                </div>
+
+                {/* Actions */}
+                {isEditing ? (
+                  <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-warm-border shrink-0">
+                    <button onClick={() => setIsEditing(false)} className="btn btn-ghost">Cancel</button>
+                    <button
+                      onClick={() => updateMutation.mutate({ id: selectedMemory.id, content: editContent })}
+                      disabled={updateMutation.isPending || editContent.trim() === ''}
+                      className="btn btn-primary"
+                    >
+                      <Check size={15} /> {updateMutation.isPending ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                ) : showDeleteConfirm ? (
+                  <div className="px-4 py-3 border-t border-warm-border bg-danger-light/50 shrink-0" role="alertdialog" aria-label="Confirm delete">
+                    <p className="text-[13px] text-ink">Delete this memory? It moves to Deleted and leaves the graph.</p>
+                    <div className="flex items-center justify-end gap-2 mt-2.5">
+                      <button onClick={() => setShowDeleteConfirm(false)} className="btn btn-secondary">Cancel</button>
+                      <button onClick={() => deleteMutation.mutate(selectedMemory.id)} disabled={deleteMutation.isPending} className="btn btn-danger">
+                        <Trash2 size={15} /> {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                ) : selectedMemory.status === 'active' && (
+                  <div className="flex items-center gap-2 px-4 py-3 border-t border-warm-border shrink-0">
+                    <button onClick={() => { setEditContent(selectedMemory.content); setIsEditing(true) }} className="btn btn-secondary flex-1">
+                      <Pencil size={15} /> Edit
+                    </button>
+                    <button onClick={() => setShowDeleteConfirm(true)} className="btn btn-danger flex-1">
+                      <Trash2 size={15} /> Delete
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </aside>
         )}
       </div>
     </div>
