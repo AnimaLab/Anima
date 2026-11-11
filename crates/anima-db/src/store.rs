@@ -2862,9 +2862,9 @@ fn stats_sync(conn: &Connection, namespace: &Namespace) -> Result<NamespaceStats
     let mut stmt = conn.prepare(
         "SELECT
             COUNT(*) as total,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) as superseded,
-            SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END) as deleted,
+            COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) as active,
+            COALESCE(SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END), 0) as superseded,
+            COALESCE(SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END), 0) as deleted,
             COALESCE(AVG(access_count), 0.0) as avg_access,
             COALESCE(MAX(access_count), 0) as max_access,
             MIN(created_at) as oldest,
