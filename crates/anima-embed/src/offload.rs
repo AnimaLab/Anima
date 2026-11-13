@@ -53,12 +53,42 @@ impl<E: Embedder> Embedder for OffloadingEmbedder<E> {
     fn embed_query_with_sparse(&self, text: &str) -> Result<(Vec<f32>, SparseVector), EmbedError> {
         offload_blocking(|| self.0.embed_query_with_sparse(text))
     }
+
+    fn has_sparse(&self) -> bool {
+        self.0.has_sparse()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    /// The status route reads `has_sparse` through the server's wrappers; a
+    /// wrapper that fell back to the trait default would report sparse as off
+    /// on a server that computes it.
+    #[test]
+    fn wrappers_report_the_sparse_capability() {
+        struct SparseEmbedder;
+        impl Embedder for SparseEmbedder {
+            fn embed(&self, _: &str) -> Result<Vec<f32>, EmbedError> {
+                Ok(vec![0.0])
+            }
+            fn embed_query(&self, _: &str) -> Result<Vec<f32>, EmbedError> {
+                Ok(vec![0.0])
+            }
+            fn dimension(&self) -> usize {
+                1
+            }
+            fn has_sparse(&self) -> bool {
+                true
+            }
+        }
+
+        let wrapped: std::sync::Arc<dyn Embedder> = std::sync::Arc::new(OffloadingEmbedder(SparseEmbedder));
+        assert!(wrapped.has_sparse());
+        assert!(!OffloadingEmbedder(SlowEmbedder(Duration::ZERO)).has_sparse());
+    }
 
     /// Stands in for ONNX inference: holds its thread for a while.
     struct SlowEmbedder(Duration);
