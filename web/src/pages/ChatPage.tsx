@@ -255,7 +255,7 @@ export function ChatPage() {
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3 border-b border-warm-border shrink-0">
         <div className="flex items-center gap-1 min-w-0">
-          <h1 className="page-title truncate">{title}</h1>
+          <h1 className="page-title truncate text-base leading-6 sm:text-lg sm:leading-7">{title}</h1>
           {conversationId && messages.length > 0 && (
             <button
               onClick={async () => {

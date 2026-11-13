@@ -31,8 +31,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
-          <div className={`flex items-center gap-2 text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg max-w-md ${toast.error ? 'bg-red-600' : 'bg-ink'}`}>
-            {toast.error ? <X className="w-3.5 h-3.5 shrink-0" /> : <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+          <div role={toast.error ? 'alert' : 'status'} className={`flex items-center gap-2 text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg max-w-md ${toast.error ? 'bg-red-600 text-white' : 'bg-card text-ink border border-warm-border'}`}>
+            {toast.error ? <X className="w-3.5 h-3.5 shrink-0" /> : <Check className="w-3.5 h-3.5 text-success shrink-0" />}
             <span className="truncate">{toast.msg}</span>
           </div>
         </div>

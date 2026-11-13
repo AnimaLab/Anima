@@ -321,7 +321,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 onClick={() => setThemePreference(value)}
                 aria-pressed={themePreference === value}
                 title={`${label} theme`}
-                className="flex-1 inline-flex items-center justify-center gap-1.5"
+                className="flex-1 min-w-0 px-1 inline-flex items-center justify-center gap-1"
               >
                 <Icon size={14} />
                 <span className="text-xs">{label}</span>
@@ -384,7 +384,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="text-base font-semibold text-ink tracking-wide uppercase font-[family-name:var(--font-display)]">Anima</span>
         </div>
 
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto bg-paper p-4 sm:p-6 lg:p-8 focus:outline-none">
+        <main id="main-content" tabIndex={-1} className="relative flex-1 overflow-auto bg-paper p-4 sm:p-6 lg:p-8 focus:outline-none">
           {children}
         </main>
       </div>
