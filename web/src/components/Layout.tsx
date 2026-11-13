@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen, Info } from 'lucide-react'
 import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
+import { AboutAnima, aboutSeen } from './AboutAnima'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -59,6 +60,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(true)
+  // The introduction opens by itself on a browser's first visit.
+  const [aboutOpen, setAboutOpen] = useState(() => !aboutSeen())
   const { preference: themePreference } = useTheme()
 
   // Give each page its own tab title so history and multiple tabs are usable.
@@ -311,6 +314,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
 
+      {/* About */}
+      <div className={`px-2 pb-2 ${showLabels ? '' : 'flex justify-center'}`}>
+        <button
+          onClick={() => setAboutOpen(true)}
+          aria-label={!showLabels ? 'About Anima' : undefined}
+          title={!showLabels ? 'About Anima' : undefined}
+          className={`nav-item w-full ${showLabels ? 'gap-2.5 px-2' : 'justify-center w-8'}`}
+        >
+          <Info size={16} className="shrink-0" />
+          {showLabels && 'About Anima'}
+        </button>
+      </div>
+
       {/* Theme */}
       <div className={`border-t border-warm-border ${showLabels ? 'p-3' : 'p-2 flex justify-center'}`}>
         {showLabels ? (
@@ -345,6 +361,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell flex h-screen bg-paper text-ink">
       <a href="#main-content" className="skip-link">Skip to content</a>
+      <AboutAnima open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       {/* Mobile overlay */}
       {mobileOpen && (
