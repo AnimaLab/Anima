@@ -7,3 +7,4 @@
 !crates/
 !config.default.toml
 !web/
+!models/bge-m3/sparse_linear.bin

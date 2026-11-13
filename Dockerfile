@@ -30,6 +30,8 @@ COPY --from=builder /app/target/release/anima-server /usr/local/bin/
 WORKDIR /app
 
 COPY config.default.toml ./config.default.toml
+# BGE-M3 sparse head: never downloaded, read from [sparse] weights_path.
+COPY models/bge-m3/sparse_linear.bin ./models/bge-m3/sparse_linear.bin
 COPY --from=web-builder /app/dist/ ./web/dist/
 RUN sed -i 's/host = "127.0.0.1"/host = "0.0.0.0"/' config.default.toml && \
     sed -i 's|http://localhost:|http://host.docker.internal:|g' config.default.toml
