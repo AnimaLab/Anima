@@ -138,13 +138,42 @@ fn plist_path() -> PathBuf {
     PathBuf::from(home).join("Library/LaunchAgents/dev.anima.server.plist")
 }
 
+/// Write the launchd plist, creating `~/Library/LaunchAgents` when a fresh
+/// account has none, and say what to do when the folder is not writable
+/// (managed Macs often make it owned by root).
+#[cfg(target_os = "macos")]
+fn write_launch_agent(dest: &Path, plist: &str) -> anyhow::Result<()> {
+    let dir = dest.parent().unwrap_or(dest);
+    std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(dest, plist))
+        .map_err(|e| launch_agent_error(dest, &e))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn launch_agent_error(dest: &Path, e: &std::io::Error) -> anyhow::Error {
+    let dir = dest.parent().unwrap_or(dest);
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        anyhow::anyhow!(
+            "cannot write {}: {e}\n\
+             {} is not writable by this user; on managed Macs it is often owned by root. \
+             Ask an administrator to make it yours, or start Anima another way \
+             (run anima-server from a terminal, or add it to Login Items).",
+            dest.display(),
+            dir.display()
+        )
+    } else {
+        anyhow::anyhow!("cannot write {}: {e}", dest.display())
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn install() -> anyhow::Result<()> {
     let bin = anima_binary()?;
     let cwd = anima_working_dir()?;
     let config = cwd.join("config.toml");
     let log_dir = cwd.join("logs");
-    std::fs::create_dir_all(&log_dir)?;
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| anyhow::anyhow!("cannot create {}: {e}", log_dir.display()))?;
 
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -182,7 +211,7 @@ fn install() -> anyhow::Result<()> {
     );
 
     let dest = plist_path();
-    std::fs::write(&dest, &plist)?;
+    write_launch_agent(&dest, &plist)?;
     println!("Wrote {}", dest.display());
 
     let status = std::process::Command::new("launchctl")
@@ -304,7 +333,8 @@ fn install() -> anyhow::Result<()> {
         cwd.display()
     );
     let launcher = cwd.join(LAUNCHER);
-    std::fs::write(&launcher, launcher_script(&bin, "config.toml", LOG_FILE))?;
+    std::fs::write(&launcher, launcher_script(&bin, "config.toml", LOG_FILE))
+        .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", launcher.display()))?;
 
     powershell(&register_task_script(TASK_NAME, &launcher, &cwd)).map_err(|e| {
         anyhow::anyhow!("could not register the scheduled task \"{TASK_NAME}\": {e}")
@@ -390,5 +420,24 @@ mod tests {
         assert!(script.contains("-WorkingDirectory 'C:\\Anima'"));
         assert!(script.contains("-AtLogOn"));
         assert!(!script.to_lowercase().contains("highest"), "must not ask for elevation");
+    }
+
+    #[test]
+    fn launch_agent_permission_error_names_the_folder_and_a_way_out() {
+        let dest = Path::new("/Users/someone/Library/LaunchAgents/dev.anima.server.plist");
+        let e = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let msg = launch_agent_error(dest, &e).to_string();
+        assert!(msg.contains(&dest.display().to_string()), "{msg}");
+        assert!(msg.contains("/Users/someone/Library/LaunchAgents is not writable"), "{msg}");
+        assert!(msg.contains("Login Items"), "{msg}");
+    }
+
+    #[test]
+    fn other_launch_agent_errors_name_the_file() {
+        let dest = Path::new("/Users/someone/Library/LaunchAgents/dev.anima.server.plist");
+        let e = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        let msg = launch_agent_error(dest, &e).to_string();
+        assert!(msg.starts_with(&format!("cannot write {}", dest.display())), "{msg}");
+        assert!(!msg.contains("administrator"), "{msg}");
     }
 }

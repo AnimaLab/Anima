@@ -7,6 +7,20 @@ pub enum DownloadError {
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 
+    /// A model file could not be fetched. The message says where to put the
+    /// file by hand: machines behind an authenticating proxy, a firewall or
+    /// offline cannot download it, and existing files are never re-fetched.
+    #[error(
+        "could not download {url}: {source}\n\
+         If this machine cannot reach that URL (proxy, firewall, offline), download the \
+         file another way and save it as {dest}; files already present are not downloaded again."
+    )]
+    Fetch {
+        url: String,
+        dest: PathBuf,
+        source: reqwest::Error,
+    },
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -109,14 +123,22 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// on success, so an interrupted download is never mistaken for a complete
 /// file, and multi-GB models are not buffered in memory.
 async fn download_file(url: &str, dest: &Path) -> Result<(), DownloadError> {
-    let mut response = reqwest::get(url).await?.error_for_status()?;
+    let fetch_err = |source: reqwest::Error| DownloadError::Fetch {
+        url: url.to_string(),
+        dest: dest.to_path_buf(),
+        source,
+    };
+    let mut response = reqwest::get(url)
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(fetch_err)?;
 
     let mut part = dest.as_os_str().to_owned();
     part.push(".part");
     let part = PathBuf::from(part);
 
     let mut file = tokio::fs::File::create(&part).await?;
-    while let Some(chunk) = response.chunk().await? {
+    while let Some(chunk) = response.chunk().await.map_err(fetch_err)? {
         file.write_all(&chunk).await?;
     }
     file.flush().await?;
@@ -151,5 +173,21 @@ mod tests {
     #[test]
     fn self_contained_graph_has_no_sidecar() {
         assert!(referenced_sidecars(b"plain graph bytes", "model.onnx").is_empty());
+    }
+
+    /// A failed download must say which file to place by hand and where.
+    #[tokio::test]
+    async fn failed_download_names_the_file_to_place_by_hand() {
+        // Port 1 on loopback: nothing listens, the connection is refused.
+        let url = "http://127.0.0.1:1/org/repo/resolve/main/model.onnx";
+        let dest = std::env::temp_dir().join("anima-download-test-model.onnx");
+
+        let err = download_file(url, &dest).await.unwrap_err();
+
+        assert!(matches!(err, DownloadError::Fetch { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains(url), "{msg}");
+        assert!(msg.contains(&dest.display().to_string()), "{msg}");
+        assert!(!dest.exists());
     }
 }
