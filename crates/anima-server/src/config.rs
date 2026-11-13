@@ -461,8 +461,22 @@ pub struct RerankerConfig {
     /// Max candidate pairs to re-rank. Default 15.
     #[serde(default = "reranker_default_top_n")]
     pub top_n: usize,
+    /// "local" (default, ONNX), or "openai" / "openai_compat": a cross-encoder
+    /// behind an OpenAI-style `/rerank` endpoint (vLLM, TEI, Cohere, Jina, Voyage).
+    #[serde(default = "reranker_default_backend")]
+    pub backend: String,
+    /// Remote backend: base URL, e.g. "https://api.example.com/v1".
+    #[serde(default)]
+    pub api_base_url: Option<String>,
+    /// Remote backend: model name, e.g. "BAAI/bge-reranker-v2-m3".
+    #[serde(default)]
+    pub api_model: Option<String>,
+    /// Remote backend: API key. Falls back to RERANKER_API_KEY env var, then OPENAI_API_KEY env var.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
+fn reranker_default_backend() -> String { "local".into() }
 fn reranker_default_model_dir() -> String { "./models/bge-reranker-v2-m3".into() }
 fn reranker_default_model_url() -> String {
     "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/onnx/model_int8.onnx".into()
@@ -482,6 +496,10 @@ impl Default for RerankerConfig {
             tokenizer_url: reranker_default_tokenizer_url(),
             max_length: reranker_default_max_length(),
             top_n: reranker_default_top_n(),
+            backend: reranker_default_backend(),
+            api_base_url: None,
+            api_model: None,
+            api_key: None,
         }
     }
 }

@@ -138,6 +138,12 @@ model_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resol
 tokenizer_url = "https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/tokenizer.json"
 max_length = 512
 top_n = 10
+# To call a re-ranker served elsewhere (vLLM, TEI, Cohere, Jina, Voyage) through
+# an OpenAI-style /rerank endpoint instead of downloading the model:
+#   backend = "openai_compat"
+#   api_base_url = "https://api.example.com/v1"
+#   api_model = "BAAI/bge-reranker-v2-m3"
+#   api_key = ""  # or set RERANKER_API_KEY env var
 
 # Memory categories with custom decay rates.
 # Use half_life_days — after that many days, a memory's temporal score drops to 50%.
