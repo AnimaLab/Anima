@@ -2411,7 +2411,7 @@ fn search_sync(
                 sparse_scored = if is_exact_ns {
                     crate::sparse::search_sparse(conn, query_sparse, ns_str, candidate_limit)?
                 } else {
-                    crate::sparse::search_sparse_global(conn, query_sparse, candidate_limit)?
+                    crate::sparse::search_sparse_like(conn, query_sparse, &ns_pattern, candidate_limit)?
                 };
             }
             SearchMode::Keyword => {}
@@ -6432,6 +6432,51 @@ mod tests {
                 base + noise
             })
             .collect()
+    }
+
+    /// Security, namespace isolation: for a nested namespace ("work/alpha")
+    /// the sparse leg searched every namespace and nothing filtered its hits
+    /// afterwards, so a search in one namespace returned memories stored in
+    /// another, around ANIMA_NAMESPACE_ACL.
+    #[test]
+    fn sparse_search_stays_inside_a_nested_namespace() {
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let conn = pool.writer().await;
+            let dim = DbPool::DEFAULT_DIMENSION;
+            let sparse = anima_embed::SparseVector(vec![(4242, 1.0)]);
+
+            let inside = insert_test_memory(&conn, "work/alpha", "alpha roadmap", &make_embedding(dim, 1));
+            let child = insert_test_memory(&conn, "work/alpha/q3", "alpha q3 roadmap", &make_embedding(dim, 2));
+            let outside = insert_test_memory(&conn, "personal", "private diary", &make_embedding(dim, 3));
+            for (id, ns) in [(&inside, "work/alpha"), (&child, "work/alpha/q3"), (&outside, "personal")] {
+                crate::sparse::insert_sparse(&conn, id, ns, &sparse).unwrap();
+            }
+
+            let config = ScorerConfig {
+                min_vector_similarity: 0.0,
+                min_score_spread: 0.0,
+                ..Default::default()
+            };
+            let results = search_sync(
+                &conn,
+                &make_embedding(dim, 1),
+                &sparse,
+                "unrelated words",
+                &Namespace::parse("work/alpha").unwrap(),
+                &SearchMode::Hybrid,
+                10,
+                &config,
+                &[("content".to_string(), 1.0)],
+            )
+            .unwrap();
+
+            let ids: Vec<&str> = results.iter().map(|r| r.memory_id.as_str()).collect();
+            assert!(!ids.contains(&outside.as_str()), "memory from another namespace leaked: {ids:?}");
+            assert!(ids.contains(&inside.as_str()), "{ids:?}");
+            assert!(ids.contains(&child.as_str()), "child namespace is part of the tree: {ids:?}");
+        });
     }
 
     #[test]

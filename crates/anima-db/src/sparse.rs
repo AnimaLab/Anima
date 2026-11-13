@@ -108,11 +108,13 @@ pub fn search_sparse(
     Ok(results)
 }
 
-/// Search sparse postings globally (all namespaces), returning (memory_id, score) pairs
-/// sorted by descending dot-product score.
-pub fn search_sparse_global(
+/// Search sparse postings in every namespace matching a SQL LIKE pattern
+/// (a namespace and its children, as `Namespace::like_pattern` builds it),
+/// returning (memory_id, score) pairs sorted by descending dot-product score.
+pub fn search_sparse_like(
     conn: &Connection,
     query_sparse: &SparseVector,
+    namespace_pattern: &str,
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, f64)>> {
     if query_sparse.is_empty() {
@@ -122,15 +124,17 @@ pub fn search_sparse_global(
     let query_weights: HashMap<u32, f32> = query_sparse.0.iter().copied().collect();
     let token_ids: Vec<i64> = query_weights.keys().map(|&k| k as i64).collect();
 
-    let placeholders: Vec<String> = (1..=token_ids.len()).map(|i| format!("?{i}")).collect();
+    // ?1 = namespace pattern, ?2..?N = token_ids
+    let placeholders: Vec<String> = (2..=token_ids.len() + 1).map(|i| format!("?{i}")).collect();
     let sql = format!(
         "SELECT memory_id, token_id, weight FROM sparse_postings
-         WHERE token_id IN ({})
+         WHERE namespace LIKE ?1 AND token_id IN ({})
         ",
         placeholders.join(", ")
     );
 
     let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    sql_params.push(Box::new(namespace_pattern.to_string()));
     for tid in &token_ids {
         sql_params.push(Box::new(*tid));
     }
@@ -237,12 +241,17 @@ mod tests {
         assert_eq!(results_b.len(), 1);
         assert_eq!(results_b[0].0, "m2");
 
-        // Global search returns both
-        let results_global = search_sparse_global(&conn, &query, 10).unwrap();
-        assert_eq!(results_global.len(), 2);
+        // A pattern that covers both namespaces returns both
+        let results_all = search_sparse_like(&conn, &query, "ns_%", 10).unwrap();
+        assert_eq!(results_all.len(), 2);
         // m2 should come first (higher score: 2.0 vs 1.0)
-        assert_eq!(results_global[0].0, "m2");
-        assert_eq!(results_global[1].0, "m1");
+        assert_eq!(results_all[0].0, "m2");
+        assert_eq!(results_all[1].0, "m1");
+
+        // A pattern for one namespace tree returns only that tree
+        let results_like_a = search_sparse_like(&conn, &query, "ns_a%", 10).unwrap();
+        assert_eq!(results_like_a.len(), 1);
+        assert_eq!(results_like_a[0].0, "m1");
     }
 
     #[test]
