@@ -3282,6 +3282,7 @@ pub async fn get_vec_status(
     let sparse_count = state.store.sparse_count().await.unwrap_or(0);
     let memory_count = state.store.active_memory_count().await.unwrap_or(0);
     let sparse_indexed = sparse_count >= memory_count && memory_count > 0;
+    let sparse_enabled = state.embedder.has_sparse();
     match &*status {
         anima_db::vector::VecTableStatus::DimensionMismatch { existing, requested } => {
             Ok(Json(serde_json::json!({
@@ -3289,6 +3290,7 @@ pub async fn get_vec_status(
                 "existing_dimension": existing,
                 "requested_dimension": requested,
                 "needs_reindex": true,
+                "sparse_enabled": sparse_enabled,
                 "sparse_indexed": sparse_indexed,
                 "sparse_count": sparse_count,
                 "memory_count": memory_count,
@@ -3298,6 +3300,7 @@ pub async fn get_vec_status(
             Ok(Json(serde_json::json!({
                 "status": format!("{:?}", other).to_lowercase(),
                 "needs_reindex": false,
+                "sparse_enabled": sparse_enabled,
                 "sparse_indexed": sparse_indexed,
                 "sparse_count": sparse_count,
                 "memory_count": memory_count,

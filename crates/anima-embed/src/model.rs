@@ -187,6 +187,11 @@ impl EmbeddingModel {
         Ok(results)
     }
 
+    /// Whether the sparse weights were loaded, so sparse vectors are computed.
+    pub fn has_sparse(&self) -> bool {
+        self.sparse_weights.is_some()
+    }
+
     pub fn embed_with_sparse(&self, text: &str) -> Result<(Vec<f32>, crate::SparseVector), EmbedError> {
         self.embed_single(text)
     }

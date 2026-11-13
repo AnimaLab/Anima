@@ -74,6 +74,13 @@ pub trait Embedder: Send + Sync {
     fn embed_query_with_sparse(&self, text: &str) -> Result<(Vec<f32>, SparseVector), model::EmbedError> {
         Ok((self.embed_query(text)?, SparseVector::default()))
     }
+
+    /// Whether the `*_with_sparse` calls return real sparse vectors. Only a
+    /// local model with its sparse weights loaded does; the defaults above
+    /// return empty ones.
+    fn has_sparse(&self) -> bool {
+        false
+    }
 }
 
 impl<T: Embedder + ?Sized> Embedder for std::sync::Arc<T> {
@@ -100,6 +107,10 @@ impl<T: Embedder + ?Sized> Embedder for std::sync::Arc<T> {
     fn embed_query_with_sparse(&self, text: &str) -> Result<(Vec<f32>, SparseVector), model::EmbedError> {
         (**self).embed_query_with_sparse(text)
     }
+
+    fn has_sparse(&self) -> bool {
+        (**self).has_sparse()
+    }
 }
 
 impl Embedder for model::EmbeddingModel {
@@ -125,6 +136,10 @@ impl Embedder for model::EmbeddingModel {
 
     fn embed_query_with_sparse(&self, text: &str) -> Result<(Vec<f32>, SparseVector), model::EmbedError> {
         model::EmbeddingModel::embed_query_with_sparse(self, text)
+    }
+
+    fn has_sparse(&self) -> bool {
+        model::EmbeddingModel::has_sparse(self)
     }
 }
 

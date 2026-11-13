@@ -239,6 +239,7 @@ export function SettingsPage() {
     needs_reindex: boolean;
     existing_dimension?: number;
     requested_dimension?: number;
+    sparse_enabled?: boolean;
     sparse_indexed?: boolean;
     sparse_count?: number;
     memory_count?: number;
@@ -443,7 +444,7 @@ export function SettingsPage() {
             </div>
           )}
 
-          {vecStatus && !vecStatus.needs_reindex && vecStatus.sparse_indexed === false && (
+          {vecStatus && !vecStatus.needs_reindex && vecStatus.sparse_enabled !== false && vecStatus.sparse_indexed === false && (
             <div role="alert" className="rounded-xl border border-warm-border bg-warning-light p-5">
               <div className="flex items-start gap-3">
                 <AlertTriangle size={18} className="text-warning shrink-0 mt-0.5" />
