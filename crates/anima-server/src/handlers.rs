@@ -6432,7 +6432,9 @@ pub async fn get_telemetry_config(
     State(state): State<Arc<AppState>>,
 ) -> Json<serde_json::Value> {
     Json(serde_json::json!({
-        "enabled": state.telemetry_enabled()
+        "enabled": state.telemetry_enabled(),
+        // true when config.toml has [telemetry] enabled = false: the UI cannot turn it on.
+        "locked": !state.config.telemetry.enabled,
     }))
 }
 
@@ -6447,16 +6449,40 @@ pub async fn set_telemetry_config(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SetTelemetryConfigRequest>,
 ) -> Json<serde_json::Value> {
-    state
-        .telemetry_enabled
-        .store(body.enabled, std::sync::atomic::Ordering::Relaxed);
-
     if let Some(flags) = body.feature_flags {
         let mut current = state.telemetry_feature_flags.write().await;
         *current = flags;
     }
 
-    Json(serde_json::json!({"updated": true}))
+    // config.toml's `enabled = false` is final: the reporting loop is not even
+    // running, so turning it on here would only pretend.
+    if !state.config.telemetry.enabled {
+        return Json(serde_json::json!({
+            "updated": false,
+            "enabled": false,
+            "locked": true,
+        }));
+    }
+
+    state
+        .telemetry_enabled
+        .store(body.enabled, std::sync::atomic::Ordering::Relaxed);
+
+    // Keep the choice across restarts.
+    let persisted = match crate::telemetry::persist_choice(&crate::telemetry::anima_dir(), body.enabled) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("Could not save the telemetry choice; it lasts until restart: {e}");
+            false
+        }
+    };
+
+    Json(serde_json::json!({
+        "updated": true,
+        "enabled": body.enabled,
+        "persisted": persisted,
+        "locked": false,
+    }))
 }
 
 // ── Backup / Restore ──────────────────────────────────────────────

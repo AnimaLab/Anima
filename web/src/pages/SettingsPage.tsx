@@ -152,6 +152,7 @@ export function SettingsPage() {
   const [modelError, setModelError] = useState<string | null>(null)
   const [cognitive, setCognitiveState] = useState<CognitiveConfig>(loadCognitiveConfig)
   const [telemetryEnabled, setTelemetryEnabled] = useState(true)
+  const [telemetryLocked, setTelemetryLocked] = useState(false)
   const [profiles, setProfiles] = useState<ProfilesResponse | null>(null)
   const setCognitive = (cfg: CognitiveConfig) => {
     setCognitiveState(cfg)
@@ -200,7 +201,12 @@ export function SettingsPage() {
   useEffect(() => { refreshNamespaces() }, [])
 
   useEffect(() => { api.getProfiles().then(setProfiles).catch(() => {}) }, [])
-  useEffect(() => { api.getTelemetryConfig().then(res => setTelemetryEnabled(res.enabled)).catch(() => {}) }, [])
+  useEffect(() => {
+    api.getTelemetryConfig().then(res => {
+      setTelemetryEnabled(res.enabled)
+      setTelemetryLocked(res.locked ?? false)
+    }).catch(() => {})
+  }, [])
 
   const toggleTelemetry = (enabled: boolean) => {
     setTelemetryEnabled(enabled)
@@ -211,8 +217,15 @@ export function SettingsPage() {
       reflection_enabled: cognitive.reflection_enabled,
       deduction_enabled: cognitive.deduction_enabled,
       induction_enabled: cognitive.induction_enabled,
-    }).catch(() => {})
-    showToast(enabled ? 'Telemetry enabled' : 'Telemetry disabled')
+    }).then(res => {
+      // The server has the last word: config.toml can keep telemetry off.
+      const actual = res.enabled ?? enabled
+      setTelemetryEnabled(actual)
+      setTelemetryLocked(res.locked ?? false)
+      if (res.locked) showToast('Telemetry is turned off in config.toml')
+      else if (res.persisted === false) showToast(actual ? 'Telemetry enabled until restart' : 'Telemetry disabled until restart')
+      else showToast(actual ? 'Telemetry enabled' : 'Telemetry disabled')
+    }).catch(() => showToast('Could not change telemetry'))
   }
 
   const [backupLoading, setBackupLoading] = useState<'json' | 'sqlite' | null>(null)
@@ -722,9 +735,12 @@ export function SettingsPage() {
           <Section id="privacy" title="Privacy" description="What this server reports back to the Anima project.">
             <ToggleRow
               label="Anonymous telemetry"
-              description="Model names, memory counts, OS info. No personal data. Lasts until the server restarts; edit config.toml to make it permanent."
+              description={telemetryLocked
+                ? 'Turned off in config.toml ([telemetry] enabled = false).'
+                : 'Model names, memory counts, OS info. No personal data. Your choice is kept across restarts.'}
               checked={telemetryEnabled}
               onChange={toggleTelemetry}
+              disabled={telemetryLocked}
             />
           </Section>
 

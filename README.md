@@ -539,8 +539,9 @@ Telemetry is **on by default**. To turn it off, set this in `config.toml`:
 enabled = false
 ```
 
-The Settings page in the web UI can also switch it off, but only until the
-next restart.
+The Settings page in the web UI can also switch it off or back on. The choice
+is kept across restarts in `~/.anima/telemetry_opt_out`. With `enabled = false`
+in `config.toml`, telemetry stays off and the switch is greyed out.
 
 ## License
 

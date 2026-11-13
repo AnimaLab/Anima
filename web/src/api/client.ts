@@ -288,10 +288,10 @@ export const api = {
 
   // Telemetry
   getTelemetryConfig: () =>
-    request<{ enabled: boolean }>('/api/v1/telemetry/config'),
+    request<{ enabled: boolean; locked?: boolean }>('/api/v1/telemetry/config'),
 
   setTelemetryConfig: (enabled: boolean, featureFlags?: Record<string, boolean>) =>
-    request<{ updated: boolean }>('/api/v1/telemetry/config', {
+    request<{ updated: boolean; enabled?: boolean; persisted?: boolean; locked?: boolean }>('/api/v1/telemetry/config', {
       method: 'PUT',
       body: JSON.stringify({ enabled, feature_flags: featureFlags }),
     }),
