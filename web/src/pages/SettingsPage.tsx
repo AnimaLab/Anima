@@ -149,7 +149,14 @@ export function SettingsPage() {
   const [modelDraft, setModelDraft] = useState<ModelFields>(() => pickModelFields(config))
   const modelDirty = JSON.stringify(modelDraft) !== JSON.stringify(pickModelFields(config))
   const saveModel = () => {
-    setConfigRaw({ ...config, ...modelDraft })
+    const saved = {
+      ...modelDraft,
+      base_url: modelDraft.base_url.trim(),
+      model: modelDraft.model.trim(),
+      api_key: modelDraft.api_key?.trim() || undefined,
+    }
+    setModelDraft(saved)
+    setConfigRaw({ ...config, ...saved })
     showToast('Chat model saved')
   }
   const setNamespace = (ns: string) => { setNamespaceRaw(ns); showToast(`Switched to ${ns}`) }
