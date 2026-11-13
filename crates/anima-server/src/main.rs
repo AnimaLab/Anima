@@ -168,7 +168,11 @@ async fn main() -> anyhow::Result<()> {
                 "Using OpenAI-compatible embedding: model={}, dim={}, base_url={}",
                 model, config.embedding.dimension, base_url
             );
-            Arc::new(OpenAiEmbedder::new(base_url, model, api_key, config.embedding.dimension))
+            Arc::new(
+                OpenAiEmbedder::new(base_url, model, api_key, config.embedding.dimension)
+                    .with_query_instruction(config.embedding.query_instruction.clone())
+                    .with_request_dimensions(config.embedding.request_dimensions),
+            )
         }
         _ => {
             // Local ONNX backend (default)

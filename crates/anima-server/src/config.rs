@@ -248,7 +248,15 @@ pub struct EmbeddingConfig {
     /// API key. Falls back to EMBEDDING_API_KEY env var, then OPENAI_API_KEY env var.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Send `dimensions` in each request (default true). Set false for models
+    /// that reject it, such as `text-embedding-ada-002` or models without
+    /// Matryoshka support served by vLLM. `dimension` must then be the model's
+    /// native size.
+    #[serde(default = "embedding_default_request_dimensions")]
+    pub request_dimensions: bool,
 }
+
+fn embedding_default_request_dimensions() -> bool { true }
 
 fn default_embedding_backend() -> String {
     "local".into()
@@ -523,6 +531,7 @@ impl Default for AppConfig {
                 api_base_url: None,
                 api_model: None,
                 api_key: None,
+                request_dimensions: true,
             },
             search: SearchConfig {
                 rrf_k: 10.0,

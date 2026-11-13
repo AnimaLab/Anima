@@ -51,6 +51,10 @@ pooling = "mean"
 #   api_model = "voyage-3-large"
 #   api_key = ""  # or set EMBEDDING_API_KEY env var
 #   dimension = 1024
+# Remote backends send `dimensions` with each request. For a model that rejects
+# it (text-embedding-ada-002, a non-Matryoshka model on vLLM), add:
+#   request_dimensions = false   # and set dimension to the model's native size
+# query_instruction (above) also applies to remote backends.
 
 [sparse]
 enabled = true

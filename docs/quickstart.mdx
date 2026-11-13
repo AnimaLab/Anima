@@ -143,6 +143,11 @@ dimension = 1024
 
 Works with OpenAI, Cohere, Voyage, Together, vLLM, or any OpenAI-compatible endpoint.
 
+`query_instruction` is prepended to search queries, as with the local backend.
+Anima sends `dimensions` with each request; set `request_dimensions = false` for
+models that reject it (such as `text-embedding-ada-002`, or a model without
+Matryoshka support served by vLLM), with `dimension` set to the model's native size.
+
 <Warning>
   Switching embedding backends on an existing database produces incompatible vectors. Start with a fresh database when changing backends.
 </Warning>
