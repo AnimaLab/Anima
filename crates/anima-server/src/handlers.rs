@@ -3755,7 +3755,7 @@ fn procedure_confidence_hint(fn_name: &str, args: &serde_json::Value) -> f64 {
     };
 
     let base: f64 = match fn_name {
-        "memory_search" => 0.84,
+        "memory_search" | "memory_recent" => 0.84,
         "memory_add" => 0.79,
         "memory_update" => 0.78,
         _ => 0.55,
@@ -4120,7 +4120,7 @@ async fn chat_tool_mode(
             "type": "function",
             "function": {
                 "name": "memory_search",
-                "description": "Search the user's personal memory store. Call this PROACTIVELY to recall facts, preferences, relationships, or history about the user. Use short focused queries like 'diet', 'job', 'pets'. Always search before answering personal questions.",
+                "description": "Search the user's personal memory store. Call this PROACTIVELY to recall facts, preferences, relationships, or history about the user. Use short focused queries like 'diet', 'job', 'pets'. Always search before answering personal questions. To see what is stored without a topic, use memory_recent.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -4133,6 +4133,7 @@ async fn chat_tool_mode(
                 }
             }
         }),
+        memory_recent_tool(),
         serde_json::json!({
             "type": "function",
             "function": {
@@ -4276,6 +4277,15 @@ async fn chat_tool_mode(
                             Err(e) => format!("Error searching memories: {e}"),
                         }
                     }
+                    "memory_recent" => {
+                        match handle_tool_recent(state, ns, recent_tool_limit(&args)).await {
+                            Ok((text, contexts)) => {
+                                memories_used.extend(contexts);
+                                text
+                            }
+                            Err(e) => format!("Error listing memories: {e}"),
+                        }
+                    }
                     "memory_add" => {
                         let content = args["content"].as_str().unwrap_or("");
                         match handle_tool_add(state, ns, content, vec![]).await {
@@ -4340,6 +4350,63 @@ async fn chat_tool_mode(
         "tool".into(),
         tool_degraded,
     )))
+}
+
+/// The chat tool that lists the latest memories, for questions no search query
+/// expresses ("what do you remember?", "what's new?").
+fn memory_recent_tool() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "memory_recent",
+            "description": "List the most recently stored memories about the user, newest first. Use it when the user asks what you remember, what is new, or for an overview, rather than about a specific topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many memories to list (1 to 30, default 10)"
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// The `limit` of a memory_recent call: 10 by default, at most 30.
+fn recent_tool_limit(args: &serde_json::Value) -> usize {
+    args.get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.clamp(1, 30) as usize)
+        .unwrap_or(10)
+}
+
+async fn handle_tool_recent(
+    state: &AppState,
+    ns: &anima_core::namespace::Namespace,
+    limit: usize,
+) -> Result<(String, Vec<MemoryContext>), AppError> {
+    let (memories, total) = state.store.list(ns, Some("active"), None, None, 0, limit).await?;
+    if memories.is_empty() {
+        return Ok(("No memories are stored yet.".to_string(), Vec::new()));
+    }
+    let lines: Vec<String> = memories
+        .iter()
+        .map(|m| format!("- [{}] {} ({}, id: {})", m.created_at.format("%Y-%m-%d"), m.content, m.memory_type, m.id))
+        .collect();
+    let text = format!("The {} most recent of {} memories:\n{}", memories.len(), total, lines.join("\n"));
+    let contexts = memories
+        .into_iter()
+        .map(|m| MemoryContext {
+            id: m.id,
+            content: m.content,
+            score: 1.0,
+            source: Some("recent".into()),
+            memory_type: m.memory_type,
+            importance: m.importance,
+        })
+        .collect();
+    Ok((text, contexts))
 }
 
 async fn handle_tool_search(
@@ -5494,6 +5561,17 @@ mod tests {
         assert_eq!(usable_api_key(None), None);
     }
 
+    use super::recent_tool_limit;
+
+    #[test]
+    fn recent_tool_limit_defaults_and_clamps() {
+        assert_eq!(recent_tool_limit(&serde_json::json!({})), 10);
+        assert_eq!(recent_tool_limit(&serde_json::json!({"limit": 0})), 1);
+        assert_eq!(recent_tool_limit(&serde_json::json!({"limit": 5})), 5);
+        assert_eq!(recent_tool_limit(&serde_json::json!({"limit": 500})), 30);
+        assert_eq!(recent_tool_limit(&serde_json::json!({"limit": "x"})), 10);
+    }
+
     use super::*;
     use std::sync::Mutex;
 
@@ -5824,7 +5902,7 @@ pub async fn chat_stream(
                 "type": "function",
                 "function": {
                     "name": "memory_search",
-                    "description": "Search the user's personal memory store. Call this PROACTIVELY to recall facts, preferences, relationships, or history about the user. Use short focused queries like 'diet', 'job', 'pets'. Always search before answering personal questions.",
+                    "description": "Search the user's personal memory store. Call this PROACTIVELY to recall facts, preferences, relationships, or history about the user. Use short focused queries like 'diet', 'job', 'pets'. Always search before answering personal questions. To see what is stored without a topic, use memory_recent.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -5837,6 +5915,7 @@ pub async fn chat_stream(
                     }
                 }
             }),
+            memory_recent_tool(),
             serde_json::json!({
                 "type": "function",
                 "function": {
@@ -6123,6 +6202,7 @@ pub async fn chat_stream(
                             let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("?");
                             format!("Searching for \"{}\"", query)
                         }
+                        "memory_recent" => "Listing recent memories".to_string(),
                         "memory_add" => {
                             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
                             let preview = if content.len() > 60 { format!("{}...", &content[..60]) } else { content.to_string() };
@@ -6154,19 +6234,33 @@ pub async fn chat_stream(
                     "memory_search" => {
                         let query = args["query"].as_str().unwrap_or("");
                         match handle_tool_search(&state_clone, &ns_clone, query).await {
-                            Ok((text, _contexts)) => {
+                            Ok((text, contexts)) => {
                                 // Emit updated action with result count
-                                let n_results = text.lines().filter(|l| !l.is_empty()).count();
+                                let n_results = contexts.len();
                                 let result_action = serde_json::json!({
                                     "type": "action",
                                     "tool": "memory_search",
                                     "query": query,
-                                    "summary": format!("Searched \"{}\" — found {} results", query, n_results),
+                                    "summary": format!("Searched \"{}\" — found {} result{}", query, n_results, if n_results == 1 { "" } else { "s" }),
                                 });
                                 yield Ok(Event::default().data(result_action.to_string()));
                                 text
                             }
                             Err(e) => format!("Error searching memories: {e}"),
+                        }
+                    }
+                    "memory_recent" => {
+                        match handle_tool_recent(&state_clone, &ns_clone, recent_tool_limit(&args)).await {
+                            Ok((text, contexts)) => {
+                                let result_action = serde_json::json!({
+                                    "type": "action",
+                                    "tool": "memory_recent",
+                                    "summary": format!("Listed {} recent memor{}", contexts.len(), if contexts.len() == 1 { "y" } else { "ies" }),
+                                });
+                                yield Ok(Event::default().data(result_action.to_string()));
+                                text
+                            }
+                            Err(e) => format!("Error listing memories: {e}"),
                         }
                     }
                     "memory_add" => {
