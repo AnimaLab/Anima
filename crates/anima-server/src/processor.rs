@@ -105,8 +105,12 @@ struct DeductionRunResult {
     usage: LlmStageUsage,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct InductionRunResult {
+    /// Facts given to the model.
+    facts_used: usize,
+    /// Patterns written back.
+    induced: usize,
     usage: LlmStageUsage,
 }
 
@@ -585,9 +589,9 @@ async fn run_worker(
                             status: "completed".to_string(),
                             input_count: input_count as i64,
                             output_count: reflected_ids.len() as i64,
-                            prompt_tokens: reflection_prompt_tokens.load(Ordering::Relaxed) as i64,
-                            completion_tokens: reflection_completion_tokens.load(Ordering::Relaxed) as i64,
-                            total_tokens: reflection_total_tokens.load(Ordering::Relaxed) as i64,
+                            prompt_tokens: reflection.usage.prompt_tokens as i64,
+                            completion_tokens: reflection.usage.completion_tokens as i64,
+                            total_tokens: reflection.usage.total_tokens as i64,
                             elapsed_ms: reflect_elapsed,
                             details: Some(serde_json::json!({"facts": reflected_ids.len()})),
                             created_at: chrono::Utc::now().to_rfc3339(),
@@ -614,8 +618,23 @@ async fn run_worker(
                         }
                         if reflected_ids.len() >= 2 {
                             tracing::info!("Auto-triggering deduction on {} reflected facts", reflected_ids.len());
+                            let deduce_start = std::time::Instant::now();
                             match process_deduction(&store, &embedder, &llm, &namespace, &reflected_ids).await {
                                 Ok(deduction) => {
+                                    let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        namespace: namespace.clone(),
+                                        pipeline: "deduction".to_string(),
+                                        status: "completed".to_string(),
+                                        input_count: reflected_ids.len() as i64,
+                                        output_count: deduction.deduced_ids.len() as i64,
+                                        prompt_tokens: deduction.usage.prompt_tokens as i64,
+                                        completion_tokens: deduction.usage.completion_tokens as i64,
+                                        total_tokens: deduction.usage.total_tokens as i64,
+                                        elapsed_ms: deduce_start.elapsed().as_secs_f64() * 1000.0,
+                                        details: Some(serde_json::json!({"deductions": deduction.deduced_ids.len(), "trigger": "after_reflection"})),
+                                        created_at: chrono::Utc::now().to_rfc3339(),
+                                    }).await;
                                     apply_usage_metrics(
                                         deduction.usage,
                                         &llm_calls,
@@ -651,6 +670,20 @@ async fn run_worker(
                                 Err(e) => {
                                     job_failed = true;
                                     tracing::error!("Deduction failed for {namespace}: {e}");
+                                    let _ = store.insert_processor_log(&anima_db::store::ProcessorLogEntry {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        namespace: namespace.clone(),
+                                        pipeline: "deduction".to_string(),
+                                        status: "failed".to_string(),
+                                        input_count: reflected_ids.len() as i64,
+                                        output_count: 0,
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        total_tokens: 0,
+                                        elapsed_ms: deduce_start.elapsed().as_secs_f64() * 1000.0,
+                                        details: Some(serde_json::json!({"error": e.to_string(), "trigger": "after_reflection"})),
+                                        created_at: chrono::Utc::now().to_rfc3339(),
+                                    }).await;
                                 }
                             }
                         }
@@ -704,9 +737,9 @@ async fn run_worker(
                             status: "completed".to_string(),
                             input_count: deduce_input_count as i64,
                             output_count: deduced_ids.len() as i64,
-                            prompt_tokens: deduction_prompt_tokens.load(Ordering::Relaxed) as i64,
-                            completion_tokens: deduction_completion_tokens.load(Ordering::Relaxed) as i64,
-                            total_tokens: deduction_total_tokens.load(Ordering::Relaxed) as i64,
+                            prompt_tokens: deduction.usage.prompt_tokens as i64,
+                            completion_tokens: deduction.usage.completion_tokens as i64,
+                            total_tokens: deduction.usage.total_tokens as i64,
                             elapsed_ms: deduce_start.elapsed().as_secs_f64() * 1000.0,
                             details: Some(serde_json::json!({"deductions": deduced_ids.len()})),
                             created_at: chrono::Utc::now().to_rfc3339(),
@@ -773,11 +806,11 @@ async fn run_worker(
                             namespace: namespace.clone(),
                             pipeline: "induction".to_string(),
                             status: "completed".to_string(),
-                            input_count: 0,
-                            output_count: 0,
-                            prompt_tokens: induction_prompt_tokens.load(Ordering::Relaxed) as i64,
-                            completion_tokens: induction_completion_tokens.load(Ordering::Relaxed) as i64,
-                            total_tokens: induction_total_tokens.load(Ordering::Relaxed) as i64,
+                            input_count: induction.facts_used as i64,
+                            output_count: induction.induced as i64,
+                            prompt_tokens: induction.usage.prompt_tokens as i64,
+                            completion_tokens: induction.usage.completion_tokens as i64,
+                            total_tokens: induction.usage.total_tokens as i64,
                             elapsed_ms: induce_elapsed,
                             details: None,
                             created_at: chrono::Utc::now().to_rfc3339(),
@@ -1036,11 +1069,11 @@ async fn run_worker(
                             namespace: ns.clone(),
                             pipeline: "induction".to_string(),
                             status: "completed".to_string(),
-                            input_count: count as i64,
-                            output_count: 0,
-                            prompt_tokens: induction_prompt_tokens.load(Ordering::Relaxed) as i64,
-                            completion_tokens: induction_completion_tokens.load(Ordering::Relaxed) as i64,
-                            total_tokens: induction_total_tokens.load(Ordering::Relaxed) as i64,
+                            input_count: induction.facts_used as i64,
+                            output_count: induction.induced as i64,
+                            prompt_tokens: induction.usage.prompt_tokens as i64,
+                            completion_tokens: induction.usage.completion_tokens as i64,
+                            total_tokens: induction.usage.total_tokens as i64,
                             elapsed_ms: auto_induce_elapsed,
                             details: Some(serde_json::json!({"trigger": "queue_drained", "new_deduced": count})),
                             created_at: chrono::Utc::now().to_rfc3339(),
@@ -2600,7 +2633,7 @@ async fn process_induction(
 
     if all_facts.len() < 5 {
         tracing::info!("Skipping induction for {namespace}: only {} facts", all_facts.len());
-        return Ok(InductionRunResult { usage });
+        return Ok(InductionRunResult { usage, ..Default::default() });
     }
 
     // Check if existing induced memories already cover this fact pool.
@@ -2622,7 +2655,7 @@ async fn process_induction(
             "Skipping induction for {namespace}: {} facts (last run used {}, threshold {})",
             all_facts.len(), prev_facts_used, min_new_count
         );
-        return Ok(InductionRunResult { usage });
+        return Ok(InductionRunResult { usage, ..Default::default() });
     }
 
     tracing::info!(
@@ -2644,7 +2677,7 @@ async fn process_induction(
             "Skipping induction for {namespace}: only {} compressed facts after dedup",
             facts_used_count
         );
-        return Ok(InductionRunResult { usage });
+        return Ok(InductionRunResult { usage, ..Default::default() });
     }
 
     let prompt = build_induction_prompt(&prompt_facts);
@@ -2653,7 +2686,7 @@ async fn process_induction(
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("LLM induction call failed: {e}");
-            return Ok(InductionRunResult { usage });
+            return Ok(InductionRunResult { usage, ..Default::default() });
         }
     };
     usage.record_call(completion.usage);
@@ -2663,7 +2696,7 @@ async fn process_induction(
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("Failed to parse induction response: {e}");
-            return Ok(InductionRunResult { usage });
+            return Ok(InductionRunResult { usage, ..Default::default() });
         }
     };
 
@@ -2766,7 +2799,11 @@ async fn process_induction(
         facts_used_count
     );
 
-    Ok(InductionRunResult { usage })
+    Ok(InductionRunResult {
+        facts_used: facts_used_count,
+        induced: patterns.len(),
+        usage,
+    })
 }
 
 fn build_induction_prompt(facts: &[PromptFact]) -> String {
