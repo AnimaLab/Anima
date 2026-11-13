@@ -42,8 +42,8 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
   return (
     <div className="relative shrink-0">
       <input type="checkbox" role="switch" checked={checked} onChange={e => onChange(e.target.checked)} disabled={disabled} className="sr-only peer" />
-      <div className={`w-9 h-5 rounded-full transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent ${disabled ? 'bg-accent opacity-60' : 'bg-warm-border-strong peer-checked:bg-accent'}`} />
-      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-card shadow-sm transition-transform ${disabled ? 'translate-x-4' : 'peer-checked:translate-x-4'}`} />
+      <div className={`w-9 h-5 rounded-full transition-colors bg-warm-border-strong peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent ${disabled ? 'opacity-60' : ''}`} />
+      <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-card shadow-sm transition-transform peer-checked:translate-x-4" />
     </div>
   )
 }
