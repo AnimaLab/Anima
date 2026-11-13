@@ -2,6 +2,11 @@ use crate::error::CoreError;
 
 /// Hierarchical namespace: "org/project/user/agent"
 /// Each segment is validated (non-empty, alphanumeric + hyphens + underscores).
+///
+/// Queries scope a namespace to its tree: the namespace itself and its
+/// descendants, matched in SQL as `(namespace = ?N OR namespace GLOB ?N || '/*')`.
+/// GLOB is case-sensitive and none of its special characters (`*`, `?`, `[`)
+/// can appear in a namespace, so the namespace needs no escaping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Namespace(String);
 
@@ -31,12 +36,6 @@ impl Namespace {
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// Returns a LIKE pattern for prefix matching: "org/project" -> "org/project/%"
-    /// For exact match, returns the namespace itself.
-    pub fn like_pattern(&self) -> String {
-        format!("{}%", self.0)
     }
 
     /// Returns the depth (number of segments).
@@ -69,12 +68,6 @@ mod tests {
         assert!(Namespace::parse("   ").is_err());
         assert!(Namespace::parse("org//project").is_err());
         assert!(Namespace::parse("org/proj ect").is_err());
-    }
-
-    #[test]
-    fn test_like_pattern() {
-        let ns = Namespace::parse("org/project").unwrap();
-        assert_eq!(ns.like_pattern(), "org/project%");
     }
 
     #[test]

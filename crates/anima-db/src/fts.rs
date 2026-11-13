@@ -29,7 +29,7 @@ pub fn delete_fts(conn: &Connection, memory_id: &str) -> rusqlite::Result<()> {
 pub fn search_fts(
     conn: &Connection,
     query: &str,
-    namespace_pattern: &str,
+    namespace_scope: &str,
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, f64)>> {
     let sanitized = sanitize_fts_query(query);
@@ -43,14 +43,14 @@ pub fn search_fts(
          FROM fts_memories f
          JOIN memories m ON f.memory_id = m.id
          WHERE fts_memories MATCH ?1
-           AND m.namespace LIKE ?2
+           AND (m.namespace = ?2 OR m.namespace GLOB ?2 || '/*')
            AND m.status = 'active'
          ORDER BY rank
          LIMIT ?3",
     )?;
 
     let rows = stmt.query_map(
-        rusqlite::params![sanitized, namespace_pattern, limit as i64],
+        rusqlite::params![sanitized, namespace_scope, limit as i64],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
     )?;
 
