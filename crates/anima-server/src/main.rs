@@ -449,7 +449,9 @@ async fn start_server(
         processor: bg_processor,
         scorer_config: tokio::sync::RwLock::new(scorer_config),
         reranker,
-        telemetry_enabled: std::sync::atomic::AtomicBool::new(config.telemetry.enabled),
+        telemetry_enabled: std::sync::atomic::AtomicBool::new(
+            config.telemetry.enabled && !telemetry::opted_out(&telemetry::anima_dir()),
+        ),
         telemetry_feature_flags: tokio::sync::RwLock::new(telemetry::FeatureFlags::default()),
         config: config.clone(),
         resolved_profiles,

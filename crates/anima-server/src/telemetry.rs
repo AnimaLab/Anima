@@ -198,6 +198,7 @@ pub async fn collect_payload(state: &AppState) -> TelemetryPayload {
 pub fn spawn_telemetry_loop(state: Arc<AppState>) {
     let endpoint = state.config.telemetry.endpoint.clone();
     let interval_secs = state.config.telemetry.interval_secs.max(60);
+    let enabled_at_start = state.telemetry_enabled();
 
     tokio::spawn(async move {
         // Initial delay to let the server stabilize
@@ -229,8 +230,73 @@ pub fn spawn_telemetry_loop(state: Arc<AppState>) {
         }
     });
 
-    tracing::info!(
-        "Anima collects anonymous usage telemetry (model names, memory counts, OS info — never content or keys). \
-         To opt out, set [telemetry] enabled = false in config.toml or toggle it in the web UI Settings page."
-    );
+    if enabled_at_start {
+        tracing::info!(
+            "Anima collects anonymous usage telemetry (model names, memory counts, OS info — never content or keys). \
+             To opt out, set [telemetry] enabled = false in config.toml or toggle it in the web UI Settings page."
+        );
+    } else {
+        tracing::info!(
+            "Telemetry turned off from the web UI ({}); turn it back on there",
+            opt_out_path(&anima_dir()).display()
+        );
+    }
+}
+
+// ── Opt-out chosen in the web UI ──────────────────────────────
+
+/// Per-user folder that already holds the telemetry ID.
+pub fn anima_dir() -> std::path::PathBuf {
+    home_dir().join(".anima")
+}
+
+/// Marker file whose presence records an opt-out made in the web UI, so the
+/// choice survives restarts. `[telemetry] enabled = false` in config.toml
+/// still overrides everything.
+fn opt_out_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join("telemetry_opt_out")
+}
+
+/// Whether the web UI turned telemetry off.
+pub fn opted_out(dir: &std::path::Path) -> bool {
+    opt_out_path(dir).exists()
+}
+
+/// Record the web UI's choice: create the marker to opt out, remove it to opt in.
+pub fn persist_choice(dir: &std::path::Path, enabled: bool) -> std::io::Result<()> {
+    let path = opt_out_path(dir);
+    if enabled {
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        std::fs::create_dir_all(dir)?;
+        std::fs::write(
+            &path,
+            "Anonymous telemetry was turned off from the Anima web UI.\n\
+             Turn it back on there, or delete this file.\n",
+        )
+    }
+}
+
+#[cfg(test)]
+mod opt_out_tests {
+    use super::*;
+
+    #[test]
+    fn opt_out_survives_and_opt_in_clears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().join("nested");
+        assert!(!opted_out(&dir));
+
+        persist_choice(&dir, false).unwrap();
+        assert!(opted_out(&dir), "opt-out must be on disk for the next start");
+
+        persist_choice(&dir, true).unwrap();
+        assert!(!opted_out(&dir));
+
+        // Opting in twice is not an error.
+        persist_choice(&dir, true).unwrap();
+    }
 }
