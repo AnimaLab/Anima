@@ -244,6 +244,10 @@ async fn main() -> anyhow::Result<()> {
             Arc::new(embedder)
         }
     };
+    // Handlers and processor tasks call the embedder synchronously; keep that
+    // work from holding the async workers (see anima_embed::offload).
+    let embedder: Arc<dyn Embedder> =
+        Arc::new(anima_embed::offload::OffloadingEmbedder(embedder));
 
     // 3. Consolidation LLM (optional — warn but don't fail)
     let consolidator = if config.consolidation.enabled {

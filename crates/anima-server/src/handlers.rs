@@ -1717,7 +1717,7 @@ pub async fn search_memories(
                 contents.push(content);
             }
             let doc_refs: Vec<&str> = contents.iter().map(|s| s.as_str()).collect();
-            match reranker.score_pairs(&req.query, &doc_refs) {
+            match anima_embed::offload::offload_blocking(|| reranker.score_pairs(&req.query, &doc_refs)) {
                 Ok(rerank_scores) => {
                     for (i, score) in rerank_scores.iter().enumerate() {
                         if i < scored.len() {
