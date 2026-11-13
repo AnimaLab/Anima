@@ -90,6 +90,10 @@ jobs:
           cp LICENSE "${ARCHIVE_NAME}/"
           cp README.md "${ARCHIVE_NAME}/"
           cp -r service/ "${ARCHIVE_NAME}/service/"
+          # BGE-M3 sparse head (4 KB). The server never downloads it and only
+          # uses sparse retrieval when it sits at [sparse] weights_path.
+          mkdir -p "${ARCHIVE_NAME}/models/bge-m3"
+          cp models/bge-m3/sparse_linear.bin "${ARCHIVE_NAME}/models/bge-m3/"
           mkdir -p "${ARCHIVE_NAME}/web"
           cp -r web/dist "${ARCHIVE_NAME}/web/dist"
 
