@@ -41,15 +41,18 @@ export default function App() {
 
   // Chat state lifted to App so it survives tab switches
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([])
-  const [chatMode, setChatMode] = useState<'rag' | 'tool'>('rag')
+  // Memory tools are on by default: without them the model cannot look
+  // anything up beyond what Recall found for the message.
   const [chatFeatures, setChatFeatures] = useState<ChatFeatures>(() => {
     try {
       const saved = localStorage.getItem('anima-chat-features')
-      return saved ? JSON.parse(saved) : { recall: true, tools: false }
+      return saved ? JSON.parse(saved) : { recall: true, tools: true }
     } catch {
-      return { recall: true, tools: false }
+      return { recall: true, tools: true }
     }
   })
+  // Follows the saved features from the first render, not only after a toggle.
+  const [chatMode, setChatMode] = useState<'rag' | 'tool'>(() => chatFeatures.tools ? 'tool' : 'rag')
   const setChatFeaturesAndSave = useCallback((f: ChatFeatures) => {
     setChatFeatures(f)
     localStorage.setItem('anima-chat-features', JSON.stringify(f))
@@ -106,7 +109,8 @@ export default function App() {
   const messagesRef = useRef(chatMessages)
   messagesRef.current = chatMessages
   const modeRef = useRef(chatMode)
-  modeRef.current = chatMode
+  // A model whose "Tool use" capability is off is never sent the tools.
+  modeRef.current = chatConfig.tool_use === false ? 'rag' : chatMode
   const configRef = useRef(chatConfig)
   configRef.current = chatConfig
   const convIdRef = useRef(conversationId)
