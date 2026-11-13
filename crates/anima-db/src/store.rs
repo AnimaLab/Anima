@@ -3798,12 +3798,11 @@ fn find_contradictions_for_memories_sync(
     );
     let mut stmt = conn.prepare(&sql).map_err(DbError::Sqlite)?;
 
-    // Build params: namespace pattern + memory_ids twice (for both IN clauses)
+    // Build params: namespace pattern, then each memory id once. Both IN
+    // clauses use the same numbered placeholders (?2..), so binding the ids a
+    // second time makes SQLite reject the statement.
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     params_vec.push(Box::new(ns_pattern));
-    for id in memory_ids {
-        params_vec.push(Box::new(id.clone()));
-    }
     for id in memory_ids {
         params_vec.push(Box::new(id.clone()));
     }
@@ -6705,6 +6704,51 @@ mod tests {
                 "calibrated top score should be compressed, got {}",
                 results[0].score
             );
+        });
+    }
+
+    /// Regression, v0.3.0: the ids were bound twice for placeholders used by
+    /// both IN clauses, so every call failed with "Wrong number of parameters"
+    /// and /ask always returned an empty `conflicts`.
+    #[test]
+    fn contradictions_are_found_for_retrieved_memories() {
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let store = MemoryStore::new(pool.clone());
+            let dim = DbPool::DEFAULT_DIMENSION;
+            let ns = Namespace::parse("test/conflicts").unwrap();
+            let (old_id, new_id, other_id) = {
+                let conn = pool.writer().await;
+                (
+                    insert_test_memory(&conn, ns.as_str(), "User lives in Portland", &make_embedding(dim, 1)),
+                    insert_test_memory(&conn, ns.as_str(), "User moved to Seattle", &make_embedding(dim, 2)),
+                    insert_test_memory(&conn, ns.as_str(), "User likes tea", &make_embedding(dim, 3)),
+                )
+            };
+            store
+                .record_contradiction_resolution(&ns, &old_id, &new_id, "supersede", None)
+                .await
+                .unwrap();
+
+            let found = store
+                .find_contradictions_for_memories(&ns, &[new_id.clone()])
+                .await
+                .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].old_memory_id, old_id);
+
+            let found = store
+                .find_contradictions_for_memories(&ns, &[old_id.clone(), new_id.clone(), other_id.clone()])
+                .await
+                .unwrap();
+            assert_eq!(found.len(), 1, "one ledger entry, matched by both of its ids");
+
+            let found = store
+                .find_contradictions_for_memories(&ns, &[other_id])
+                .await
+                .unwrap();
+            assert!(found.is_empty());
         });
     }
 
