@@ -108,13 +108,12 @@ pub fn search_sparse(
     Ok(results)
 }
 
-/// Search sparse postings in every namespace matching a SQL LIKE pattern
-/// (a namespace and its children, as `Namespace::like_pattern` builds it),
-/// returning (memory_id, score) pairs sorted by descending dot-product score.
-pub fn search_sparse_like(
+/// Search sparse postings in a namespace and its descendants (`org/project`
+/// and `org/project/...`, never `org/project2`), returning (memory_id, score) pairs sorted by descending dot-product score.
+pub fn search_sparse_in_tree(
     conn: &Connection,
     query_sparse: &SparseVector,
-    namespace_pattern: &str,
+    namespace_scope: &str,
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, f64)>> {
     if query_sparse.is_empty() {
@@ -124,17 +123,17 @@ pub fn search_sparse_like(
     let query_weights: HashMap<u32, f32> = query_sparse.0.iter().copied().collect();
     let token_ids: Vec<i64> = query_weights.keys().map(|&k| k as i64).collect();
 
-    // ?1 = namespace pattern, ?2..?N = token_ids
+    // ?1 = namespace, ?2..?N = token_ids
     let placeholders: Vec<String> = (2..=token_ids.len() + 1).map(|i| format!("?{i}")).collect();
     let sql = format!(
         "SELECT memory_id, token_id, weight FROM sparse_postings
-         WHERE namespace LIKE ?1 AND token_id IN ({})
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND token_id IN ({})
         ",
         placeholders.join(", ")
     );
 
     let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    sql_params.push(Box::new(namespace_pattern.to_string()));
+    sql_params.push(Box::new(namespace_scope.to_string()));
     for tid in &token_ids {
         sql_params.push(Box::new(*tid));
     }
@@ -241,17 +240,35 @@ mod tests {
         assert_eq!(results_b.len(), 1);
         assert_eq!(results_b[0].0, "m2");
 
-        // A pattern that covers both namespaces returns both
-        let results_all = search_sparse_like(&conn, &query, "ns_%", 10).unwrap();
-        assert_eq!(results_all.len(), 2);
-        // m2 should come first (higher score: 2.0 vs 1.0)
-        assert_eq!(results_all[0].0, "m2");
-        assert_eq!(results_all[1].0, "m1");
+    }
 
-        // A pattern for one namespace tree returns only that tree
-        let results_like_a = search_sparse_like(&conn, &query, "ns_a%", 10).unwrap();
-        assert_eq!(results_like_a.len(), 1);
-        assert_eq!(results_like_a[0].0, "m1");
+    #[test]
+    fn test_sparse_tree_search() {
+        let conn = setup_db();
+        let sv = |w: f32| SparseVector(vec![(100, w)]);
+        for (id, ns, w) in [
+            ("m1", "org/a", 1.0),
+            ("m2", "org/a/team", 2.0),
+            ("m3", "org/ab", 3.0),
+            ("m4", "org/a_b", 4.0),
+            ("m5", "ORG/A", 5.0),
+        ] {
+            insert_test_memory(&conn, id, ns);
+            insert_sparse(&conn, id, ns, &sv(w)).unwrap();
+        }
+        let query = sv(1.0);
+
+        // A tree is the namespace and its descendants, highest score first.
+        let ids = |ns: &str| -> Vec<String> {
+            search_sparse_in_tree(&conn, &query, ns, 10)
+                .unwrap()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        };
+        assert_eq!(ids("org/a"), ["m2", "m1"]);
+        assert_eq!(ids("org"), ["m4", "m3", "m2", "m1"]);
+        assert_eq!(ids("org/a/team"), ["m2"]);
     }
 
     #[test]

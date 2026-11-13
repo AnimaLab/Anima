@@ -1043,14 +1043,14 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<WorkingMemoryEntry>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let status_value = status.unwrap_or("");
         let conversation_value = conversation_id.unwrap_or("");
         let mut stmt = conn
             .prepare(
                 "SELECT id, namespace, content, metadata, provisional_score, status, conversation_id, expires_at, committed_memory_id, created_at, updated_at
                  FROM working_memories
-                 WHERE namespace LIKE ?1
+                 WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
                    AND (?2 = '' OR status = ?2)
                    AND (?3 = '' OR conversation_id = ?3)
                  ORDER BY created_at ASC
@@ -1059,7 +1059,7 @@ impl MemoryStore {
             .map_err(DbError::Sqlite)?;
         let rows = stmt
             .query_map(
-                params![ns_pattern, status_value, conversation_value, limit as i64],
+                params![ns_scope, status_value, conversation_value, limit as i64],
                 |row| {
                     let metadata: Option<String> = row.get(3)?;
                     Ok(WorkingMemoryEntry {
@@ -1178,11 +1178,11 @@ impl MemoryStore {
         let mut stmt = conn.prepare(
             "SELECT id, title, mode, created_at, updated_at
              FROM conversations
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
              ORDER BY updated_at DESC"
         ).map_err(DbError::Sqlite)?;
         let rows = stmt.query_map(
-            params![namespace.like_pattern()],
+            params![namespace.as_str()],
             |row: &rusqlite::Row| Ok(ConversationSummary {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -1628,11 +1628,11 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<Memory>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
              FROM memories
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
                AND status = 'active'
                AND (json_extract(metadata, '$.reflected') IS NULL OR json_extract(metadata, '$.reflected') = 0)
                AND (json_extract(metadata, '$.tier') IS NULL OR json_extract(metadata, '$.tier') = 1)
@@ -1641,7 +1641,7 @@ impl MemoryStore {
              LIMIT ?2",
         ).map_err(DbError::Sqlite)?;
 
-        let rows = stmt.query_map(params![ns_pattern, limit as i64], row_to_memory)
+        let rows = stmt.query_map(params![ns_scope, limit as i64], row_to_memory)
             .map_err(DbError::Sqlite)?;
         let memories: Vec<Memory> = rows.filter_map(|r| r.ok()).collect();
         Ok(memories)
@@ -1655,18 +1655,18 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<Memory>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
              FROM memories
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
                AND status = 'active'
                AND CAST(json_extract(metadata, '$.tier') AS INTEGER) = ?2
              ORDER BY created_at ASC
              LIMIT ?3",
         ).map_err(DbError::Sqlite)?;
 
-        let rows = stmt.query_map(params![ns_pattern, tier, limit as i64], row_to_memory)
+        let rows = stmt.query_map(params![ns_scope, tier, limit as i64], row_to_memory)
             .map_err(DbError::Sqlite)?;
         let memories: Vec<Memory> = rows.filter_map(|r| r.ok()).collect();
         Ok(memories)
@@ -1682,11 +1682,11 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<Memory>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
              FROM memories
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
                AND status = 'active'
                AND event_date IS NOT NULL
                AND event_date >= ?2
@@ -1695,7 +1695,7 @@ impl MemoryStore {
              LIMIT ?4",
         ).map_err(DbError::Sqlite)?;
 
-        let rows = stmt.query_map(params![ns_pattern, start, end, limit as i64], row_to_memory)
+        let rows = stmt.query_map(params![ns_scope, start, end, limit as i64], row_to_memory)
             .map_err(DbError::Sqlite)?;
         let memories: Vec<Memory> = rows.filter_map(|r| r.ok()).collect();
         Ok(memories)
@@ -1735,19 +1735,19 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<Memory>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at,
                     accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
              FROM memories
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
                AND episode_id = ?2
                AND status = 'active'
              ORDER BY created_at ASC
              LIMIT ?3",
         ).map_err(DbError::Sqlite)?;
         let rows = stmt
-            .query_map(params![ns_pattern, episode_id, limit as i64], row_to_memory)
+            .query_map(params![ns_scope, episode_id, limit as i64], row_to_memory)
             .map_err(DbError::Sqlite)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
@@ -1773,15 +1773,15 @@ impl MemoryStore {
         namespace: &Namespace,
     ) -> Result<Vec<Memory>, DbError> {
         let conn = self.pool.writer().await;
-        let ns_pattern = namespace.like_pattern();
+        let ns_scope = namespace.as_str();
         let mut stmt = conn.prepare(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at, \
              accessed_at, access_count, hash, tags, memory_type, importance, episode_id, \
              event_date, category, confidence, source \
-             FROM memories WHERE namespace LIKE ?1 \
+             FROM memories WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') \
              ORDER BY created_at ASC",
         )?;
-        let rows = stmt.query_map(params![ns_pattern], row_to_memory)?;
+        let rows = stmt.query_map(params![ns_scope], row_to_memory)?;
         let mut memories = Vec::new();
         for row in rows {
             memories.push(row?);
@@ -2028,12 +2028,12 @@ fn find_by_hash_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
          FROM memories
-         WHERE namespace LIKE ?1 AND hash = ?2 AND status = 'active'
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND hash = ?2 AND status = 'active'
          LIMIT 1",
     )?;
 
     let result = stmt
-        .query_row(params![namespace.like_pattern(), hash], row_to_memory)
+        .query_row(params![namespace.as_str(), hash], row_to_memory)
         .optional()?;
 
     Ok(result)
@@ -2244,7 +2244,7 @@ fn search_sync(
     // Oversampling: fetch more candidates from cheap int8 search,
     // then rescore with full-precision f32 to narrow down before scoring.
     let candidate_limit = limit * 10;
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let now = Utc::now();
 
     let mut vector_scored: Vec<(String, f64)> = vec![];
@@ -2310,9 +2310,9 @@ fn search_sync(
                         }
                     } else {
                         let mut stmt = conn.prepare_cached(
-                            "SELECT 1 FROM memories WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
+                            "SELECT 1 FROM memories WHERE id = ?1 AND (namespace = ?2 OR namespace GLOB ?2 || '/*') AND status = 'active'",
                         )?;
-                        if stmt.exists(params![id, ns_pattern])? {
+                        if stmt.exists(params![id, ns_scope])? {
                             scored.push((id.clone(), similarity));
                         }
                     }
@@ -2397,7 +2397,7 @@ fn search_sync(
     // Keyword search
     match mode {
         SearchMode::Hybrid | SearchMode::Keyword | SearchMode::AskRetrieval => {
-            let raw = fts::search_fts(conn, query_text, &ns_pattern, candidate_limit)?;
+            let raw = fts::search_fts(conn, query_text, &ns_scope, candidate_limit)?;
             keyword_scored = raw;
         }
         SearchMode::Vector => {}
@@ -2411,7 +2411,7 @@ fn search_sync(
                 sparse_scored = if is_exact_ns {
                     crate::sparse::search_sparse(conn, query_sparse, ns_str, candidate_limit)?
                 } else {
-                    crate::sparse::search_sparse_like(conn, query_sparse, &ns_pattern, candidate_limit)?
+                    crate::sparse::search_sparse_in_tree(conn, query_sparse, &ns_scope, candidate_limit)?
                 };
             }
             SearchMode::Keyword => {}
@@ -2665,7 +2665,7 @@ fn find_similar_sync(
     threshold: f64,
 ) -> Result<Vec<(Memory, f64)>, DbError> {
     let raw = vector::search_vectors(conn, embedding, limit * 3)?;
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut results = Vec::new();
 
     for (id, distance) in raw {
@@ -2678,10 +2678,10 @@ fn find_similar_sync(
         let mut stmt = conn.prepare_cached(
             "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
              FROM memories
-             WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'",
+             WHERE id = ?1 AND (namespace = ?2 OR namespace GLOB ?2 || '/*') AND status = 'active'",
         )?;
 
-        if let Some(memory) = stmt.query_row(params![id, ns_pattern], row_to_memory).optional()? {
+        if let Some(memory) = stmt.query_row(params![id, ns_scope], row_to_memory).optional()? {
             results.push((memory, similarity));
         }
 
@@ -2747,11 +2747,11 @@ fn list_sync(
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<Memory>, u64), DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
 
     // Build dynamic WHERE clause
-    let mut conditions = vec!["namespace LIKE ?1".to_string()];
-    let mut count_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_pattern.clone())];
+    let mut conditions = vec!["(namespace = ?1 OR namespace GLOB ?1 || '/*')".to_string()];
+    let mut count_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope.clone())];
 
     if let Some(st) = status {
         conditions.push(format!("status = ?{}", count_params.len() + 1));
@@ -2802,7 +2802,7 @@ fn list_with_cursor_sync(
     cursor: &str,
     limit: usize,
 ) -> Result<(Vec<Memory>, u64), DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
 
     // Parse cursor: "created_at:id" — split on first colon only since RFC3339 contains colons
     let (cursor_ts, cursor_id) = cursor.split_once(':')
@@ -2818,8 +2818,8 @@ fn list_with_cursor_sync(
         .ok_or_else(|| DbError::Sqlite(rusqlite::Error::InvalidParameterName("invalid cursor format".into())))?;
 
     // Build WHERE clause for filters (used in both count and data queries)
-    let mut conditions = vec!["namespace LIKE ?1".to_string()];
-    let mut filter_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_pattern.clone())];
+    let mut conditions = vec!["(namespace = ?1 OR namespace GLOB ?1 || '/*')".to_string()];
+    let mut filter_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope.clone())];
 
     if let Some(st) = status {
         conditions.push(format!("status = ?{}", filter_params.len() + 1));
@@ -2872,7 +2872,7 @@ fn list_with_cursor_sync(
 }
 
 fn stats_sync(conn: &Connection, namespace: &Namespace) -> Result<NamespaceStats, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut stmt = conn.prepare(
         "SELECT
             COUNT(*) as total,
@@ -2883,10 +2883,10 @@ fn stats_sync(conn: &Connection, namespace: &Namespace) -> Result<NamespaceStats
             COALESCE(MAX(access_count), 0) as max_access,
             MIN(created_at) as oldest,
             MAX(created_at) as newest
-         FROM memories WHERE namespace LIKE ?1",
+         FROM memories WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')",
     )?;
 
-    let stats = stmt.query_row(params![ns_pattern], |row| {
+    let stats = stmt.query_row(params![ns_scope], |row| {
         Ok(NamespaceStats {
             total: row.get::<_, u64>(0)?,
             active: row.get::<_, u64>(1)?,
@@ -3054,13 +3054,13 @@ fn similarity_graph_sync(
     threshold: f64,
     max_nodes: usize,
 ) -> Result<GraphData, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
 
     // 1. Fetch active memories with embeddings
     let mut stmt = conn.prepare(
         "SELECT id, content, namespace, status, created_at, access_count, embedding, memory_type, importance
          FROM memories
-         WHERE namespace LIKE ?1 AND status = 'active'
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND status = 'active'
            AND embedding IS NOT NULL AND length(embedding) > 0
          LIMIT ?2",
     )?;
@@ -3070,7 +3070,7 @@ fn similarity_graph_sync(
         embedding: Vec<f32>,
     }
 
-    let rows = stmt.query_map(params![ns_pattern, max_nodes as i64], |row| {
+    let rows = stmt.query_map(params![ns_scope, max_nodes as i64], |row| {
         let content: String = row.get(1)?;
         let truncated = if content.len() > 100 {
             format!("{}...", &content[..100])
@@ -3168,11 +3168,11 @@ fn similarity_graph_sync(
     let mut sup_stmt = conn.prepare(
         "SELECT id, content, namespace, status, created_at, access_count, superseded_by, memory_type, importance
          FROM memories
-         WHERE namespace LIKE ?1 AND status = 'superseded' AND superseded_by IS NOT NULL
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND status = 'superseded' AND superseded_by IS NOT NULL
          LIMIT ?2",
     )?;
 
-    let sup_rows = sup_stmt.query_map(params![ns_pattern, max_nodes as i64], |row| {
+    let sup_rows = sup_stmt.query_map(params![ns_scope, max_nodes as i64], |row| {
         let content: String = row.get(1)?;
         let truncated = if content.len() > 100 {
             format!("{}...", &content[..100])
@@ -3212,11 +3212,11 @@ fn similarity_graph_sync(
     let mut causal_stmt = conn.prepare(
         "SELECT source_memory_id, target_memory_id, relation_type, confidence
          FROM causal_edges
-         WHERE namespace LIKE ?1
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
          ORDER BY confidence DESC
          LIMIT ?2",
     )?;
-    let causal_rows = causal_stmt.query_map(params![ns_pattern, (max_nodes * 4) as i64], |row| {
+    let causal_rows = causal_stmt.query_map(params![ns_scope, (max_nodes * 4) as i64], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -3267,18 +3267,18 @@ fn access_ranking_sync(
     ascending: bool,
     limit: usize,
 ) -> Result<Vec<Memory>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let order = if ascending { "ASC" } else { "DESC" };
     let sql = format!(
         "SELECT id, namespace, content, metadata, status, created_at, updated_at, accessed_at, access_count, hash, tags, memory_type, importance, episode_id, event_date, category, confidence, source
          FROM memories
-         WHERE namespace LIKE ?1 AND status = 'active'
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND status = 'active'
          ORDER BY access_count {order}
          LIMIT ?2"
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![ns_pattern, limit as i64], row_to_memory)?;
+    let rows = stmt.query_map(params![ns_scope, limit as i64], row_to_memory)?;
     let memories: Vec<Memory> = rows.filter_map(|r| r.ok()).collect();
     Ok(memories)
 }
@@ -3501,18 +3501,18 @@ fn calibration_metrics_sync(
     conn: &Connection,
     namespace: &Namespace,
 ) -> Result<CalibrationMetrics, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
 
     let mut models_stmt = conn
         .prepare(
             "SELECT namespace, prediction_kind, samples, avg_prediction, avg_outcome, mse, slope, intercept, updated_at
              FROM calibration_models
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
              ORDER BY prediction_kind ASC, namespace ASC",
         )
         .map_err(DbError::Sqlite)?;
     let model_rows = models_stmt
-        .query_map(params![ns_pattern.clone()], |row| {
+        .query_map(params![ns_scope.clone()], |row| {
             Ok(CalibrationModel {
                 namespace: row.get(0)?,
                 prediction_kind: row.get(1)?,
@@ -3532,12 +3532,12 @@ fn calibration_metrics_sync(
         .prepare(
             "SELECT namespace, prediction_kind, bin_index, sample_count, avg_prediction, avg_outcome, updated_at
              FROM calibration_bins
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
              ORDER BY prediction_kind ASC, bin_index ASC, namespace ASC",
         )
         .map_err(DbError::Sqlite)?;
     let bins_rows = bins_stmt
-        .query_map(params![ns_pattern.clone()], |row| {
+        .query_map(params![ns_scope.clone()], |row| {
             Ok(CalibrationBin {
                 namespace: row.get(0)?,
                 prediction_kind: row.get(1)?,
@@ -3555,10 +3555,10 @@ fn calibration_metrics_sync(
         .prepare(
             "SELECT COUNT(*)
              FROM calibration_observations
-             WHERE namespace LIKE ?1 AND outcome IS NULL",
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND outcome IS NULL",
         )
         .map_err(DbError::Sqlite)?
-        .query_row(params![ns_pattern], |row| row.get(0))
+        .query_row(params![ns_scope], |row| row.get(0))
         .map_err(DbError::Sqlite)?;
 
     Ok(CalibrationMetrics {
@@ -3743,7 +3743,7 @@ fn list_contradictions_sync(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ContradictionEntry>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut stmt = conn.prepare(
         "SELECT c.id, c.namespace, c.old_memory_id, c.new_memory_id,
                 c.resolution, c.provenance, c.created_at,
@@ -3751,12 +3751,12 @@ fn list_contradictions_sync(
          FROM contradiction_ledger c
          LEFT JOIN memories m_old ON m_old.id = c.old_memory_id
          LEFT JOIN memories m_new ON m_new.id = c.new_memory_id
-         WHERE c.namespace LIKE ?1
+         WHERE (c.namespace = ?1 OR c.namespace GLOB ?1 || '/*')
          ORDER BY c.created_at DESC
          LIMIT ?2 OFFSET ?3",
     ).map_err(DbError::Sqlite)?;
 
-    let rows = stmt.query_map(params![ns_pattern, limit as i64, offset as i64], |row| {
+    let rows = stmt.query_map(params![ns_scope, limit as i64, offset as i64], |row| {
         let provenance_str: Option<String> = row.get(5)?;
         let provenance = provenance_str
             .and_then(|s| serde_json::from_str(&s).ok());
@@ -3781,7 +3781,7 @@ fn find_contradictions_for_memories_sync(
     namespace: &Namespace,
     memory_ids: &[String],
 ) -> Result<Vec<ContradictionEntry>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     // Build IN clause with placeholders
     let placeholders: Vec<String> = (0..memory_ids.len()).map(|i| format!("?{}", i + 2)).collect();
     let in_clause = placeholders.join(",");
@@ -3792,7 +3792,7 @@ fn find_contradictions_for_memories_sync(
          FROM contradiction_ledger c
          LEFT JOIN memories m_old ON m_old.id = c.old_memory_id
          LEFT JOIN memories m_new ON m_new.id = c.new_memory_id
-         WHERE c.namespace LIKE ?1
+         WHERE (c.namespace = ?1 OR c.namespace GLOB ?1 || '/*')
            AND (c.old_memory_id IN ({in_clause}) OR c.new_memory_id IN ({in_clause}))
          ORDER BY c.created_at DESC"
     );
@@ -3800,7 +3800,7 @@ fn find_contradictions_for_memories_sync(
 
     // Build params: namespace pattern + memory_ids twice (for both IN clauses)
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    params_vec.push(Box::new(ns_pattern));
+    params_vec.push(Box::new(ns_scope));
     for id in memory_ids {
         params_vec.push(Box::new(id.clone()));
     }
@@ -3834,7 +3834,7 @@ fn get_supersession_chain_sync(
     namespace: &Namespace,
     memory_id: &str,
 ) -> Result<Vec<SupersessionLink>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut chain = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -3844,10 +3844,10 @@ fn get_supersession_chain_sync(
         if !seen.insert(current_id.clone()) { break; }
         let predecessor: Option<String> = conn.prepare(
             "SELECT old_memory_id FROM contradiction_ledger
-             WHERE namespace LIKE ?1 AND new_memory_id = ?2
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND new_memory_id = ?2
              ORDER BY created_at DESC LIMIT 1",
         ).map_err(DbError::Sqlite)?
-        .query_row(params![ns_pattern, current_id], |row| row.get(0))
+        .query_row(params![ns_scope, current_id], |row| row.get(0))
         .optional()
         .map_err(DbError::Sqlite)?;
 
@@ -3867,9 +3867,9 @@ fn get_supersession_chain_sync(
         // Fetch memory data
         let mem_data: Option<(String, String, Option<String>, f64, String, String)> = conn.prepare(
             "SELECT content, status, superseded_by, confidence, source, created_at
-             FROM memories WHERE id = ?1 AND namespace LIKE ?2",
+             FROM memories WHERE id = ?1 AND (namespace = ?2 OR namespace GLOB ?2 || '/*')",
         ).map_err(DbError::Sqlite)?
-        .query_row(params![walk_id, ns_pattern], |row| {
+        .query_row(params![walk_id, ns_scope], |row| {
             Ok((
                 row.get(0)?,
                 row.get(1)?,
@@ -4073,11 +4073,11 @@ fn list_claim_revisions_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, memory_id, revision_number, operation, content, metadata, tags, memory_type, importance, status, superseded_by, hash, actor, reason, provenance, created_at
          FROM claim_revisions
-         WHERE namespace LIKE ?1 AND memory_id = ?2
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND memory_id = ?2
          ORDER BY revision_number DESC
          LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![namespace.like_pattern(), memory_id, limit as i64], |row| {
+    let rows = stmt.query_map(params![namespace.as_str(), memory_id, limit as i64], |row| {
         let metadata: Option<String> = row.get(6)?;
         let tags_json: String = row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "[]".to_string());
         let provenance: Option<String> = row.get(15)?;
@@ -4527,11 +4527,11 @@ fn list_procedure_revisions_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, procedure_name, revision_number, operation, spec, actor, reason, created_at
          FROM procedure_revisions
-         WHERE namespace LIKE ?1 AND procedure_name = ?2
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND procedure_name = ?2
          ORDER BY revision_number DESC
          LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![namespace.like_pattern(), procedure_name, limit as i64], |row| {
+    let rows = stmt.query_map(params![namespace.as_str(), procedure_name, limit as i64], |row| {
         let spec_json: String = row.get(5)?;
         Ok(ProcedureRevision {
             id: row.get(0)?,
@@ -4555,41 +4555,41 @@ fn list_audit_events_sync(
     entity_id: Option<&str>,
     limit: usize,
 ) -> Result<Vec<AuditEvent>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut rows_out = Vec::new();
 
     let (sql, params_any): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match (entity_type, entity_id) {
         (Some(t), Some(id)) => (
             "SELECT id, namespace, entity_type, entity_id, operation, actor, reason, details, created_at
              FROM memory_audit_log
-             WHERE namespace LIKE ?1 AND entity_type = ?2 AND entity_id = ?3
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND entity_type = ?2 AND entity_id = ?3
              ORDER BY created_at DESC
              LIMIT ?4".to_string(),
-            vec![Box::new(ns_pattern), Box::new(t.to_string()), Box::new(id.to_string()), Box::new(limit as i64)],
+            vec![Box::new(ns_scope), Box::new(t.to_string()), Box::new(id.to_string()), Box::new(limit as i64)],
         ),
         (Some(t), None) => (
             "SELECT id, namespace, entity_type, entity_id, operation, actor, reason, details, created_at
              FROM memory_audit_log
-             WHERE namespace LIKE ?1 AND entity_type = ?2
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND entity_type = ?2
              ORDER BY created_at DESC
              LIMIT ?3".to_string(),
-            vec![Box::new(ns_pattern), Box::new(t.to_string()), Box::new(limit as i64)],
+            vec![Box::new(ns_scope), Box::new(t.to_string()), Box::new(limit as i64)],
         ),
         (None, Some(id)) => (
             "SELECT id, namespace, entity_type, entity_id, operation, actor, reason, details, created_at
              FROM memory_audit_log
-             WHERE namespace LIKE ?1 AND entity_id = ?2
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND entity_id = ?2
              ORDER BY created_at DESC
              LIMIT ?3".to_string(),
-            vec![Box::new(ns_pattern), Box::new(id.to_string()), Box::new(limit as i64)],
+            vec![Box::new(ns_scope), Box::new(id.to_string()), Box::new(limit as i64)],
         ),
         (None, None) => (
             "SELECT id, namespace, entity_type, entity_id, operation, actor, reason, details, created_at
              FROM memory_audit_log
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
              ORDER BY created_at DESC
              LIMIT ?2".to_string(),
-            vec![Box::new(ns_pattern), Box::new(limit as i64)],
+            vec![Box::new(ns_scope), Box::new(limit as i64)],
         ),
     };
     let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -4915,12 +4915,12 @@ fn resolve_identity_sync(
         "SELECT e.id, e.canonical_name, a.alias, e.language, e.confidence, a.confidence, e.ambiguity
          FROM identity_aliases a
          JOIN identity_entities e ON e.id = a.entity_id
-         WHERE a.namespace LIKE ?1 AND a.normalized_alias = ?2
+         WHERE (a.namespace = ?1 OR a.namespace GLOB ?1 || '/*') AND a.normalized_alias = ?2
          ORDER BY a.confidence DESC, e.confidence DESC
          LIMIT ?3",
     )?;
     let exact_rows = exact_stmt.query_map(
-        params![namespace.like_pattern(), normalized_query, (limit * 4) as i64],
+        params![namespace.as_str(), normalized_query, (limit * 4) as i64],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -4967,12 +4967,12 @@ fn resolve_identity_sync(
             "SELECT e.id, e.canonical_name, a.alias, e.language, e.confidence, a.confidence, e.ambiguity, a.normalized_alias
              FROM identity_aliases a
              JOIN identity_entities e ON e.id = a.entity_id
-             WHERE a.namespace LIKE ?1 AND a.normalized_alias LIKE ?2
+             WHERE (a.namespace = ?1 OR a.namespace GLOB ?1 || '/*') AND a.normalized_alias LIKE ?2
              ORDER BY a.confidence DESC, e.confidence DESC
              LIMIT ?3",
         )?;
         let prefix_rows = prefix_stmt.query_map(
-            params![namespace.like_pattern(), prefix_like, (limit * 8) as i64],
+            params![namespace.as_str(), prefix_like, (limit * 8) as i64],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -5034,11 +5034,11 @@ fn resolve_identity_sync(
             "SELECT e.id, e.canonical_name, a.alias, e.language, e.confidence, a.confidence, e.ambiguity, a.normalized_alias
              FROM identity_aliases a
              JOIN identity_entities e ON e.id = a.entity_id
-             WHERE a.namespace LIKE ?1
+             WHERE (a.namespace = ?1 OR a.namespace GLOB ?1 || '/*')
              ORDER BY a.updated_at DESC
              LIMIT 200",
         )?;
-        let fuzzy_rows = fuzzy_stmt.query_map(params![namespace.like_pattern()], |row| {
+        let fuzzy_rows = fuzzy_stmt.query_map(params![namespace.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -5293,12 +5293,12 @@ fn list_plan_traces_sync(
         let mut stmt = conn.prepare(
             "SELECT id, namespace, goal, status, priority, due_at, metadata, outcome, outcome_confidence, finished_at, created_at, updated_at
              FROM plan_traces
-             WHERE namespace LIKE ?1 AND status = ?2
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND status = ?2
              ORDER BY updated_at DESC
              LIMIT ?3",
         )?;
         let rows = stmt.query_map(
-            params![namespace.like_pattern(), normalize_plan_status(status), limit as i64],
+            params![namespace.as_str(), normalize_plan_status(status), limit as i64],
             row_to_plan_trace,
         )?;
         for row in rows {
@@ -5308,12 +5308,12 @@ fn list_plan_traces_sync(
         let mut stmt = conn.prepare(
             "SELECT id, namespace, goal, status, priority, due_at, metadata, outcome, outcome_confidence, finished_at, created_at, updated_at
              FROM plan_traces
-             WHERE namespace LIKE ?1
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
              ORDER BY updated_at DESC
              LIMIT ?2",
         )?;
         let rows =
-            stmt.query_map(params![namespace.like_pattern(), limit as i64], row_to_plan_trace)?;
+            stmt.query_map(params![namespace.as_str(), limit as i64], row_to_plan_trace)?;
         for row in rows {
             plans.push(row.map_err(DbError::Sqlite)?);
         }
@@ -5405,10 +5405,10 @@ fn list_plan_checkpoints_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, plan_id, checkpoint_key, title, order_index, status, expected_by, completed_at, evidence, metadata, created_at, updated_at
          FROM plan_checkpoints
-         WHERE namespace LIKE ?1 AND plan_id = ?2
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND plan_id = ?2
          ORDER BY order_index ASC, created_at ASC",
     )?;
-    let rows = stmt.query_map(params![namespace.like_pattern(), plan_id], row_to_plan_checkpoint)?;
+    let rows = stmt.query_map(params![namespace.as_str(), plan_id], row_to_plan_checkpoint)?;
     let mut out = Vec::new();
     for row in rows {
         out.push(row.map_err(DbError::Sqlite)?);
@@ -5629,11 +5629,11 @@ fn list_plan_recovery_branches_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, plan_id, source_checkpoint_id, branch_label, trigger_reason, status, branch_plan, metadata, resolution_notes, created_at, updated_at, resolved_at
          FROM plan_recovery_branches
-         WHERE namespace LIKE ?1 AND plan_id = ?2
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND plan_id = ?2
          ORDER BY created_at DESC",
     )?;
     let rows =
-        stmt.query_map(params![namespace.like_pattern(), plan_id], row_to_plan_recovery_branch)?;
+        stmt.query_map(params![namespace.as_str(), plan_id], row_to_plan_recovery_branch)?;
     let mut out = Vec::new();
     for row in rows {
         out.push(row.map_err(DbError::Sqlite)?);
@@ -5786,11 +5786,11 @@ fn list_plan_procedure_bindings_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, plan_id, procedure_name, binding_role, confidence, metadata, created_at, updated_at
          FROM plan_procedure_bindings
-         WHERE namespace LIKE ?1 AND plan_id = ?2
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND plan_id = ?2
          ORDER BY updated_at DESC",
     )?;
     let rows =
-        stmt.query_map(params![namespace.like_pattern(), plan_id], row_to_plan_procedure_binding)?;
+        stmt.query_map(params![namespace.as_str(), plan_id], row_to_plan_procedure_binding)?;
     let mut out = Vec::new();
     for row in rows {
         out.push(row.map_err(DbError::Sqlite)?);
@@ -5866,7 +5866,7 @@ fn find_memories_by_entity_ids_sync(
     let placeholders: Vec<String> = entity_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 2)).collect();
     let sql = format!(
         "SELECT DISTINCT target_memory_id FROM causal_edges
-         WHERE namespace LIKE ?1 AND source_memory_id IN ({})
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND source_memory_id IN ({})
          ORDER BY confidence DESC
          LIMIT {}",
         placeholders.join(","),
@@ -5874,7 +5874,7 @@ fn find_memories_by_entity_ids_sync(
     );
     let mut stmt = conn.prepare(&sql)?;
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    params_vec.push(Box::new(namespace.like_pattern()));
+    params_vec.push(Box::new(namespace.as_str()));
     for eid in entity_ids {
         params_vec.push(Box::new(eid.clone()));
     }
@@ -5897,11 +5897,11 @@ fn list_causal_edges_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, source_memory_id, target_memory_id, relation_type, confidence, evidence, created_at, updated_at
          FROM causal_edges
-         WHERE namespace LIKE ?1
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
          ORDER BY confidence DESC, updated_at DESC
          LIMIT ?2",
     )?;
-    let rows = stmt.query_map(params![namespace.like_pattern(), limit as i64], |row| {
+    let rows = stmt.query_map(params![namespace.as_str(), limit as i64], |row| {
         Ok(CausalEdge {
             id: row.get(0)?,
             namespace: row.get(1)?,
@@ -5974,11 +5974,11 @@ fn list_state_transitions_sync(
     let mut stmt = conn.prepare(
         "SELECT id, namespace, from_memory_id, to_memory_id, transition_type, confidence, evidence, created_at, updated_at
          FROM state_transitions
-         WHERE namespace LIKE ?1
+         WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*')
          ORDER BY confidence DESC, updated_at DESC
          LIMIT ?2",
     )?;
-    let rows = stmt.query_map(params![namespace.like_pattern(), limit as i64], |row| {
+    let rows = stmt.query_map(params![namespace.as_str(), limit as i64], |row| {
         Ok(StateTransitionEdge {
             id: row.get(0)?,
             namespace: row.get(1)?,
@@ -6193,13 +6193,13 @@ fn simulate_counterfactual_sync(
     let mut mem_stmt = conn.prepare_cached(
         "SELECT id, content
          FROM memories
-         WHERE id = ?1 AND namespace LIKE ?2 AND status = 'active'
+         WHERE id = ?1 AND (namespace = ?2 OR namespace GLOB ?2 || '/*') AND status = 'active'
          LIMIT 1",
     )?;
     let mut hypotheses = Vec::new();
     for (memory_id, score) in scored_ids {
         let maybe_row = mem_stmt
-            .query_row(params![memory_id, namespace.like_pattern()], |row| {
+            .query_row(params![memory_id, namespace.as_str()], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .optional()?;
@@ -6353,12 +6353,12 @@ fn get_raw_embeddings_sync(
     namespace: &Namespace,
     limit: usize,
 ) -> Result<Vec<RawEmbeddingData>, DbError> {
-    let ns_pattern = namespace.like_pattern();
+    let ns_scope = namespace.as_str();
     let mut stmt = conn
         .prepare(
             "SELECT id, content, memory_type, embedding
              FROM memories
-             WHERE namespace LIKE ?1 AND status = 'active'
+             WHERE (namespace = ?1 OR namespace GLOB ?1 || '/*') AND status = 'active'
                AND embedding IS NOT NULL AND length(embedding) > 0
              ORDER BY created_at DESC
              LIMIT ?2",
@@ -6366,7 +6366,7 @@ fn get_raw_embeddings_sync(
         .map_err(DbError::Sqlite)?;
 
     let rows = stmt
-        .query_map(params![ns_pattern, limit as i64], |row| {
+        .query_map(params![ns_scope, limit as i64], |row| {
             let id: String = row.get(0)?;
             let content: String = row.get(1)?;
             let memory_type: String = row.get(2)?;
@@ -6476,6 +6476,61 @@ mod tests {
             assert!(!ids.contains(&outside.as_str()), "memory from another namespace leaked: {ids:?}");
             assert!(ids.contains(&inside.as_str()), "{ids:?}");
             assert!(ids.contains(&child.as_str()), "child namespace is part of the tree: {ids:?}");
+        });
+    }
+
+    /// Security, namespace isolation: a namespace's tree was matched with
+    /// `LIKE 'ns%'`, so "work/alpha" also reached "work/alphabet", `_` in a
+    /// namespace matched any character, and the match ignored case. Every leg
+    /// of a search (vector, keyword, sparse) must keep to the namespace and its
+    /// descendants.
+    #[test]
+    fn search_keeps_to_the_namespace_tree() {
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let conn = pool.writer().await;
+            let dim = DbPool::DEFAULT_DIMENSION;
+            let sparse = anima_embed::SparseVector(vec![(4242, 1.0)]);
+
+            let mut ids = std::collections::HashMap::new();
+            for (i, ns) in ["work/alpha", "work/alpha/q3", "work/alphabet", "WORK/ALPHA", "work/a_pha"]
+                .into_iter()
+                .enumerate()
+            {
+                let id = insert_test_memory(&conn, ns, "alpha roadmap", &make_embedding(dim, 1 + i % 2));
+                crate::sparse::insert_sparse(&conn, &id, ns, &sparse).unwrap();
+                ids.insert(id, ns);
+            }
+
+            let config = ScorerConfig {
+                min_vector_similarity: 0.0,
+                min_score_spread: 0.0,
+                ..Default::default()
+            };
+            let found = |ns: &str| -> Vec<&str> {
+                let mut found: Vec<&str> = search_sync(
+                    &conn,
+                    &make_embedding(dim, 1),
+                    &sparse,
+                    "alpha roadmap",
+                    &Namespace::parse(ns).unwrap(),
+                    &SearchMode::Hybrid,
+                    10,
+                    &config,
+                    &[("content".to_string(), 1.0)],
+                )
+                .unwrap()
+                .iter()
+                .map(|r| ids[&r.memory_id])
+                .collect();
+                found.sort();
+                found
+            };
+
+            assert_eq!(found("work/alpha"), ["work/alpha", "work/alpha/q3"]);
+            assert_eq!(found("work/a_pha"), ["work/a_pha"]);
+            assert_eq!(found("work/alphabet"), ["work/alphabet"]);
         });
     }
 
