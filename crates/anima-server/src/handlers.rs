@@ -3544,6 +3544,13 @@ pub async fn top_accessed(
     Ok(Json(responses))
 }
 
+/// A client API key as it can be sent: trimmed, and `None` when blank so the
+/// server's own key is used. A key pasted with surrounding whitespace would
+/// otherwise go out as `Bearer  key`, which providers read as no key at all.
+fn usable_api_key(key: Option<String>) -> Option<String> {
+    key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty())
+}
+
 /// Resolve an optional client-provided LLM config, falling back to the
 /// operation's profile (from `[profiles]` + `[routing]`) or server-side `[llm]` config.
 fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState, operation: &str) -> LlmConfig {
@@ -3568,7 +3575,8 @@ fn resolve_llm_config(llm: Option<LlmConfig>, state: &AppState, operation: &str)
                     }
                 }
             }
-            if client_llm.api_key.as_ref().map_or(true, |k| k.is_empty()) {
+            client_llm.api_key = usable_api_key(client_llm.api_key);
+            if client_llm.api_key.is_none() {
                 client_llm.api_key = profile
                     .and_then(|p| p.resolve_api_key(profile_name))
                     .or_else(|| Some(state.config.llm.api_key.clone()).filter(|k| !k.is_empty()))
@@ -5471,6 +5479,18 @@ fn mock_chat_completion(body: &serde_json::Value) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use super::usable_api_key;
+
+    /// Regression, 2026-11-13: a chat API key pasted with a leading space was
+    /// sent as "Bearer  key" and rejected with 401 by the provider.
+    #[test]
+    fn client_api_key_is_trimmed_or_dropped() {
+        assert_eq!(usable_api_key(Some(" user:secret\n".into())).as_deref(), Some("user:secret"));
+        assert_eq!(usable_api_key(Some("   ".into())), None);
+        assert_eq!(usable_api_key(Some(String::new())), None);
+        assert_eq!(usable_api_key(None), None);
+    }
+
     use super::*;
     use std::sync::Mutex;
 
