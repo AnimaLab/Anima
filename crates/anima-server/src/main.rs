@@ -315,7 +315,26 @@ async fn start_server(
     };
 
     // Load cross-encoder re-ranker (optional)
-    let reranker = if config.reranker.enabled {
+    let remote_reranker = matches!(config.reranker.backend.as_str(), "openai" | "openai_compat");
+    let reranker = if config.reranker.enabled && remote_reranker {
+        let missing = |field: &str| {
+            tracing::error!(domain = "reranker", "Startup check failed — remote reranker needs {field}");
+            anyhow::anyhow!("[reranker] backend = \"{}\" requires {field}", config.reranker.backend)
+        };
+        let base_url = config.reranker.api_base_url.clone().ok_or_else(|| missing("api_base_url"))?;
+        let model = config.reranker.api_model.clone().ok_or_else(|| missing("api_model"))?;
+        let api_key = config.reranker.api_key.clone()
+            .filter(|k| !k.is_empty())
+            .or_else(|| std::env::var("RERANKER_API_KEY").ok().filter(|k| !k.is_empty()))
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty()))
+            .ok_or_else(|| missing("api_key, RERANKER_API_KEY or OPENAI_API_KEY"))?;
+        tracing::info!(
+            domain = "reranker",
+            "Using remote reranker: model={model}, base_url={base_url}, top_n={}",
+            config.reranker.top_n
+        );
+        Some(Arc::new(anima_embed::reranker::Reranker::remote(base_url, model, api_key)))
+    } else if config.reranker.enabled {
         let model_dir = std::path::Path::new(&config.reranker.model_dir);
         let (model_path, tokenizer_path) = anima_embed::download::ensure_model_files(
             model_dir,

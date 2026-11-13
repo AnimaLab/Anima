@@ -1,6 +1,7 @@
-//! Cross-encoder re-ranker using ONNX Runtime.
+//! Cross-encoder re-ranker: a local ONNX model, or a model served behind an
+//! OpenAI-style `/rerank` endpoint.
 //!
-//! Takes (query, document) pairs and returns relevance scores.
+//! Takes (query, document) pairs and returns relevance scores in [0, 1].
 //! Uses bge-reranker-v2-m3 INT8 by default — a true cross-encoder that outputs
 //! a single logit per pair (not a generative model).
 
@@ -13,16 +14,114 @@ use ort::value::Value;
 use tokenizers::Tokenizer;
 
 use crate::model::EmbedError;
+use crate::openai::{block_on_outside_runtime, post_json};
 
-/// Cross-encoder re-ranker model.
+/// Cross-encoder re-ranker.
+pub enum Reranker {
+    Local(LocalReranker),
+    Remote(RemoteReranker),
+}
+
+impl Reranker {
+    /// Load a local cross-encoder ONNX model + tokenizer.
+    pub fn load(
+        model_path: &Path,
+        tokenizer_path: &Path,
+        max_length: usize,
+    ) -> Result<Self, EmbedError> {
+        LocalReranker::load(model_path, tokenizer_path, max_length).map(Self::Local)
+    }
+
+    /// Use a cross-encoder served behind an OpenAI-style `/rerank` endpoint
+    /// (vLLM, TEI, Cohere, Jina, Voyage). Must be called from within a tokio
+    /// runtime: requests are driven on it.
+    pub fn remote(base_url: String, model: String, api_key: String) -> Self {
+        Self::Remote(RemoteReranker {
+            client: reqwest::Client::new(),
+            rt: tokio::runtime::Handle::current(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model,
+            api_key,
+        })
+    }
+
+    /// Score (query, document) pairs. Returns one relevance score per document.
+    pub fn score_pairs(&self, query: &str, documents: &[&str]) -> Result<Vec<f64>, EmbedError> {
+        match self {
+            Self::Local(r) => r.score_pairs(query, documents),
+            Self::Remote(r) => r.score_pairs(query, documents),
+        }
+    }
+}
+
+/// Cross-encoder behind a `/rerank` endpoint. The server is expected to apply
+/// the model's own truncation and to return sigmoid relevance scores, as vLLM,
+/// TEI and the hosted APIs do.
+pub struct RemoteReranker {
+    client: reqwest::Client,
+    rt: tokio::runtime::Handle,
+    base_url: String,
+    model: String,
+    api_key: String,
+}
+
+impl RemoteReranker {
+    pub fn score_pairs(&self, query: &str, documents: &[&str]) -> Result<Vec<f64>, EmbedError> {
+        if documents.is_empty() {
+            return Ok(vec![]);
+        }
+        let body = serde_json::json!({
+            "model": &self.model,
+            "query": query,
+            "documents": documents,
+        });
+        let url = format!("{}/rerank", &self.base_url);
+        let resp = block_on_outside_runtime(
+            &self.rt,
+            post_json(&self.client, &url, &self.api_key, &body, "rerank"),
+        )?;
+        parse_rerank_response(&resp, documents.len())
+    }
+}
+
+/// Read `results[]` of a `/rerank` response into input order.
+fn parse_rerank_response(resp: &serde_json::Value, n: usize) -> Result<Vec<f64>, EmbedError> {
+    let results = resp["results"]
+        .as_array()
+        .ok_or_else(|| EmbedError::Config("missing results in rerank response".into()))?;
+    let mut scores = vec![None; n];
+    for r in results {
+        let idx = r["index"]
+            .as_u64()
+            .ok_or_else(|| EmbedError::Config("rerank result without index".into()))? as usize;
+        let score = r["relevance_score"]
+            .as_f64()
+            .ok_or_else(|| EmbedError::Config("rerank result without relevance_score".into()))?;
+        if idx >= n {
+            return Err(EmbedError::Config(format!(
+                "rerank index {idx} out of range ({n} documents)"
+            )));
+        }
+        scores[idx] = Some(score);
+    }
+    scores
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| {
+            s.ok_or_else(|| EmbedError::Config(format!("rerank response missing document {i}")))
+        })
+        .collect()
+}
+
+/// Local cross-encoder model on ONNX Runtime.
 /// Thread-safe via internal Mutex on the session.
-pub struct Reranker {
+pub struct LocalReranker {
     session: Mutex<Session>,
     tokenizer: Tokenizer,
     max_length: usize,
 }
 
-impl Reranker {
+impl LocalReranker {
     /// Load a cross-encoder ONNX model + tokenizer.
     pub fn load(
         model_path: &Path,
@@ -227,5 +326,35 @@ mod tests {
         assert!((sigmoid(0.0) - 0.5).abs() < 1e-6);
         assert!(sigmoid(10.0) > 0.99);
         assert!(sigmoid(-10.0) < 0.01);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_scores_come_back_in_document_order() {
+        // Servers return results sorted by score, not by input position.
+        let (base, server) = crate::openai::tests::mock_server(vec![serde_json::json!({
+            "results": [
+                {"index": 1, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.1},
+            ]
+        })])
+        .await;
+        let reranker = Reranker::remote(base, "bge".into(), "k".into());
+
+        let scores = tokio::spawn(async move { reranker.score_pairs("q", &["a", "b"]) })
+            .await
+            .expect("rerank task panicked")
+            .unwrap();
+
+        assert_eq!(scores, vec![0.1, 0.9]);
+        let received = server.await.unwrap();
+        assert_eq!(received[0]["model"], "bge");
+        assert_eq!(received[0]["query"], "q");
+        assert_eq!(received[0]["documents"], serde_json::json!(["a", "b"]));
+    }
+
+    #[test]
+    fn rerank_response_missing_a_document_is_an_error() {
+        let resp = serde_json::json!({"results": [{"index": 0, "relevance_score": 0.9}]});
+        assert!(parse_rerank_response(&resp, 2).is_err());
     }
 }
