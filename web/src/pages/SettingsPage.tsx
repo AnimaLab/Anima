@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, RefreshCw, Loader2, Download, Upload, X, AlertTriangle, Check, Pencil, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Loader2, Download, Upload, X, AlertTriangle, Check, Pencil, Trash2, Eye, EyeOff } from 'lucide-react'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -37,6 +37,17 @@ interface ModelInfo {
   id: string
   owned_by?: string
 }
+
+/** Whether an LLM base URL sends requests, API key included, in clear text to another machine. */
+function isInsecureRemoteUrl(url: string): boolean {
+  const u = url.trim().toLowerCase()
+  return u.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(u)
+}
+
+// A type="password" field makes browsers offer to save a password (with the
+// base URL as the user name). Where the browser can mask a text field, the
+// key uses one instead.
+const CAN_MASK_TEXT = typeof CSS !== 'undefined' && CSS.supports('-webkit-text-security', 'disc')
 
 /** The chat model fields edited as a draft in Settings. */
 type ModelFields = Pick<LlmConfig, 'base_url' | 'model' | 'api_key' | 'temperature' | 'max_tokens'>
@@ -147,6 +158,7 @@ export function SettingsPage() {
     base_url: c.base_url, model: c.model, api_key: c.api_key, temperature: c.temperature, max_tokens: c.max_tokens,
   })
   const [modelDraft, setModelDraft] = useState<ModelFields>(() => pickModelFields(config))
+  const [showApiKey, setShowApiKey] = useState(false)
   const modelDirty = JSON.stringify(modelDraft) !== JSON.stringify(pickModelFields(config))
   const saveModel = () => {
     const saved = {
@@ -607,7 +619,14 @@ export function SettingsPage() {
                 <label htmlFor="base-url" className={fieldLabel}>API base URL</label>
                 <input id="base-url" type="text" value={modelDraft.base_url} onChange={e => setModelDraft({ ...modelDraft, base_url: e.target.value })}
                   placeholder="http://localhost:11434/v1"
+                  aria-describedby={isInsecureRemoteUrl(modelDraft.base_url) ? 'base-url-warning' : undefined}
                   className="field" />
+                {isInsecureRemoteUrl(modelDraft.base_url) && (
+                  <p id="base-url-warning" className="text-xs text-warning mt-1.5">
+                    Use https:// for a remote provider. Over http:// the API key travels in clear text, and
+                    providers that redirect to https drop it, which fails with 401.
+                  </p>
+                )}
               </div>
               <div>
                 <label htmlFor="model-name" className={fieldLabel}>Model</label>
@@ -645,12 +664,24 @@ export function SettingsPage() {
 
             <div>
               <label htmlFor="api-key" className={fieldLabel}>API key</label>
-              <input id="api-key" type="password" value={modelDraft.api_key || ''} onChange={e => setModelDraft({ ...modelDraft, api_key: e.target.value || undefined })}
-                placeholder="Optional"
-                autoComplete="off"
-                aria-describedby="api-key-help"
-                className="field" />
-              <p id="api-key-help" className={helpText}>Leave empty for local models. Stored in this browser only.</p>
+              <div className="flex gap-2">
+                <input id="api-key" name="anima-chat-api-key"
+                  type={CAN_MASK_TEXT || showApiKey ? 'text' : 'password'}
+                  style={CAN_MASK_TEXT && !showApiKey ? ({ WebkitTextSecurity: 'disc' } as React.CSSProperties) : undefined}
+                  value={modelDraft.api_key || ''} onChange={e => setModelDraft({ ...modelDraft, api_key: e.target.value || undefined })}
+                  placeholder="Optional"
+                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                  data-1p-ignore data-lpignore="true" data-form-type="other"
+                  aria-describedby="api-key-help"
+                  className="field flex-1 min-w-0" />
+                <button type="button" onClick={() => setShowApiKey(v => !v)}
+                  aria-label={showApiKey ? 'Hide API key' : 'Show API key'} title={showApiKey ? 'Hide API key' : 'Show API key'}
+                  aria-pressed={showApiKey}
+                  className="btn btn-secondary btn-icon shrink-0">
+                  {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+              <p id="api-key-help" className={helpText}>Leave empty to use the server's key for its chat provider. Stored in this browser only.</p>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-x-4 gap-y-5 pt-1">
