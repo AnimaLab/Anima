@@ -4,7 +4,7 @@ import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
 import { api, apiFetch } from '../api/client'
-import type { NamespaceInfo, ProfilesResponse } from '../api/types'
+import type { LlmConfig, NamespaceInfo, ProfilesResponse } from '../api/types'
 
 export interface CognitiveConfig {
   max_tier: number
@@ -37,6 +37,9 @@ interface ModelInfo {
   id: string
   owned_by?: string
 }
+
+/** The chat model fields edited as a draft in Settings. */
+type ModelFields = Pick<LlmConfig, 'base_url' | 'model' | 'api_key' | 'temperature' | 'max_tokens'>
 
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
@@ -137,6 +140,18 @@ export function SettingsPage() {
   const { namespace, setNamespace: setNamespaceRaw, refreshNamespaces: refreshSidebar } = useNamespace()
 
   const setConfig = (c: typeof config) => { setConfigRaw(c); showToast('Settings saved') }
+
+  // The chat model fields are edited as a draft and applied with Save, so a
+  // half-typed URL or model name is never used by the chat.
+  const pickModelFields = (c: LlmConfig): ModelFields => ({
+    base_url: c.base_url, model: c.model, api_key: c.api_key, temperature: c.temperature, max_tokens: c.max_tokens,
+  })
+  const [modelDraft, setModelDraft] = useState<ModelFields>(() => pickModelFields(config))
+  const modelDirty = JSON.stringify(modelDraft) !== JSON.stringify(pickModelFields(config))
+  const saveModel = () => {
+    setConfigRaw({ ...config, ...modelDraft })
+    showToast('Chat model saved')
+  }
   const setNamespace = (ns: string) => { setNamespaceRaw(ns); showToast(`Switched to ${ns}`) }
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([])
   const [newNs, setNewNs] = useState('')
@@ -176,7 +191,10 @@ export function SettingsPage() {
     setModelError(null)
     try {
       const res = await apiFetch('/api/v1/models')
-      if (!res.ok) throw new Error(`${res.status}`)
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `HTTP ${res.status}`)
+      }
       const json = await res.json()
       const list: ModelInfo[] = (json.data || []).map((m: { id: string; owned_by?: string }) => ({
         id: m.id,
@@ -570,12 +588,17 @@ export function SettingsPage() {
           <Section
             id="model"
             title="Chat model"
-            description="The model that answers in chat. Changes are saved as you make them."
+            description="The model that answers in chat."
+            footer={
+              <button onClick={saveModel} disabled={!modelDirty} className="btn btn-primary">
+                <Check size={15} /> Save chat model
+              </button>
+            }
           >
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="base-url" className={fieldLabel}>API base URL</label>
-                <input id="base-url" type="text" value={config.base_url} onChange={e => setConfig({ ...config, base_url: e.target.value })}
+                <input id="base-url" type="text" value={modelDraft.base_url} onChange={e => setModelDraft({ ...modelDraft, base_url: e.target.value })}
                   placeholder="http://localhost:11434/v1"
                   className="field" />
               </div>
@@ -583,13 +606,16 @@ export function SettingsPage() {
                 <label htmlFor="model-name" className={fieldLabel}>Model</label>
                 <div className="flex gap-2">
                   {models.length > 0 ? (
-                    <select id="model-name" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+                    <select id="model-name" value={modelDraft.model} onChange={e => setModelDraft({ ...modelDraft, model: e.target.value })}
                       className="field flex-1 min-w-0">
-                      {!models.find(m => m.id === config.model) && <option value={config.model}>{config.model}</option>}
+                      {!modelDraft.model && <option value="" disabled>Select a model</option>}
+                      {modelDraft.model && !models.find(m => m.id === modelDraft.model) && (
+                        <option value={modelDraft.model}>{modelDraft.model} (not detected)</option>
+                      )}
                       {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
                     </select>
                   ) : (
-                    <input id="model-name" type="text" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })}
+                    <input id="model-name" type="text" value={modelDraft.model} onChange={e => setModelDraft({ ...modelDraft, model: e.target.value })}
                       placeholder="model name"
                       className="field flex-1 min-w-0" />
                   )}
@@ -598,13 +624,21 @@ export function SettingsPage() {
                     {loadingModels ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
                   </button>
                 </div>
-                {modelError && <p className="text-xs text-warning mt-1.5">Could not fetch models. Enter the name manually.</p>}
+                <p role="status" className={`text-xs mt-1.5 ${!loadingModels && (modelError || models.length === 0) ? 'text-warning' : 'text-ink-muted'}`}>
+                  {loadingModels
+                    ? 'Detecting models…'
+                    : modelError
+                      ? `Could not fetch models (${modelError}). Enter the name manually.`
+                      : models.length > 0
+                        ? `${models.length} model${models.length > 1 ? 's' : ''} detected on the server's chat provider.`
+                        : 'No models detected on the server\'s chat provider. Enter the name manually.'}
+                </p>
               </div>
             </div>
 
             <div>
               <label htmlFor="api-key" className={fieldLabel}>API key</label>
-              <input id="api-key" type="password" value={config.api_key || ''} onChange={e => setConfig({ ...config, api_key: e.target.value || undefined })}
+              <input id="api-key" type="password" value={modelDraft.api_key || ''} onChange={e => setModelDraft({ ...modelDraft, api_key: e.target.value || undefined })}
                 placeholder="Optional"
                 autoComplete="off"
                 aria-describedby="api-key-help"
@@ -616,10 +650,10 @@ export function SettingsPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label htmlFor="temperature" className="text-[13px] font-medium text-ink">Temperature</label>
-                  <span className="text-[13px] text-ink font-mono tabular-nums">{(config.temperature ?? 0.7).toFixed(2)}</span>
+                  <span className="text-[13px] text-ink font-mono tabular-nums">{(modelDraft.temperature ?? 0.7).toFixed(2)}</span>
                 </div>
-                <input id="temperature" type="range" min="0" max="2" step="0.05" value={config.temperature ?? 0.7}
-                  onChange={e => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                <input id="temperature" type="range" min="0" max="2" step="0.05" value={modelDraft.temperature ?? 0.7}
+                  onChange={e => setModelDraft({ ...modelDraft, temperature: parseFloat(e.target.value) })}
                   className="w-full" />
                 <div className="flex justify-between text-xs text-ink-muted mt-1">
                   <span>Precise</span><span>Creative</span>
@@ -628,10 +662,10 @@ export function SettingsPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label htmlFor="max-tokens" className="text-[13px] font-medium text-ink">Max tokens</label>
-                  <span className="text-[13px] text-ink font-mono tabular-nums">{config.max_tokens ?? 4096}</span>
+                  <span className="text-[13px] text-ink font-mono tabular-nums">{modelDraft.max_tokens ?? 4096}</span>
                 </div>
-                <input id="max-tokens" type="range" min="256" max="16384" step="256" value={config.max_tokens ?? 4096}
-                  onChange={e => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
+                <input id="max-tokens" type="range" min="256" max="16384" step="256" value={modelDraft.max_tokens ?? 4096}
+                  onChange={e => setModelDraft({ ...modelDraft, max_tokens: parseInt(e.target.value) })}
                   className="w-full" />
                 <div className="flex justify-between text-xs text-ink-muted mt-1 tabular-nums">
                   <span>256</span><span>16384</span>
