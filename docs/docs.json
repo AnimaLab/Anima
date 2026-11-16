@@ -3,9 +3,13 @@
   "theme": "mint",
   "name": "Anima",
   "colors": {
-    "primary": "#7C3AED",
-    "light": "#A78BFA",
-    "dark": "#5B21B6"
+    "primary": "#7A5E00",
+    "light": "#FCEE0A",
+    "dark": "#5C4700"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
   "navigation": {
