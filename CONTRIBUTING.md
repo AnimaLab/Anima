@@ -20,6 +20,19 @@ cd web && npm install && npm run build
 cd mcp && npm install && npm run build
 ```
 
+## Pre-commit hook
+
+`.githooks/pre-commit` runs the checks for what a commit touches: no Rust
+compiler warning and the workspace tests for `crates/`, the production build
+for `web/`, the type check for `mcp/`. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`git commit --no-verify` skips it for one commit. CI fails on compiler
+warnings too.
+
 ## Pull Request Expectations
 
 - Keep changes focused and easy to review.

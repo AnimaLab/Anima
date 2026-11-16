@@ -61,6 +61,8 @@ pub struct ScorerConfig {
     pub date_start: Option<String>,
     /// Optional ISO 8601 date filter (inclusive end).
     pub date_end: Option<String>,
+    /// Only memories of this category (e.g. "preference").
+    pub category: Option<String>,
     /// Per-category decay lambda overrides. Key = category name, value = lambda.
     /// Categories not in this map fall back to `self.lambda`.
     pub category_lambdas: HashMap<String, f64>,
@@ -83,6 +85,7 @@ impl Default for ScorerConfig {
             max_tier: 4,
             date_start: None,
             date_end: None,
+            category: None,
             category_lambdas: HashMap::new(),
         }
     }

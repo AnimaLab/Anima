@@ -1663,6 +1663,7 @@ pub async fn search_memories(
     }
     scorer_config.date_start = req.date_start;
     scorer_config.date_end = req.date_end;
+    scorer_config.category = req.category.filter(|c| !c.trim().is_empty());
 
     // ── ask_retrieval mode: full multi-stage pipeline, return as search results ──
     if matches!(mode, SearchMode::AskRetrieval) {

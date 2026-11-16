@@ -22,4 +22,6 @@ jobs:
       - name: Run workspace tests
         env:
           ANIMA_LLM_MODE: mock
+          # A compiler warning fails the build, as in the pre-commit hook.
+          RUSTFLAGS: -D warnings
         run: cargo test --workspace --quiet

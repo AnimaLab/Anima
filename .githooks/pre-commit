@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Pre-commit checks for Anima. Enable once per clone:
+#   git config core.hooksPath .githooks
+# Skip for one commit with `git commit --no-verify`.
+#
+# Only the parts of the repository that the commit touches are checked:
+# - Rust (crates/, Cargo.*, config.default.toml): no compiler warning, tests pass
+# - web/: type check and production build
+# - mcp/: type check
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+touches() { grep -qE "$1" <<<"$staged"; }
+
+step() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
+fail() { printf '\n\033[31m✗ %s\033[0m\nFix it, or commit with --no-verify to skip the checks.\n' "$1" >&2; exit 1; }
+
+if touches '^(crates/|Cargo\.(toml|lock)$|config\.default\.toml$)'; then
+  step "cargo check (warnings fail the commit)"
+  log="$(mktemp)"
+  cargo check --workspace --all-targets --message-format short 2>&1 | tee "$log" >/dev/null || { cat "$log"; fail "cargo check failed"; }
+  # Short format: "path:line:col: warning: message".
+  if grep -E ':[0-9]+:[0-9]+: (warning|error)' "$log" >&2; then
+    fail "the Rust code has compiler warnings"
+  fi
+  rm -f "$log"
+
+  step "cargo test"
+  ANIMA_LLM_MODE=mock cargo test --workspace --quiet >/dev/null 2>&1 \
+    || { ANIMA_LLM_MODE=mock cargo test --workspace --quiet 2>&1 | tail -40; fail "tests failed"; }
+fi
+
+if touches '^web/'; then
+  step "web: build"
+  (cd web && npm run build >/dev/null 2>&1) || { (cd web && npm run build 2>&1 | tail -30); fail "the web UI does not build"; }
+fi
+
+if touches '^mcp/'; then
+  step "mcp: type check"
+  (cd mcp && npx --no-install tsc --noEmit) || fail "the MCP bridge does not type-check"
+fi
+
+printf '\n\033[32m✓ pre-commit checks passed\033[0m\n'
