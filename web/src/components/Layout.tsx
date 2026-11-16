@@ -4,12 +4,13 @@ import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Tras
 import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
 import { AboutAnima, aboutSeen } from './AboutAnima'
 import { ReleaseNotes } from './ReleaseNotes'
+import { SetupDialog, setupPostponed } from './ModelSetup'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
 import { api } from '../api/client'
 import type { DisplayMessage } from '../hooks/useChat'
-import type { NamespaceInfo, UpdateStatus } from '../api/types'
+import type { NamespaceInfo, SetupStatus, UpdateStatus } from '../api/types'
 
 const navGroups = [
   {
@@ -96,6 +97,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const closeNotes = useCallback(() => setNotesOpen(false), [])
   useEffect(() => {
     api.getUpdates().then(setUpdate).catch(() => {})
+  }, [])
+
+  // First run: the server still runs on the shipped config.
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
+  const [setupOpen, setSetupOpen] = useState(false)
+  useEffect(() => {
+    api.getSetup().then(s => { setSetup(s); setSetupOpen(!s.configured && !setupPostponed()) }).catch(() => {})
   }, [])
 
   // Poll processor status for LLM errors
@@ -385,7 +393,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell flex h-screen bg-paper text-ink">
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <AboutAnima open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {setupOpen && setup && <SetupDialog status={setup} onClose={() => setSetupOpen(false)} />}
+      <AboutAnima open={aboutOpen && !setupOpen} onClose={() => setAboutOpen(false)} />
       {notesOpen && update && <ReleaseNotes update={update} onClose={closeNotes} />}
 
       {/* Mobile overlay */}

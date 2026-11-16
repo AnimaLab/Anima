@@ -48,9 +48,20 @@ pub struct AppState {
     pub vec_status: tokio::sync::RwLock<anima_db::vector::VecTableStatus>,
     /// Latest release found by the update check, if any.
     pub latest_release: tokio::sync::RwLock<Option<crate::updates::LatestRelease>>,
+    /// Which config file the server runs on, for the model setup.
+    pub config_source: crate::setup::ConfigSource,
+    /// Set once a saved setup asks the server to restart.
+    pub restart_requested: AtomicBool,
+    pub restart: tokio::sync::Notify,
 }
 
 impl AppState {
+    /// Stop serving (gracefully) and start again with the saved config.
+    pub fn request_restart(&self) {
+        self.restart_requested.store(true, Ordering::SeqCst);
+        self.restart.notify_one();
+    }
+
     pub fn record_ingestion(&self, count: u64) {
         self.ingested_count.fetch_add(count, Ordering::Relaxed);
     }
@@ -254,6 +265,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(handlers::generate_title),
         )
         .route("/api/v1/updates", get(handlers::get_updates))
+        .route("/api/v1/setup", get(crate::setup::get_setup).put(crate::setup::put_setup))
+        .route("/api/v1/setup/models", post(crate::setup::list_models))
         .route(
             "/api/v1/telemetry/config",
             get(handlers::get_telemetry_config).put(handlers::set_telemetry_config),

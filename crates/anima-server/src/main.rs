@@ -8,6 +8,7 @@ mod handlers;
 mod processor;
 mod prompts;
 mod service;
+mod setup;
 mod skills;
 mod telemetry;
 mod updates;
@@ -62,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load config — skip flags when looking for config path
     let config_path = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
-    let config = AppConfig::load(config_path.as_deref());
+    let (config, config_file) = AppConfig::load_with_source(config_path.as_deref());
 
     tracing::info!("Starting Anima v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Database: {}", config.database.path);
@@ -270,7 +271,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 other => {
                     tracing::warn!(domain = "llm", "Unknown consolidation backend '{other}', disabling");
-                    return Ok(start_server(store, embedder, None, &config, resolved_profiles, vec_status).await?);
+                    return Ok(start_server(store, embedder, None, &config, config_file, resolved_profiles, vec_status).await?);
                 }
             };
         tracing::info!(domain = "llm", "Startup check passed — consolidation LLM configured");
@@ -283,7 +284,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    start_server(store, embedder, consolidator, &config, resolved_profiles, vec_status).await
+    start_server(store, embedder, consolidator, &config, config_file, resolved_profiles, vec_status).await
 }
 
 async fn start_server(
@@ -291,6 +292,7 @@ async fn start_server(
     embedder: Arc<dyn Embedder>,
     consolidator: Option<Arc<Consolidator>>,
     config: &AppConfig,
+    config_file: Option<std::path::PathBuf>,
     resolved_profiles: crate::config::ResolvedProfiles,
     vec_status: anima_db::vector::VecTableStatus,
 ) -> anyhow::Result<()> {
@@ -460,6 +462,9 @@ async fn start_server(
         ingested_started_at: std::time::Instant::now(),
         vector_configs,
         vec_status: tokio::sync::RwLock::new(vec_status),
+        config_source: setup::ConfigSource { loaded_from: config_file },
+        restart_requested: std::sync::atomic::AtomicBool::new(false),
+        restart: tokio::sync::Notify::new(),
         latest_release: tokio::sync::RwLock::new(
             config.updates.check.then(|| updates::read_cache(&telemetry::anima_dir())).flatten(),
         ),
@@ -585,8 +590,14 @@ async fn start_server(
     // --- Graceful shutdown ---
     // Wait for SIGINT (ctrl-c) or SIGTERM, then drain in-flight work.
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(state))
+        .with_graceful_shutdown(shutdown_signal(state.clone()))
         .await?;
+
+    if state.restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+        // Only returns when the new process could not be started.
+        let err = setup::relaunch();
+        anyhow::bail!("could not restart Anima: {err}. Start it again by hand.");
+    }
 
     Ok(())
 }
@@ -614,6 +625,7 @@ async fn shutdown_signal(state: Arc<AppState>) {
     tokio::select! {
         _ = ctrl_c => tracing::info!("Received SIGINT, starting graceful shutdown..."),
         _ = terminate => tracing::info!("Received SIGTERM, starting graceful shutdown..."),
+        _ = state.restart.notified() => tracing::info!("Restarting to apply the new model setup..."),
     }
 
     // Drain the background processor: drop the sender so workers see channel closed,

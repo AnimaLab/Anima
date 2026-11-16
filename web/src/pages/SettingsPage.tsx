@@ -4,7 +4,8 @@ import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
 import { api, apiFetch } from '../api/client'
-import type { LlmConfig, NamespaceInfo, ProfilesResponse } from '../api/types'
+import type { LlmConfig, NamespaceInfo, ProfilesResponse, SetupStatus } from '../api/types'
+import { ModelFields, RestartWait, saveAndRestart, useModelForm } from '../components/ModelSetup'
 
 export interface CognitiveConfig {
   max_tier: number
@@ -238,6 +239,25 @@ export function SettingsPage() {
   useEffect(() => { refreshNamespaces() }, [])
 
   useEffect(() => { api.getProfiles().then(setProfiles).catch(() => {}) }, [])
+
+  // Server models, saved in config.toml
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
+  useEffect(() => { api.getSetup().then(setSetup).catch(() => {}) }, [])
+  const modelForm = useModelForm(setup)
+  const [savingModels, setSavingModels] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [restarting, setRestarting] = useState<null | { slow: boolean }>(null)
+  const saveModels = async () => {
+    const body = modelForm.toRequest()
+    if (!body) return
+    setSavingModels(true); setModelsError(null)
+    const err = await saveAndRestart(body)
+    setSavingModels(false)
+    if (err) { setModelsError(err); return }
+    const nowLocal = (body.embedding.backend === 'local' && setup?.embedding.backend !== 'local')
+      || (body.reranker.enabled && body.reranker.backend === 'local' && !(setup?.reranker.enabled && setup.reranker.backend === 'local'))
+    setRestarting({ slow: nowLocal })
+  }
   useEffect(() => {
     api.getTelemetryConfig().then(res => {
       setTelemetryEnabled(res.enabled)
@@ -421,6 +441,7 @@ export function SettingsPage() {
   const sections = [
     { id: 'namespaces', label: 'Namespaces' },
     { id: 'identity', label: 'Identity' },
+    ...(setup ? [{ id: 'server-models', label: 'Server models' }] : []),
     { id: 'model', label: 'Chat model' },
     { id: 'capabilities', label: 'Capabilities' },
     { id: 'tiers', label: 'Search tiers' },
@@ -603,6 +624,28 @@ export function SettingsPage() {
               <p id="agent-persona-help" className={helpText}>Persona, tone, and behavior. Sent as the system prompt with every message.</p>
             </div>
           </Section>
+
+          {/* ── Server models (config.toml) ── */}
+          {setup && (
+            <Section
+              id="server-models"
+              title="Server models"
+              description={<>The models Anima runs on, for every client. Saved in <code className="bg-paper-deep px-1 py-0.5 rounded text-xs">{setup.config_file}</code>; saving restarts the server.</>}
+              footer={
+                <>
+                  {modelsError && <p role="alert" className="mr-auto self-center text-[13px] text-danger">{modelsError}</p>}
+                  <button onClick={modelForm.reset} disabled={!modelForm.dirty || savingModels} className="btn btn-ghost">Reset</button>
+                  <button onClick={saveModels} disabled={!modelForm.dirty || savingModels || !modelForm.url.trim() || !modelForm.chat.trim()} className="btn btn-primary">
+                    {savingModels ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                    {savingModels ? 'Checking the models…' : 'Save and restart'}
+                  </button>
+                </>
+              }
+            >
+              <ModelFields form={modelForm} />
+            </Section>
+          )}
+          {restarting && <RestartWait slow={restarting.slow} />}
 
           {/* ── Chat model ── */}
           <Section
