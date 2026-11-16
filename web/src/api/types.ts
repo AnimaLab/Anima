@@ -313,6 +313,25 @@ export interface ProfilesResponse {
   }
 }
 
+// --- Model setup ---
+
+export interface SetupStatus {
+  configured: boolean
+  config_file: string
+  restart_supported: boolean
+  memories: number
+  embedding: { backend: 'local' | 'openai_compat'; base_url: string | null; model: string; dimension: number; has_key: boolean }
+  llm: { base_url: string; model: string; has_key: boolean; from_profiles: boolean }
+  reranker: { enabled: boolean; backend: 'local' | 'openai_compat'; base_url: string | null; model: string | null; has_key: boolean }
+}
+
+export interface SetupRequest {
+  embedding: { backend: 'local' | 'openai_compat'; base_url?: string; model?: string; api_key?: string }
+  llm?: { base_url: string; model: string; api_key?: string }
+  reranker: { enabled: boolean; backend?: 'local' | 'openai_compat'; base_url?: string; model?: string; api_key?: string }
+  restart?: boolean
+}
+
 // --- Telemetry ---
 
 export interface TelemetryConfig {

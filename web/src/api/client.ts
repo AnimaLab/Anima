@@ -1,4 +1,6 @@
 import type {
+  SetupStatus,
+  SetupRequest,
   AddMemoryRequest, AddMemoryResponse, SearchRequest, SearchResponse,
   ListMemoriesResponse, NamespaceStats, NamespaceInfo, GraphData, Memory,
   ChatRequest, ChatResponse, Conversation, ConversationSummary,
@@ -240,6 +242,20 @@ export const api = {
     request<{ title: string }>(`/api/v1/conversations/${convId}/title`, {
       method: 'POST',
       body: JSON.stringify(llm),
+    }),
+
+  // Model setup (config.toml)
+  getSetup: () =>
+    request<SetupStatus>('/api/v1/setup'),
+  listSetupModels: (base_url: string, api_key?: string) =>
+    request<{ models: string[] }>('/api/v1/setup/models', {
+      method: 'POST',
+      body: JSON.stringify({ base_url, api_key }),
+    }),
+  saveSetup: (body: SetupRequest) =>
+    request<{ config_file: string; restarting: boolean }>('/api/v1/setup', {
+      method: 'PUT',
+      body: JSON.stringify(body),
     }),
 
   // Profiles

@@ -700,10 +700,16 @@ impl AppConfig {
 
     /// Load config from file, falling back to defaults.
     pub fn load(path: Option<&str>) -> Self {
+        Self::load_with_source(path).0
+    }
+
+    /// Load config like [`AppConfig::load`], and also say which file it came
+    /// from (`None` when the built-in defaults are used).
+    pub fn load_with_source(path: Option<&str>) -> (Self, Option<std::path::PathBuf>) {
         if let Some(p) = path {
             if let Ok(content) = std::fs::read_to_string(p) {
                 if let Ok(config) = toml::from_str(&content) {
-                    return config;
+                    return (config, Some(p.into()));
                 }
                 tracing::warn!("Failed to parse config file {p}, using defaults");
             }
@@ -713,11 +719,11 @@ impl AppConfig {
         for candidate in &["config.toml", "config.default.toml"] {
             if let Ok(content) = std::fs::read_to_string(candidate) {
                 if let Ok(config) = toml::from_str(&content) {
-                    return config;
+                    return (config, Some((*candidate).into()));
                 }
             }
         }
 
-        Self::default()
+        (Self::default(), None)
     }
 }
