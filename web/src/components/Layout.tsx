@@ -311,20 +311,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
             )}
           </div>
         ))}
-      </nav>
 
-      {/* About */}
-      <div className={`px-2 pb-2 ${showLabels ? '' : 'flex justify-center'}`}>
+        {/* About: last entry of the menu, scrolling with it */}
         <button
           onClick={() => setAboutOpen(true)}
           aria-label={!showLabels ? 'About Anima' : undefined}
           title={!showLabels ? 'About Anima' : undefined}
-          className={`nav-item w-full ${showLabels ? 'gap-2.5 px-2' : 'justify-center w-8'}`}
+          className={`nav-item ${showLabels ? 'w-full gap-2.5 px-2' : 'justify-center w-8 mx-auto'}`}
         >
           <Info size={16} className="shrink-0" />
           {showLabels && 'About Anima'}
         </button>
-      </div>
+      </nav>
 
       {/* Theme */}
       <div className={`border-t border-warm-border ${showLabels ? 'p-3' : 'p-2 flex justify-center'}`}>
