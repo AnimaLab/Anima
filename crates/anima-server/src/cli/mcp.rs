@@ -298,6 +298,30 @@ fn current_project(args: &Value) -> Option<String> {
         .or_else(|| args.get("project").and_then(Value::as_str).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string))
 }
 
+/// The body of `POST /api/v1/memories` for a `memory_add` call made while
+/// working on `project`.
+fn add_body(args: &Value, project: Option<String>) -> Value {
+    let mut body = pick(args, &["content", "tags", "consolidate", "category", "scope"]);
+    body.entry("consolidate").or_insert(json!(true));
+    if let Some(project) = project {
+        body.insert("project".into(), json!(project));
+    }
+    Value::Object(body)
+}
+
+/// The namespace a `memory_search` runs in when it is not the base one:
+/// `<base>/<project>` for `scope: "project"`.
+fn search_namespace(base: &str, args: &Value, project: Option<String>) -> anyhow::Result<Option<String>> {
+    if args.get("scope").and_then(Value::as_str) != Some("project") {
+        return Ok(None);
+    }
+    let project = project.ok_or_else(|| anyhow::anyhow!("no current project: pass project, or search with scope all"))?;
+    let ns = anima_core::namespace::Namespace::parse(base)?
+        .child(&project)
+        .ok_or_else(|| anyhow::anyhow!("'{project}' cannot name a namespace"))?;
+    Ok(Some(ns.as_str().to_string()))
+}
+
 async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
     use reqwest::Method;
     match name {
@@ -309,26 +333,15 @@ async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
             ]);
             body.entry("limit").or_insert(json!(10));
             body.entry("search_mode").or_insert(json!("hybrid"));
-            if args.get("scope").and_then(Value::as_str) == Some("project") {
-                let project = current_project(args).ok_or_else(|| {
-                    anyhow::anyhow!("no current project: pass project, or search with scope all")
-                })?;
-                let ns = anima_core::namespace::Namespace::parse(api.namespace())?
-                    .child(&project)
-                    .ok_or_else(|| anyhow::anyhow!("'{project}' cannot name a namespace"))?;
-                let req = api.request_in(Method::POST, "/api/v1/memories/search", ns.as_str());
+            if let Some(ns) = search_namespace(api.namespace(), args, current_project(args))? {
+                let req = api.request_in(Method::POST, "/api/v1/memories/search", &ns);
                 return api.json(req.json(&Value::Object(body))).await;
             }
             api.post("/api/v1/memories/search", &Value::Object(body)).await
         }
         "memory_add" => {
             required_str(args, "content")?;
-            let mut body = pick(args, &["content", "tags", "consolidate", "category", "scope"]);
-            body.entry("consolidate").or_insert(json!(true));
-            if let Some(project) = current_project(args) {
-                body.insert("project".into(), json!(project));
-            }
-            api.post("/api/v1/memories", &Value::Object(body)).await
+            api.post("/api/v1/memories", &add_body(args, current_project(args))).await
         }
         "memory_update" => {
             let id = required_str(args, "id")?;
@@ -417,6 +430,26 @@ async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_add_sends_the_current_project_and_the_scope() {
+        let args = json!({ "content": "Uses tabs", "scope": "global", "ignored": 1 });
+        let body = add_body(&args, Some("Billing-API".into()));
+        assert_eq!(body, json!({ "content": "Uses tabs", "scope": "global", "consolidate": true, "project": "Billing-API" }));
+        assert!(add_body(&json!({ "content": "x" }), None).get("project").is_none());
+    }
+
+    #[test]
+    fn a_project_search_runs_in_the_project_namespace() {
+        let project = || Some("Billing API".to_string());
+        assert_eq!(search_namespace("default", &json!({}), project()).unwrap(), None);
+        assert_eq!(search_namespace("default", &json!({ "scope": "all" }), project()).unwrap(), None);
+        assert_eq!(
+            search_namespace("work/team", &json!({ "scope": "project" }), project()).unwrap().as_deref(),
+            Some("work/team/billing-api")
+        );
+        assert!(search_namespace("default", &json!({ "scope": "project" }), None).is_err());
+    }
     use crate::cli::ClientSettings;
 
     fn api() -> Api {

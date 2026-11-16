@@ -624,3 +624,36 @@ mod tests {
         assert!(usable_project(None).is_none());
     }
 }
+
+#[cfg(test)]
+mod project_tests {
+    use super::*;
+    use crate::test_support::{put, state};
+
+    async fn session(state: &Arc<AppState>, project: Option<&str>) -> BriefingResponse {
+        let req: BriefingRequest = serde_json::from_value(serde_json::json!({ "mode": "session", "project": project })).unwrap();
+        let ns = Namespace::parse("default").unwrap();
+        briefing(State(state.clone()), ExtractNamespace(ns), Json(req)).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn a_session_sees_its_project_and_not_the_other_projects_preferences() {
+        let state = state(None);
+        let general = put(&state, "default", "Prefers short answers without preamble", "preference").await;
+        let billing_pref = put(&state, "default/billing", "Error messages are written in French", "preference").await;
+        let billing_fact = put(&state, "default/billing", "Releases are tagged vX.Y.Z and deployed on Tuesdays", "general").await;
+        let website_pref = put(&state, "default/website", "Indents with tabs", "preference").await;
+
+        let brief = session(&state, Some("billing")).await;
+        let section = |id: &str| brief.memories.iter().find(|m| m.id == id).map(|m| m.section.clone());
+        assert_eq!(section(&general).as_deref(), Some("profile"));
+        assert_eq!(section(&billing_pref).as_deref(), Some("profile"));
+        assert_eq!(section(&billing_fact).as_deref(), Some("project"), "found by namespace, without naming the project");
+        assert_eq!(section(&website_pref), None, "another project's preference stays there");
+
+        // Without a project, only the namespace's own profile.
+        let plain = session(&state, None).await;
+        assert!(plain.memories.iter().any(|m| m.id == general));
+        assert!(plain.memories.iter().all(|m| m.id != billing_pref && m.id != website_pref));
+    }
+}

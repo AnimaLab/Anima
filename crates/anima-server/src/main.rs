@@ -11,6 +11,8 @@ mod service;
 mod setup;
 mod skills;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod updates;
 
 use std::net::SocketAddr;

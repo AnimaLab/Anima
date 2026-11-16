@@ -5636,6 +5636,63 @@ mod tests {
 
     use super::*;
 
+    fn add_request(content: &str, project: Option<&str>, scope: Option<&str>) -> AddMemoryRequest {
+        serde_json::from_value(serde_json::json!({
+            "content": content, "project": project, "scope": scope, "category": "preference",
+        }))
+        .unwrap()
+    }
+
+    async fn add(state: &Arc<AppState>, req: AddMemoryRequest) -> AddMemoryResponse {
+        let ns = anima_core::namespace::Namespace::parse("default").unwrap();
+        add_memory(State(state.clone()), ExtractNamespace(ns), Json(req)).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn a_project_memory_is_stored_and_reported_in_its_project() {
+        let state = crate::test_support::state(None);
+        let saved = add(&state, add_request("Error messages are written in French", Some("Billing API"), None)).await;
+        assert_eq!((saved.action.as_str(), saved.namespace.as_str()), ("created", "default/billing-api"));
+        let stored = state.store.get(&saved.id).await.unwrap().unwrap();
+        assert_eq!(stored.namespace, "default/billing-api");
+
+        let global = add(&state, add_request("Prefers short answers", Some("Billing API"), Some("global"))).await;
+        assert_eq!(global.namespace, "default");
+    }
+
+    #[tokio::test]
+    async fn the_same_text_is_one_memory_across_projects() {
+        let state = crate::test_support::state(None);
+        let first = add(&state, add_request("Uses pnpm, not npm, in JavaScript projects", Some("web"), None)).await;
+        let again = add(&state, add_request("Uses pnpm, not npm, in JavaScript projects", Some("api"), None)).await;
+        assert_eq!(again.action, "deduplicated");
+        assert_eq!(again.id, first.id);
+        assert_eq!(again.namespace, "default/web", "the answer says where the existing memory is");
+    }
+
+    #[tokio::test]
+    async fn a_project_fact_is_never_consolidated_with_a_general_one() {
+        // A project exception ("tabs in this repo") must not supersede or be
+        // swallowed by the general rule.
+        let llm = Arc::new(crate::test_support::FixedLlm {
+            reply: r#"{"action":"no_change"}"#.into(),
+            calls: Default::default(),
+        });
+        let state = crate::test_support::state(Some(llm.clone()));
+        let general = crate::test_support::put(&state, "default", "Indents code with four spaces", "preference").await;
+
+        let project = add(&state, add_request("Indents code with tabs, four spaces wide", Some("legacy"), None)).await;
+        assert_eq!(llm.calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no candidate outside the project namespace");
+        assert_eq!((project.action.as_str(), project.namespace.as_str()), ("created", "default/legacy"));
+        let kept = state.store.get(&general).await.unwrap().unwrap();
+        assert_eq!(kept.status, anima_core::memory::MemoryStatus::Active);
+
+        // Control: a close text at the root does meet the general memory.
+        let at_root = add(&state, add_request("Indents code with tabs that are four spaces wide", None, None)).await;
+        assert_eq!(llm.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!((at_root.action.as_str(), at_root.id.as_str()), ("no_change", general.as_str()));
+    }
+
     #[test]
     fn a_project_memory_goes_below_the_namespace_and_a_global_one_stays() {
         let ns = anima_core::namespace::Namespace::parse("default").unwrap();
