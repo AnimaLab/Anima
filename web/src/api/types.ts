@@ -119,6 +119,9 @@ export interface UpdateStatus {
   latest: string | null
   url: string | null
   checked_at: string | null
+  name: string | null
+  notes: string | null
+  published_at: string | null
   update_available: boolean
 }
 

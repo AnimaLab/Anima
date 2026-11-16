@@ -24,6 +24,15 @@ pub struct LatestRelease {
     pub url: String,
     /// RFC 3339 time of the check.
     pub checked_at: String,
+    /// Release title, e.g. "Anima v0.4.0".
+    #[serde(default)]
+    pub name: String,
+    /// Release notes, in Markdown.
+    #[serde(default)]
+    pub notes: String,
+    /// RFC 3339 publication time.
+    #[serde(default)]
+    pub published_at: Option<String>,
 }
 
 /// What `GET /api/v1/updates` reports.
@@ -34,6 +43,10 @@ pub struct UpdateStatus {
     pub latest: Option<String>,
     pub url: Option<String>,
     pub checked_at: Option<String>,
+    pub name: Option<String>,
+    /// Release notes of the latest release, in Markdown.
+    pub notes: Option<String>,
+    pub published_at: Option<String>,
     pub update_available: bool,
 }
 
@@ -45,6 +58,9 @@ impl UpdateStatus {
             latest: latest.map(|l| l.version.clone()),
             url: latest.map(|l| l.url.clone()),
             checked_at: latest.map(|l| l.checked_at.clone()),
+            name: latest.map(|l| l.name.clone()).filter(|n| !n.is_empty()),
+            notes: latest.map(|l| l.notes.clone()).filter(|n| !n.is_empty()),
+            published_at: latest.and_then(|l| l.published_at.clone()),
             update_available: latest.is_some_and(|l| is_newer(&l.version, CURRENT_VERSION)),
         }
     }
@@ -98,6 +114,12 @@ fn is_stale(latest: &LatestRelease, now: chrono::DateTime<chrono::Utc>) -> bool 
 struct GithubRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    published_at: Option<String>,
 }
 
 /// Parse the GitHub `releases/latest` body (the endpoint already leaves out
@@ -106,7 +128,14 @@ fn parse_release(body: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Lates
     let release: GithubRelease = serde_json::from_str(body).ok()?;
     let version = release.tag_name.trim().trim_start_matches('v').to_string();
     parse(&version)?;
-    Some(LatestRelease { version, url: release.html_url, checked_at: now.to_rfc3339() })
+    Some(LatestRelease {
+        version,
+        url: release.html_url,
+        checked_at: now.to_rfc3339(),
+        name: release.name.unwrap_or_default(),
+        notes: release.body.unwrap_or_default(),
+        published_at: release.published_at,
+    })
 }
 
 async fn fetch_latest(client: &reqwest::Client) -> Result<LatestRelease, String> {
@@ -192,10 +221,20 @@ mod tests {
     #[test]
     fn release_body_is_read_and_the_v_dropped() {
         let now = chrono::Utc::now();
-        let body = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/AnimaLab/Anima/releases/tag/v0.4.0","draft":false}"#;
+        let body = r###"{"tag_name":"v0.4.0","html_url":"https://github.com/AnimaLab/Anima/releases/tag/v0.4.0","draft":false,
+            "name":"Anima v0.4.0","body":"## Fixes\n- one","published_at":"2026-12-01T10:00:00Z"}"###;
         let latest = parse_release(body, now).unwrap();
         assert_eq!(latest.version, "0.4.0");
         assert_eq!(latest.url, "https://github.com/AnimaLab/Anima/releases/tag/v0.4.0");
+        assert_eq!(latest.name, "Anima v0.4.0");
+        assert_eq!(latest.notes, "## Fixes\n- one");
+        assert_eq!(latest.published_at.as_deref(), Some("2026-12-01T10:00:00Z"));
+        // A release without a title or notes is still offered.
+        let bare = parse_release(r#"{"tag_name":"v0.4.0","html_url":"u","body":null}"#, now).unwrap();
+        assert!(bare.notes.is_empty() && bare.name.is_empty());
+        // A cache written before the notes were kept still reads.
+        let old: LatestRelease = serde_json::from_str(r#"{"version":"0.3.0","url":"u","checked_at":"t"}"#).unwrap();
+        assert!(old.notes.is_empty() && old.published_at.is_none());
         assert!(parse_release(r#"{"tag_name":"nightly","html_url":"x"}"#, now).is_none());
         assert!(parse_release("not json", now).is_none());
     }
@@ -222,6 +261,7 @@ mod tests {
             version: "999.0.0".into(),
             url: "https://example.test/release".into(),
             checked_at: chrono::Utc::now().to_rfc3339(),
+            ..Default::default()
         };
         write_cache(dir.path(), &newer).unwrap();
         assert_eq!(read_cache(dir.path()).as_ref(), Some(&newer));
@@ -234,10 +274,18 @@ mod tests {
 
     #[test]
     fn status_reports_an_update_only_when_newer() {
-        let latest = LatestRelease { version: "999.0.0".into(), url: "u".into(), checked_at: "t".into() };
+        let latest = LatestRelease {
+            version: "999.0.0".into(),
+            url: "u".into(),
+            checked_at: "t".into(),
+            notes: "## New".into(),
+            ..Default::default()
+        };
         let status = UpdateStatus::new(true, Some(&latest));
         assert!(status.update_available);
         assert_eq!(status.latest.as_deref(), Some("999.0.0"));
+        assert_eq!(status.notes.as_deref(), Some("## New"));
+        assert!(status.name.is_none(), "an empty title is reported as absent");
         assert!(!UpdateStatus::new(true, None).update_available);
     }
 }

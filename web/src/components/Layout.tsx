@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen, Info, ArrowUpCircle } from 'lucide-react'
 import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
 import { AboutAnima, aboutSeen } from './AboutAnima'
+import { ReleaseNotes } from './ReleaseNotes'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -91,6 +92,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   // The server checks GitHub once a day; this only reads its answer.
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const closeNotes = useCallback(() => setNotesOpen(false), [])
   useEffect(() => {
     api.getUpdates().then(setUpdate).catch(() => {})
   }, [])
@@ -222,14 +225,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Navigation */}
       <nav aria-label="Main" className="flex-1 px-2 pb-2 overflow-y-auto space-y-4">
-        {update?.update_available && update.url && (
-          <a
-            href={update.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Anima ${update.latest} is available, you run ${update.current}. Open the release notes`}
+        {update?.update_available && (
+          <button
+            type="button"
+            onClick={() => setNotesOpen(true)}
+            aria-haspopup="dialog"
+            aria-label={`Anima ${update.latest} is available, you run ${update.current}. Show the release notes`}
             title={`Anima ${update.latest} is available (you run ${update.current})`}
-            className={`flex items-center rounded-md border border-accent/40 bg-accent/10 text-ink hover:bg-accent/20 transition-colors ${showLabels ? 'gap-2.5 px-2 py-2' : 'justify-center w-8 h-8 mx-auto'}`}
+            className={`flex items-center text-left rounded-md border border-accent/40 bg-accent/10 text-ink hover:bg-accent/20 transition-colors ${showLabels ? 'w-full gap-2.5 px-2 py-2' : 'justify-center w-8 h-8 mx-auto'}`}
           >
             <ArrowUpCircle size={16} className="shrink-0 text-accent" />
             {showLabels && (
@@ -238,7 +241,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <span className="block text-xs text-ink-muted">v{update.latest} · you run v{update.current}</span>
               </span>
             )}
-          </a>
+          </button>
         )}
         {navGroups.map((group, gi) => (
           <div key={group.label}>
@@ -386,6 +389,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="app-shell flex h-screen bg-paper text-ink">
       <a href="#main-content" className="skip-link">Skip to content</a>
       <AboutAnima open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {notesOpen && update && <ReleaseNotes update={update} onClose={closeNotes} />}
 
       {/* Mobile overlay */}
       {mobileOpen && (
