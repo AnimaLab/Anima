@@ -99,6 +99,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     api.getUpdates().then(setUpdate).catch(() => {})
   }, [])
+  // The running server's version, shown at the foot of the menu.
+  const version = update?.current
 
   // First run: the server still runs on the shipped config.
   const [setup, setSetup] = useState<SetupStatus | null>(null)
@@ -351,12 +353,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* About: last entry of the menu, scrolling with it */}
         <button
           onClick={() => setAboutOpen(true)}
-          aria-label={!showLabels ? 'About Anima' : undefined}
-          title={!showLabels ? 'About Anima' : undefined}
+          aria-label={!showLabels ? `About Anima${version ? ` v${version}` : ''}` : undefined}
+          title={!showLabels ? `About Anima${version ? ` v${version}` : ''}` : undefined}
           className={`nav-item ${showLabels ? 'w-full gap-2.5 px-2' : 'justify-center w-8 mx-auto'}`}
         >
           <Info size={16} className="shrink-0" />
-          {showLabels && 'About Anima'}
+          {showLabels && (
+            <>
+              <span>About Anima</span>
+              {version && <span className="ml-auto text-[11px] text-ink-faint font-mono tabular-nums">v{version}</span>}
+            </>
+          )}
         </button>
       </nav>
 
