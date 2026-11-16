@@ -54,9 +54,14 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
+        shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target }} --bin anima-server
+        run: |
+          # On Windows, ort-sys copies DirectML.dll into this folder from its
+          # build script and fails when the folder does not exist yet.
+          mkdir -p "target/${{ matrix.target }}/release/build"
+          cargo build --release --target ${{ matrix.target }} --bin anima-server
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -94,6 +99,9 @@ jobs:
           # uses sparse retrieval when it sits at [sparse] weights_path.
           mkdir -p "${ARCHIVE_NAME}/models/bge-m3"
           cp models/bge-m3/sparse_linear.bin "${ARCHIVE_NAME}/models/bge-m3/"
+          # Runtime libraries the binary links dynamically (DirectML.dll on
+          # Windows) sit next to it.
+          find "target/${{ matrix.target }}/release" -maxdepth 2 -name '*.dll' -exec cp {} "${ARCHIVE_NAME}/" \;
           mkdir -p "${ARCHIVE_NAME}/web"
           cp -r web/dist "${ARCHIVE_NAME}/web/dist"
 
