@@ -400,6 +400,38 @@
 }
 *::-webkit-scrollbar-thumb:hover { background-color: var(--color-ink-faint); }
 
+/* Welcome steps: content rises in, the step slides in from its side. */
+@keyframes anima-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes anima-step-next {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes anima-step-back {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes anima-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes anima-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(252 238 10 / 0); }
+  50% { box-shadow: 0 0 0 6px rgb(252 238 10 / 0.18); }
+}
+@keyframes anima-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+.anima-rise { animation: anima-rise 420ms cubic-bezier(.2,.7,.2,1) both; }
+.anima-step-next { animation: anima-step-next 360ms cubic-bezier(.2,.7,.2,1) both; }
+.anima-step-back { animation: anima-step-back 360ms cubic-bezier(.2,.7,.2,1) both; }
+.anima-grow { transform-origin: left; animation: anima-grow 700ms cubic-bezier(.2,.7,.2,1) both; }
+.anima-glow { animation: anima-glow 2.4s ease-in-out infinite; }
+.anima-flow { stroke-dasharray: 4 4; animation: anima-flow 1.2s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
