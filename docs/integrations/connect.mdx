@@ -21,9 +21,11 @@ anima-server connect all        # every supported harness found on this machine
 | `hermes` | memory provider plugin in `plugins/anima/` | `skills/anima/` | by Hermes, through the provider |
 
 - **MCP server**: an entry named `anima` that runs `anima-server mcp`.
-- **Instructions**: a block between `<!-- anima:start -->` and `<!-- anima:end -->` telling the model to search memory before a task and save durable facts.
+- **Instructions**: a block between `<!-- anima:start -->` and `<!-- anima:end -->` telling the model to search memory before a task and save durable facts, with `scope: "global"` for what holds in every project.
 - **The anima skill**: a `SKILL.md` with the full guide to using this memory, in the harness's own skills folder.
 - **Automatic recall**: at session start the harness receives a [briefing](/concepts/briefing-and-skills): your profile, what is relevant to the working folder, and the list of stored skills. On each prompt it receives the memories that match it. If the server is unreachable the hooks print nothing and never block the harness.
+
+Memories are kept per project: `anima-server mcp` writes to `<namespace>/<project>`, and `recall` detects the project the same way (`ANIMA_PROJECT`, then the git repository, then the folder), so the briefing reads where the assistant writes. See [Projects](/concepts/namespaces#projects).
 
 Each edit keeps the rest of the file, is safe to repeat, and leaves a `.before-anima` copy of the original the first time. Restart the harness to load Anima.
 

@@ -200,7 +200,10 @@
               "api-reference/system/graph",
               "api-reference/system/embeddings",
               "api-reference/system/telemetry-get",
-              "api-reference/system/telemetry-set"
+              "api-reference/system/telemetry-set",
+              "api-reference/system/setup-get",
+              "api-reference/system/setup-models",
+              "api-reference/system/setup-put"
             ]
           },
           {

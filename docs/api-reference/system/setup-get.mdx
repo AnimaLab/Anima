@@ -1,0 +1,118 @@
+---
+title: 'Get Model Setup'
+description: 'Report the models the server runs on and whether they were set up'
+---
+
+## GET /api/v1/setup
+
+Returns the embedding, chat and re-ranking models in use, read from the running configuration, and the file a [setup save](/api-reference/system/setup-put) would write. The web UI calls it on load and opens its first-run dialog when `configured` is `false`. The endpoint is server-wide and takes no namespace header. API keys are never returned, only whether one is known.
+
+## Response
+
+<ResponseField name="configured" type="boolean">
+  `false` when the server runs on `config.default.toml` or on the built-in defaults, `true` when it runs on a file of the user's own
+</ResponseField>
+
+<ResponseField name="config_file" type="string">
+  File a save writes: the loaded file, or `config.toml` next to `config.default.toml` (or in the working directory) when `configured` is `false`
+</ResponseField>
+
+<ResponseField name="restart_supported" type="boolean">
+  Whether the server can restart itself after a save
+</ResponseField>
+
+<ResponseField name="memories" type="integer">
+  Active memories across all namespaces, all embedded with the current model
+</ResponseField>
+
+<ResponseField name="embedding" type="object">
+  <Expandable>
+    <ResponseField name="backend" type="string">
+      `local` or `openai_compat`
+    </ResponseField>
+    <ResponseField name="base_url" type="string | null">
+      API base URL of a remote model
+    </ResponseField>
+    <ResponseField name="model" type="string">
+      Remote model name, or the folder name of the local model (e.g. `bge-m3`)
+    </ResponseField>
+    <ResponseField name="dimension" type="integer">
+      Embedding dimension
+    </ResponseField>
+    <ResponseField name="has_key" type="boolean">
+      Whether a key is set in the config or in `EMBEDDING_API_KEY` / `OPENAI_API_KEY` (remote only)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="llm" type="object">
+  <Expandable>
+    <ResponseField name="base_url" type="string">
+      `[llm] base_url`
+    </ResponseField>
+    <ResponseField name="model" type="string">
+      `[llm] model`
+    </ResponseField>
+    <ResponseField name="has_key" type="boolean">
+      Whether `[llm] api_key` or `OPENAI_API_KEY` is set
+    </ResponseField>
+    <ResponseField name="from_profiles" type="boolean">
+      `true` when `[profiles]` in the config file decides the LLMs; a save edits `[llm]` only
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="reranker" type="object">
+  <Expandable>
+    <ResponseField name="enabled" type="boolean">
+      Whether re-ranking is on
+    </ResponseField>
+    <ResponseField name="backend" type="string">
+      `local` or `openai_compat`
+    </ResponseField>
+    <ResponseField name="base_url" type="string | null">
+      API base URL of a remote re-ranker
+    </ResponseField>
+    <ResponseField name="model" type="string | null">
+      Remote model name, or `bge-reranker-v2-m3` for the local one
+    </ResponseField>
+    <ResponseField name="has_key" type="boolean">
+      Whether a remote re-ranker has a key in the config or in `RERANKER_API_KEY` / `OPENAI_API_KEY`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/setup
+```
+
+```json
+{
+  "configured": false,
+  "config_file": "config.toml",
+  "restart_supported": true,
+  "memories": 0,
+  "embedding": {
+    "backend": "local",
+    "base_url": null,
+    "model": "bge-m3",
+    "dimension": 1024,
+    "has_key": false
+  },
+  "llm": {
+    "base_url": "http://localhost:11434/v1",
+    "model": "qwen3.5:4b",
+    "has_key": false,
+    "from_profiles": false
+  },
+  "reranker": {
+    "enabled": true,
+    "backend": "local",
+    "base_url": null,
+    "model": "bge-reranker-v2-m3",
+    "has_key": false
+  }
+}
+```

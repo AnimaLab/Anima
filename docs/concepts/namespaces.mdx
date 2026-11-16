@@ -26,10 +26,46 @@ A namespace covers its whole subtree. A new memory is written to the exact names
 
 Skills are the exception: they belong to one exact namespace, and a skill saved in `acme/project-alpha` is listed only from `acme/project-alpha`.
 
+Renaming or deleting a namespace takes its whole subtree with it: renaming `acme` to `archive/acme` moves `acme/project-alpha` to `archive/acme/project-alpha`, and deleting `acme` deletes `acme/project-alpha` too.
+
+## Projects
+
+An assistant keeps what it learns while working on a project in a sub-namespace named after it: `<namespace>/<project>`, such as `default/billing-api`. A fact about the user that holds in every project (who they are, general preferences, ways of working) is saved with scope `global` and stays in the namespace itself.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"content": "Billing API releases go out on Tuesdays.", "project": "billing-api"}'
+```
+
+The response's `namespace` says where the memory went (`default/billing-api` here). The project name becomes one namespace segment: lowercased, characters other than ASCII letters, digits, `_` and `.` turned into `-`, at most 64 characters.
+
+Reads still start from the namespace, so a search or `/ask` on `default` covers the general memories and every project. The MCP tool `memory_search` takes scope `project` to stay in the current project.
+
+### Which project a session is in
+
+`anima-server mcp`, the TypeScript MCP bridge and `anima-server recall` detect the project the same way, so the briefing reads where the assistant writes. In order:
+
+1. `ANIMA_PROJECT`, when set;
+2. the git repository around the working folder: the name of its `origin` remote (else of its first remote), or else the folder of its main checkout, so every worktree of one repository is one project;
+3. the working folder's name.
+
+Generic folder names (`src`, `home`, `desktop`, `documents`, `downloads`, `tmp`, `temp`, `projects`, `code`, `workspace`), names shorter than two characters, the home folder and a drive root name no project; memories then go to the namespace itself.
+
+### How the store treats projects
+
+- **Duplicates**: an exact duplicate is found across the whole tree. The same text saved in another project, or at the root, is one memory, and the response gives that memory's namespace.
+- **Consolidation**: a new memory is compared only with memories of the same namespace, so a project fact never merges into or replaces a general one, nor one of another project.
+- **Briefing**: the session profile comes from the namespace itself and the current project; the project section comes from the project's namespace. Other projects' preferences stay in their projects.
+- **Induction**: after new deductions in `default/billing-api`, induction looks one level up, from `default`, so habits that recur across projects are seen together. Each induced pattern is stored in the deepest namespace holding all its sources: in the project when its sources are all there, in `default` when they span several projects.
+
+The web UI lists sub-namespaces indented below their parent.
+
 ## Use Cases
 
 - **Multi-user** — give each user their own namespace so memories do not leak across accounts.
-- **Multi-project** — separate work context from personal context, or isolate memories per client engagement.
+- **Multi-project** — separate work context from personal context, or isolate memories per client engagement. Assistants connected through MCP do this on their own, see [Projects](#projects).
 - **Shared parents** — put team knowledge in `team` and personal notes in `team/alice`: a request on `team` reads both.
 - **Testing** — use a throwaway namespace for integration tests without polluting production data.
 
@@ -56,3 +92,5 @@ This returns one object per namespace used in the current database, with its mem
 ```json
 [{"namespace": "project-alpha", "total_count": 12, "active_count": 10}]
 ```
+
+Renaming and deleting are covered in the [Namespaces API](/api-reference/system/namespaces).

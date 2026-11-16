@@ -18,13 +18,15 @@ Returns every namespace that holds memories in the current database, with its me
 
 ## DELETE /api/v1/namespaces
 
-Permanently deletes the namespace given in the header: its memories, their vector, full-text and sparse index entries, and every namespace-scoped record (conversations, revisions, contradictions, audit log, calibration data, identities, plans). Child namespaces (`<namespace>/...`) are kept.
+Permanently deletes the namespace given in the header and every namespace below it (`<namespace>/...`): their memories, the vector, full-text and sparse index entries of those memories, and every namespace-scoped record (conversations, revisions, contradictions, audit log, calibration data, identities, plans).
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Namespace to delete
+  Namespace to delete, with its descendants
 </ParamField>
 
 ### Response
+
+`deleted_memories` counts the memories of the namespace and of every namespace below it.
 
 ```json
 {
@@ -40,17 +42,19 @@ curl -X DELETE http://localhost:3000/api/v1/namespaces \
 
 ## POST /api/v1/namespaces/rename
 
-Moves the namespace given in the header, with all its namespace-scoped records, to a new name in one transaction. Child namespaces (`<namespace>/...`) keep their names.
+Moves the namespace given in the header and every namespace below it, with all their namespace-scoped records, to a new name in one transaction: renaming `testing` to `archive/testing` moves `testing/alpha` to `archive/testing/alpha`.
 
 <ParamField header="X-Anima-Namespace" type="string" required>
   Namespace to rename
 </ParamField>
 
 <ParamField body="name" type="string" required>
-  New namespace name. A missing or invalid name returns `400`.
+  New namespace name. A missing or invalid name returns `400`, as does a name equal to the namespace or inside it (`testing/old` for `testing`): a namespace cannot move into itself.
 </ParamField>
 
 ### Response
+
+`renamed_memories` counts the memories moved, descendants included.
 
 ```json
 {

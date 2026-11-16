@@ -18,7 +18,7 @@ Returns a short text block, ready to place in a system prompt, with what a model
 </ParamField>
 
 <ParamField body="project" type="string">
-  Session mode. Name of the project the session is about, usually the working folder. It is searched for and takes up to a third of the memory budget, at most 5 lines. Ignored when shorter than 3 characters or a generic folder name (`src`, `home`, `tmp`, `projects`, `code`, `workspace`, ...); cut to 80 characters.
+  Session mode. Name of the project the session is about, as `anima-server mcp` and `recall` detect it (see [Projects](/concepts/namespaces#projects)). The briefing reads the memories of `<namespace>/<project>`, adds that namespace's preferences to the profile, and searches for the name; the project section takes up to a third of the memory budget, at most 5 lines. Ignored when shorter than 3 characters or a generic folder name (`src`, `home`, `tmp`, `projects`, `code`, `workspace`, ...); cut to 80 characters.
 </ParamField>
 
 <ParamField body="query" type="string">

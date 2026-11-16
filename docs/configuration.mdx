@@ -22,6 +22,17 @@ The tables below give the value shipped in `config.default.toml`. Keys marked *r
 The built-in defaults used when no file is found differ from `config.default.toml` in a few places: the embedding model is Qwen3-Embedding-0.6B (`./models/qwen3-embedding-0.6b`, `pooling = "last_token"`, `dimension = 1024`), `rrf_k = 10`, `min_vector_similarity = 0.55`, `min_score_spread = 0.055`, `tier_boost = 0`, and the `openai_compat` consolidation entry points at `gpt-4o-mini` on OpenAI.
 </Note>
 
+## Setting up the models from the web UI
+
+When the server runs on `config.default.toml` or on the built-in defaults, the web UI opens a first-run dialog asking where the models run (**Later** postpones it for the browser session); **Settings > Server models** changes the same choice later. Saving writes the choice into the file the server loaded, or into a new `config.toml` (next to `config.default.toml`, else in the working directory) when it runs on the template or the defaults, keeping its comments and every other key. It sets:
+
+- `[embedding]`: `backend`, and `api_base_url`, `api_model`, `api_key` and `dimension` for a remote model (the dimension is read from one test call, and `request_dimensions` is set to `false`), or, for the built-in model, `backend = "local"` with the BGE-M3 `model_dir`, download URLs, `pooling` and `dimension = 1024` when coming from a remote model (whose keys are then removed);
+- `[sparse] enabled`: `true` with the built-in BGE-M3, `false` with a remote embedding model;
+- `[llm]`, `[processor]` and `[consolidation.openai_compat]`: `base_url`, `model` and `api_key` of the chat model, with `[consolidation] backend = "openai_compat"`;
+- `[reranker]`: `enabled`, `backend`, and `api_base_url`, `api_model` and `api_key` for a remote re-ranker.
+
+An empty key keeps the saved one. The file is checked to load before it is written, gets owner-only permissions (`0600`) since it may hold keys, and the server then restarts itself with the same arguments. The [setup API](/api-reference/system/setup-get) does the same over HTTP.
+
 ## [server]
 
 | Key | Default | Meaning |
@@ -246,5 +257,6 @@ Memory content, namespace names and API keys are never part of a report.
 | `ANIMA_BASE_URL` (or `ANIMA_URL`) | Server address, default `http://127.0.0.1:3000`. |
 | `ANIMA_API_KEY` | API key sent to the server. |
 | `ANIMA_NAMESPACE` | Namespace, default `default`. |
+| `ANIMA_PROJECT` | Project of the session, for `mcp` and `recall` (and the TypeScript MCP bridge). Unset, it is detected from the git repository or the working folder; see [Projects](/concepts/namespaces#projects). |
 
 `~/.anima` is under `HOME`, or `USERPROFILE` on Windows.

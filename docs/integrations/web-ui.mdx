@@ -26,7 +26,18 @@ The dev server listens on `http://localhost:5173` and proxies `/api` and `/healt
 - **Conflicts** (`/conflicts`) — the ledger of memories that replaced or contradicted an earlier one, with what changed and why
 - **Chat** (`/chat`) — conversational interface backed by memory-augmented retrieval, with saved conversations
 - **Processor** (`/processor`) — log of the background jobs: reflection, deduction, reconsolidation and retention
-- **Settings** (`/settings`) — namespaces (switch, rename, delete), chat model, server profiles, search tiers, background processing, the telemetry switch, and backup and restore
+- **Settings** (`/settings`) — namespaces (switch, rename or delete, each with the namespaces below it), server models, chat model, server profiles, search tiers, background processing, the telemetry switch, and backup and restore
+
+The namespace selector lists sub-namespaces, such as the [project namespaces](/concepts/namespaces#projects), indented below their parent. **About Anima**, in the menu, introduces Anima in seven steps with animated illustrations.
+
+## Model setup
+
+When the server runs without a configuration of its own (on `config.default.toml` or the built-in defaults), the web UI opens a **Set up Anima** dialog that asks where the models run:
+
+- **OpenAI-compatible API**: one server URL and key for every model (OpenAI, Groq, vLLM, Ollama...). The dialog lists the server's models, then asks for the chat, embedding and re-ranking models.
+- **On this machine**: the built-in search models, downloaded on the first start (BGE-M3, about 2.3 GB, required to search; bge-reranker-v2-m3, about 570 MB, optional), and a chat model served by Ollama at `http://localhost:11434/v1` (default `qwen3.5:4b`, fetched with `ollama pull`).
+
+**Start Anima** writes the choice into `config.toml` and restarts the server; the page reloads when it is back. **Later** asks again in the next browser session. **Settings > Server models** shows the same fields to change the choice afterwards, with **Save and restart**. When the embedding model changes on a store that holds memories, Settings then offers to re-index them with the new model. What is written is described in [Configuration](/configuration#setting-up-the-models-from-the-web-ui).
 
 ## Production Build
 

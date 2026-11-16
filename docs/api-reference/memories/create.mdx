@@ -6,7 +6,7 @@ description: 'Store a new memory'
 ## POST /api/v1/memories
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace. With `project`, the memory is stored one level below it.
 </ParamField>
 
 ## Request Body
@@ -39,6 +39,14 @@ description: 'Store a new memory'
   Arbitrary key-value metadata to attach to the memory
 </ParamField>
 
+<ParamField body="project" type="string">
+  Project the memory belongs to. It is stored in `<namespace>/<project>`, with the name turned into one namespace segment (lowercased, characters other than ASCII letters, digits, `_` and `.` replaced by `-`, at most 64 characters). A name that leaves no valid segment stores the memory in the namespace itself. See [Projects](/concepts/namespaces#projects).
+</ParamField>
+
+<ParamField body="scope" type="string" default="project">
+  `project` or `global`. `global` is for a fact that holds in every project and stores the memory in the namespace itself, whatever `project` says. Any other value gives `400`.
+</ParamField>
+
 ## Response
 
 <ResponseField name="id" type="string">
@@ -48,13 +56,17 @@ description: 'Store a new memory'
 <ResponseField name="action" type="string">
   What happened:
   - `created`: a new memory was stored (also when consolidation superseded an older one)
-  - `deduplicated`: a memory with the same content already exists in the namespace; `id` is that memory
+  - `deduplicated`: a memory with the same content already exists in the namespace or any namespace below it; `id` is that memory
   - `no_change`: the consolidator found the content already captured; `id` is the closest existing memory
   - `updated`: the consolidator merged the content into an existing memory; `id` and `merged_into` are that memory
 </ResponseField>
 
 <ResponseField name="merged_into" type="string | null">
   ID of the existing memory the content was merged into, set when `action` is `updated`
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace the memory is stored in: `<namespace>/<project>` for a project memory, the request's namespace for a global one, or the namespace of the existing memory when `action` is `deduplicated`
 </ResponseField>
 
 ## Example
@@ -74,6 +86,29 @@ curl -X POST http://localhost:3000/api/v1/memories \
 {
   "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
   "action": "created",
-  "merged_into": null
+  "merged_into": null,
+  "namespace": "default"
+}
+```
+
+A project memory:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "content": "Billing API releases go out on Tuesdays.",
+    "project": "Billing API",
+    "scope": "project"
+  }'
+```
+
+```json
+{
+  "id": "01J9Z3M8Q2R4S6T8V0W2X4Y6Z8",
+  "action": "created",
+  "merged_into": null,
+  "namespace": "default/billing-api"
 }
 ```
