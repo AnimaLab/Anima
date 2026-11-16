@@ -1,0 +1,38 @@
+---
+title: 'Re-index Embeddings'
+description: 'Re-embed every memory with the current model and rebuild the vector indexes'
+---
+
+## POST /api/v1/vec/reindex
+
+Re-embeds the memories of every namespace with the configured embedding model, then rebuilds the dense index (`vec_memories`), every named vector index from `[[vectors]]`, and the sparse index. Run it after changing the embedding model or its dimension; [Vector Index Status](/api-reference/system/vec-status) reports `needs_reindex` until then. The call takes no request body, takes no namespace header, and returns once the whole store is processed, so it lasts as long as embedding every memory takes.
+
+On success the index status becomes `ready`.
+
+## Response
+
+<ResponseField name="reindexed" type="integer">
+  Number of memories re-embedded
+</ResponseField>
+
+<ResponseField name="dimension" type="integer">
+  Dimension of the rebuilt index (`[embedding] dimension`)
+</ResponseField>
+
+<ResponseField name="sparse_indexed" type="integer">
+  Number of memories given a fresh sparse vector (equal to `reindexed`)
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/vec/reindex
+```
+
+```json
+{
+  "reindexed": 1523,
+  "dimension": 1024,
+  "sparse_indexed": 1523
+}
+```

@@ -1,0 +1,61 @@
+---
+title: 'Vector Index Status'
+description: 'Whether the vector index matches the embedding model, and sparse index coverage'
+---
+
+## GET /api/v1/vec/status
+
+Reports the state of the dense vector index found at startup and how many memories have a sparse vector. When the index was built with a different dimension than `[embedding] dimension`, `needs_reindex` is `true`: search keeps working at the old dimension until [Re-index](/api-reference/system/vec-reindex) runs. The endpoint is server-wide and takes no namespace header.
+
+## Response
+
+<ResponseField name="status" type="string">
+  `ready`, `created` (new database), `upgraded` (schema upgraded and rebuilt), `quantizationupgraded` (rebuilt with int8 quantization) or `dimension_mismatch`
+</ResponseField>
+
+<ResponseField name="needs_reindex" type="boolean">
+  `true` only for `dimension_mismatch`
+</ResponseField>
+
+<ResponseField name="existing_dimension" type="integer">
+  Dimension of the current index. Present only for `dimension_mismatch`.
+</ResponseField>
+
+<ResponseField name="requested_dimension" type="integer">
+  Dimension of the configured model. Present only for `dimension_mismatch`.
+</ResponseField>
+
+<ResponseField name="sparse_enabled" type="boolean">
+  Whether the embedder produces sparse vectors
+</ResponseField>
+
+<ResponseField name="sparse_indexed" type="boolean">
+  `true` when there is at least one active memory and every one has a sparse vector
+</ResponseField>
+
+<ResponseField name="sparse_count" type="integer">
+  Number of stored sparse vectors
+</ResponseField>
+
+<ResponseField name="memory_count" type="integer">
+  Number of active memories
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/vec/status
+```
+
+```json
+{
+  "status": "dimension_mismatch",
+  "existing_dimension": 512,
+  "requested_dimension": 1024,
+  "needs_reindex": true,
+  "sparse_enabled": true,
+  "sparse_indexed": false,
+  "sparse_count": 0,
+  "memory_count": 1523
+}
+```

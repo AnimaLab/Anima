@@ -1,0 +1,26 @@
+---
+title: 'Purge Deleted Memories'
+description: 'Permanently remove soft-deleted memories'
+---
+
+## POST /api/v1/memories/purge
+
+Permanently removes every memory whose status is `deleted`, across all namespaces. The endpoint takes no namespace header and no request body.
+
+## Response
+
+<ResponseField name="purged" type="integer">
+  Number of memories removed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories/purge
+```
+
+```json
+{
+  "purged": 12
+}
+```

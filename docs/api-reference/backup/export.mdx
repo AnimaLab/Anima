@@ -1,0 +1,108 @@
+---
+title: 'Export Backup'
+description: 'Download memories and skills as JSON, or the whole database as SQLite'
+---
+
+## GET /api/v1/backup
+
+Downloads a backup as an attachment named `anima-backup-YYYYMMDD-HHMMSS.json` or `.db`.
+
+- **JSON** (default): a portable envelope with the memories and stored skills of the namespace and its children, or of every namespace with `all=true`. Embeddings are left out and recomputed on [restore](/api-reference/backup/restore), so a JSON backup moves between embedding models.
+- **SQLite**: the database file itself, after a WAL checkpoint, covering every namespace. Restore it with [Restore SQLite](/api-reference/backup/restore-sqlite).
+
+`anima-server export` calls this endpoint (see [Connect a harness](/integrations/connect)).
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace to export (its child namespaces are included). Required for both formats.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="format" type="string" default="json">
+  `sqlite` for the database file; any other value gives JSON
+</ParamField>
+
+<ParamField query="all" type="boolean" default="false">
+  JSON only: export every namespace instead of the one in the header
+</ParamField>
+
+## Response
+
+For `format=sqlite`, the database bytes with `Content-Type: application/octet-stream`; `400` when the server runs on an in-memory database. For JSON:
+
+<ResponseField name="version" type="string">
+  Backup format version, `1.2`
+</ResponseField>
+
+<ResponseField name="exported_at" type="string">
+  Export time (RFC 3339)
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  The exported namespace, or `*` with `all=true`
+</ResponseField>
+
+<ResponseField name="memory_count" type="integer">
+  Number of memories in `memories`
+</ResponseField>
+
+<ResponseField name="memories" type="object[]">
+  Every memory of the scope, whatever its status, each with `id`, `namespace`, `content`, `metadata` (omitted when empty), `tags`, `memory_type`, `status`, `category`, `confidence`, `source`, `importance`, `episode_id` and `event_date` (omitted when empty), `created_at` and `updated_at`
+</ResponseField>
+
+<ResponseField name="skills" type="object[]">
+  Stored skills, each with `id`, `namespace`, `name`, `description`, `content`, `version`, `created_at` and `updated_at`
+</ResponseField>
+
+## Example
+
+```bash
+# Portable JSON of one namespace
+curl -OJ http://localhost:3000/api/v1/backup \
+  -H "X-Anima-Namespace: default"
+
+# Every namespace
+curl -OJ "http://localhost:3000/api/v1/backup?all=true" \
+  -H "X-Anima-Namespace: default"
+
+# Full SQLite snapshot
+curl -OJ "http://localhost:3000/api/v1/backup?format=sqlite" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "version": "1.2",
+  "exported_at": "2026-11-16T10:02:44.118+00:00",
+  "namespace": "default",
+  "memory_count": 1,
+  "memories": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "namespace": "default",
+      "content": "I love hiking on weekends.",
+      "tags": ["preference", "outdoors"],
+      "memory_type": "raw",
+      "status": "active",
+      "category": "preference",
+      "confidence": 1.0,
+      "source": "user_stated",
+      "importance": 7,
+      "created_at": "2026-11-16T09:12:04.512+00:00",
+      "updated_at": "2026-11-16T09:12:04.512+00:00"
+    }
+  ],
+  "skills": [
+    {
+      "id": "01JA0B1C2D3E4F5G6H7J8K9M0N",
+      "namespace": "default",
+      "name": "release-checklist",
+      "description": "Steps to cut a release",
+      "content": "---\nname: release-checklist\n---\n1. Bump the version...",
+      "version": 3,
+      "created_at": "2026-11-02T14:00:00.000+00:00",
+      "updated_at": "2026-11-10T08:30:00.000+00:00"
+    }
+  ]
+}
+```

@@ -1,0 +1,71 @@
+---
+title: 'Upsert State Transition'
+description: 'Link two memories with a directed state transition'
+---
+
+## POST /api/v1/transitions
+
+A state transition is a directed edge from one memory to another, e.g. an earlier state to a later one or a task to what it depends on. [Counterfactual simulation](/api-reference/counterfactuals/simulate) follows these edges. The pair of memories and the transition type identify an edge: posting the same edge again updates its confidence and evidence.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace the transition is stored in. Both memories must belong to it or to one of its child namespaces, otherwise `403`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="from_memory_id" type="string" required>
+  Source memory ID. Unknown ID gives `404`.
+</ParamField>
+
+<ParamField body="to_memory_id" type="string" required>
+  Target memory ID. Unknown ID gives `404`; the same ID as `from_memory_id` gives `400`.
+</ParamField>
+
+<ParamField body="transition_type" type="string" default="temporal">
+  Kind of transition. Accepted values and aliases: `temporal` (`time`, `before_after`), `state_change` (`state`), `dependency` (`depends_on`), `supersession` (`superseded_by`). Any other value becomes `temporal`.
+</ParamField>
+
+<ParamField body="confidence" type="number" default="0.75">
+  Confidence in the transition, clamped to 0-1
+</ParamField>
+
+<ParamField body="evidence" type="string">
+  What supports the transition. On an existing edge, omitting it keeps the previous evidence.
+</ParamField>
+
+## Response
+
+<ResponseField name="ok" type="boolean">
+  `true` when the transition was stored
+</ResponseField>
+
+<ResponseField name="from_memory_id" type="string">
+  Source memory ID
+</ResponseField>
+
+<ResponseField name="to_memory_id" type="string">
+  Target memory ID
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/transitions \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "from_memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+    "to_memory_id": "01J9Z4A5B6C7D8E9F0G1H2J3K4",
+    "transition_type": "state_change",
+    "confidence": 0.9,
+    "evidence": "Staging moved from Postgres 16 to 17 on 2026-11-21"
+  }'
+```
+
+```json
+{
+  "ok": true,
+  "from_memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "to_memory_id": "01J9Z4A5B6C7D8E9F0G1H2J3K4"
+}
+```

@@ -25,7 +25,7 @@ X-Anima-Namespace: default
 
 A request on a namespace also covers its children: `team` reads and writes `team` and `team/*`. A memory outside the request's namespace gets `403`.
 
-These endpoints are server-wide and take no namespace header: `GET /api/v1/namespaces`, `GET /api/v1/profiles`, `GET /api/v1/models`, `GET /api/v1/calibration/weights`, `GET /api/v1/calibration/metrics`, `GET /api/v1/vec/status`, `GET /api/v1/vectors/status`, `POST /api/v1/vec/reindex`, `POST /api/v1/memories/purge`, `POST /api/v1/restore/sqlite`, `GET /api/v1/processor/status`, `GET /api/v1/processor/log`, `GET`/`PUT`/`DELETE` on existing conversations (`GET /api/v1/conversations`, `/api/v1/conversations/{id}`), and `/api/v1/telemetry/config`.
+These endpoints are server-wide and take no namespace header: `GET /api/v1/namespaces`, `GET /api/v1/profiles`, `GET /api/v1/models`, `GET /api/v1/calibration/weights`, `GET /api/v1/vec/status`, `GET /api/v1/vectors/status`, `POST /api/v1/vec/reindex`, `POST /api/v1/memories/purge`, `POST /api/v1/restore/sqlite`, `GET /api/v1/processor/status`, `GET /api/v1/processor/log`, `GET`/`PUT`/`DELETE` on existing conversations (`GET /api/v1/conversations`, `/api/v1/conversations/{id}`), and `/api/v1/telemetry/config`.
 
 ## Namespace ACL
 

@@ -1,0 +1,82 @@
+---
+title: 'Resolve Recovery Branch'
+description: 'Close or update the status of a recovery branch'
+---
+
+## POST /api/v1/plans/branches/{id}/resolve
+
+Sets the status of a recovery branch, typically to close it once the plan is back on track or the alternative was given up. The change is written to the audit log.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the branch
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Branch ID. A branch outside the namespace itself (child namespaces excluded) gives `404`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="status" type="string" required>
+  New status. Accepted values and aliases: `active` (`open`, `pending`), `resolved` (`completed`, `done`), `abandoned` (`cancelled`, `canceled`). Any other value becomes `active`. Empty status gives `400`.
+
+  `resolved` and `abandoned` set `resolved_at` to the current time; `active` keeps its previous value.
+</ParamField>
+
+<ParamField body="resolution_notes" type="string">
+  How the branch ended. When omitted, the previous notes are kept.
+</ParamField>
+
+## Response
+
+Returns the updated branch, with the fields described in [Add Recovery Branch](/api-reference/plans/add-branch).
+
+<ResponseField name="id" type="string">
+  Branch ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Normalized status
+</ResponseField>
+
+<ResponseField name="resolution_notes" type="string | null">
+  Current resolution notes
+</ResponseField>
+
+<ResponseField name="resolved_at" type="string | null">
+  When the branch reached `resolved` or `abandoned`
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Time of this update
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/plans/branches/01JCP7M3N4P5Q6R7S8T9V0W1X2/resolve \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "status": "resolved",
+    "resolution_notes": "Reindex fixed the corruption; pg_upgrade succeeded on retry."
+  }'
+```
+
+```json
+{
+  "id": "01JCP7M3N4P5Q6R7S8T9V0W1X2",
+  "namespace": "default",
+  "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+  "source_checkpoint_id": "01JCP5A1B2C3D4E5F6G7H8J9K0",
+  "branch_label": "restore-from-snapshot",
+  "trigger_reason": "pg_upgrade failed on a corrupted index",
+  "status": "resolved",
+  "branch_plan": {"steps": ["restore snapshot", "reindex", "retry pg_upgrade"]},
+  "metadata": null,
+  "resolution_notes": "Reindex fixed the corruption; pg_upgrade succeeded on retry.",
+  "created_at": "2026-11-18T14:10:27.031+00:00",
+  "updated_at": "2026-11-18T16:47:55.610+00:00",
+  "resolved_at": "2026-11-18T16:47:55.610+00:00"
+}
+```

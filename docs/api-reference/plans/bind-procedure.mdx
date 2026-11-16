@@ -1,0 +1,101 @@
+---
+title: 'Bind Procedure'
+description: 'Link a named procedure to a plan'
+---
+
+## POST /api/v1/plans/{id}/procedures
+
+Links a procedure (see [List Procedure Revisions](/api-reference/procedures/list-revisions)) to a plan, with the role it plays there. A plan holds one binding per procedure and role: binding the same pair again updates its confidence and metadata. The binding is written to the audit log.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the plan
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Plan ID. The plan must belong to the namespace itself (child namespaces excluded); another plan ID gives `500` with `plan <id> does not exist in namespace <namespace>`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="procedure_name" type="string" required>
+  Procedure name, stored trimmed. Empty name gives `400`.
+</ParamField>
+
+<ParamField body="binding_role" type="string" default="primary">
+  Role of the procedure in the plan. Accepted values and aliases: `primary` (`default`), `fallback` (`recovery`), `rollback`, `monitor` (`observer`). Any other value becomes `primary`.
+</ParamField>
+
+<ParamField body="confidence" type="number" default="0.75">
+  Confidence that the procedure fits the plan, clamped to 0-1
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Arbitrary metadata. On an existing binding, omitting it keeps the previous metadata. Values under sensitive keys (`password`, `secret`, `token`, `auth`, ...) are stored as `"[redacted]"`.
+</ParamField>
+
+## Response
+
+Returns the binding as stored.
+
+<ResponseField name="id" type="string">
+  Binding ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the binding
+</ResponseField>
+
+<ResponseField name="plan_id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="procedure_name" type="string">
+  Procedure name
+</ResponseField>
+
+<ResponseField name="binding_role" type="string">
+  `primary`, `fallback`, `rollback` or `monitor`
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Confidence (0-1)
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Binding metadata
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the binding was first created
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/plans/01JCP4Q8R2S3T4V5W6X7Y8Z9A0/procedures \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "procedure_name": "postgres-major-upgrade",
+    "binding_role": "primary",
+    "confidence": 0.85
+  }'
+```
+
+```json
+{
+  "id": "01JCP6D2E3F4G5H6J7K8M9N0P1",
+  "namespace": "default",
+  "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+  "procedure_name": "postgres-major-upgrade",
+  "binding_role": "primary",
+  "confidence": 0.85,
+  "metadata": null,
+  "created_at": "2026-11-16T10:07:58.903+00:00",
+  "updated_at": "2026-11-16T10:07:58.903+00:00"
+}
+```

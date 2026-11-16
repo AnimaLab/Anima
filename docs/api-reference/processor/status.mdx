@@ -1,0 +1,97 @@
+---
+title: 'Processor Status'
+description: 'Queue state and counters of the background processor'
+---
+
+## GET /api/v1/processor/status
+
+Reports the background processor's queue and what it has done since the server started. The endpoint is server-wide and takes no namespace header. When the processor is disabled, `enabled` is `false`, `idle` is `true` and every counter is `0`, except `ingestion`.
+
+## Response
+
+<ResponseField name="enabled" type="boolean">
+  Whether the background processor is running
+</ResponseField>
+
+<ResponseField name="queue_depth" type="integer">
+  Jobs waiting to be picked up
+</ResponseField>
+
+<ResponseField name="in_flight" type="integer">
+  Jobs being executed
+</ResponseField>
+
+<ResponseField name="dead_letter_count" type="integer">
+  Jobs dropped because the queue was full or closed
+</ResponseField>
+
+<ResponseField name="idle" type="boolean">
+  `true` when `queue_depth` and `in_flight` are both `0`
+</ResponseField>
+
+<ResponseField name="ingestion" type="object">
+  Memories ingested since start: `total`, `rate_per_sec` (rounded to two decimals) and `uptime_secs`
+</ResponseField>
+
+<ResponseField name="metrics" type="object">
+  Counters since start:
+  - jobs: `completed_jobs`, `failed_jobs`
+  - created memories: `reflected_created`, `deduced_created`
+  - working-memory commits: `committed_evaluated`, `committed_written`
+  - reconsolidation: `recon_processed`, `recon_superseded`
+  - retention: `retention_processed`, `retention_softened`
+  - LLM usage, overall (`llm_`) and per pipeline (`reflection_`, `deduction_`, `induction_`): `*_calls` (`llm_calls`, `reflection_llm_calls`, ...), `*_usage_missing` (calls whose response reported no token usage), `*_prompt_tokens`, `*_completion_tokens`, `*_total_tokens`
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/processor/status
+```
+
+```json
+{
+  "enabled": true,
+  "queue_depth": 0,
+  "in_flight": 1,
+  "dead_letter_count": 0,
+  "idle": false,
+  "ingestion": {
+    "total": 128,
+    "rate_per_sec": 0.04,
+    "uptime_secs": 3412
+  },
+  "metrics": {
+    "completed_jobs": 42,
+    "failed_jobs": 1,
+    "reflected_created": 37,
+    "deduced_created": 6,
+    "committed_evaluated": 10,
+    "committed_written": 4,
+    "recon_processed": 37,
+    "recon_superseded": 2,
+    "retention_processed": 0,
+    "retention_softened": 0,
+    "llm_calls": 58,
+    "llm_usage_missing": 0,
+    "llm_prompt_tokens": 91230,
+    "llm_completion_tokens": 8840,
+    "llm_total_tokens": 100070,
+    "reflection_llm_calls": 40,
+    "reflection_usage_missing": 0,
+    "reflection_prompt_tokens": 70110,
+    "reflection_completion_tokens": 6900,
+    "reflection_total_tokens": 77010,
+    "deduction_llm_calls": 12,
+    "deduction_usage_missing": 0,
+    "deduction_prompt_tokens": 15320,
+    "deduction_completion_tokens": 1410,
+    "deduction_total_tokens": 16730,
+    "induction_llm_calls": 6,
+    "induction_usage_missing": 0,
+    "induction_prompt_tokens": 5800,
+    "induction_completion_tokens": 530,
+    "induction_total_tokens": 6330
+  }
+}
+```

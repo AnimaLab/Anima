@@ -1,0 +1,57 @@
+---
+title: 'Reconsolidate'
+description: 'Supersede older duplicates of derived memories'
+---
+
+## POST /api/v1/processor/reconsolidate
+
+Runs reconsolidation on the given memories: for each one, older active memories of the same tier that say the same thing are marked superseded by it. It uses no LLM.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="memory_ids" type="string[]" required>
+  Newer memories to reconsolidate. Empty gives `400`.
+</ParamField>
+
+<ParamField body="async" type="boolean" default="false">
+  `true` queues the work on the background processor and returns at once. Without a background processor this gives `500`.
+</ParamField>
+
+## Behavior
+
+A memory counts when it is active and of tier 2 or above (`metadata.tier`, see [Memory Types](/concepts/memory-types)); raw memories are passed over. It is compared with the 400 oldest active memories of the same tier in the namespace and its children, keeping those created before it. An older memory is superseded when its normalized text (lowercase, alphanumeric words) is identical, or when both texts are at least 24 characters long, differ in length by at most 16 characters and have a word-set Jaccard similarity of at least 0.92. Each supersession records a state transition and a contradiction-ledger entry. A synchronous run is written to the [processor log](/api-reference/processor/log) as `reconsolidation`.
+
+## Response
+
+<ResponseField name="status" type="string">
+  `completed`, or `queued` in async mode
+</ResponseField>
+
+<ResponseField name="processed" type="integer">
+  Memories that were eligible and compared (`0` when queued)
+</ResponseField>
+
+<ResponseField name="superseded" type="integer">
+  Older memories marked superseded (`0` when queued)
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/processor/reconsolidate \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"memory_ids": ["01J9Z4A1B2C3D4E5F6G7H8J9K0"]}'
+```
+
+```json
+{
+  "status": "completed",
+  "processed": 1,
+  "superseded": 1
+}
+```

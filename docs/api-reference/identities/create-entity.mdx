@@ -1,0 +1,103 @@
+---
+title: 'Create Identity Entity'
+description: 'Create or update a named entity used for identity resolution'
+---
+
+## POST /api/v1/identities/entities
+
+Creates an identity entity (a person, place or thing known by one canonical name and any number of aliases) or updates the one with the same normalized name in the namespace. Its canonical name is also registered as an alias with confidence `0.98`.
+
+Names are normalized by lowercasing, folding accents, turning punctuation into spaces and collapsing whitespace. When the entity exists, `canonical_name` is replaced, `language` and `metadata` are replaced only when given, and `confidence` becomes 70% of the stored value plus 30% of the new one.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the entity
+</ParamField>
+
+## Request Body
+
+<ParamField body="canonical_name" type="string" required>
+  Preferred name of the entity. Blank gives `400`.
+</ParamField>
+
+<ParamField body="language" type="string">
+  Language code of the name. Default: `"und"` (undetermined)
+</ParamField>
+
+<ParamField body="confidence" type="number" default="0.8">
+  Confidence in the entity, clamped to 0.0-1.0
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Arbitrary metadata. Sensitive values are redacted.
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string">
+  Entity ID, used to add aliases
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the entity
+</ResponseField>
+
+<ResponseField name="canonical_name" type="string">
+  Canonical name, trimmed
+</ResponseField>
+
+<ResponseField name="normalized_name" type="string">
+  Normalized form of the canonical name, unique per namespace
+</ResponseField>
+
+<ResponseField name="language" type="string">
+  Language code
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Confidence in the entity (0.0-1.0)
+</ResponseField>
+
+<ResponseField name="ambiguity" type="number">
+  How much the entity's aliases are shared with other entities (0.0-1.0); `0.0` when no alias is shared
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Metadata
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/identities/entities \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "canonical_name": "Hélène Martin",
+    "language": "fr",
+    "confidence": 0.9,
+    "metadata": {"relation": "sister"}
+  }'
+```
+
+```json
+{
+  "id": "01J9ZA1B2C3D4E5F6G7H8J9K0M",
+  "namespace": "default",
+  "canonical_name": "Hélène Martin",
+  "normalized_name": "helene martin",
+  "language": "fr",
+  "confidence": 0.9,
+  "ambiguity": 0.0,
+  "metadata": {"relation": "sister"},
+  "created_at": "2026-11-16T10:20:31.007+00:00",
+  "updated_at": "2026-11-16T10:20:31.007+00:00"
+}
+```

@@ -116,7 +116,8 @@ Memories found by the tools are returned in `memories_used`, memories stored by 
   Present and `true` when the LLM backend was unavailable and the reply was built from retrieval results only. No facts are extracted in that case.
 </ResponseField>
 
-<RequestExample>
+## Example
+
 ```bash
 curl -X POST http://localhost:3000/api/v1/chat \
   -H "Content-Type: application/json" \
@@ -126,9 +127,7 @@ curl -X POST http://localhost:3000/api/v1/chat \
     "mode": "rag"
   }'
 ```
-</RequestExample>
 
-<ResponseExample>
 ```json
 {
   "reply": "You enjoy rock climbing on weekends and you have been learning the cello.",
@@ -160,4 +159,3 @@ curl -X POST http://localhost:3000/api/v1/chat \
   }
 }
 ```
-</ResponseExample>

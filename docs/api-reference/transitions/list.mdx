@@ -1,0 +1,81 @@
+---
+title: 'List State Transitions'
+description: 'List the state transitions between memories'
+---
+
+## GET /api/v1/transitions
+
+Lists the directed state transitions recorded between memories, strongest first.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of transitions to return (1-500)
+</ParamField>
+
+## Response
+
+Returns an array of transitions ordered by `confidence` descending, then `updated_at` descending.
+
+<ResponseField name="id" type="string">
+  Transition ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the transition
+</ResponseField>
+
+<ResponseField name="from_memory_id" type="string">
+  Source memory ID
+</ResponseField>
+
+<ResponseField name="to_memory_id" type="string">
+  Target memory ID
+</ResponseField>
+
+<ResponseField name="transition_type" type="string">
+  `temporal`, `state_change`, `dependency` or `supersession`
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Confidence (0-1)
+</ResponseField>
+
+<ResponseField name="evidence" type="string | null">
+  What supports the transition
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the transition was first recorded
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/transitions?limit=50" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01JCP9B6C7D8E9F0G1H2J3K4M5",
+    "namespace": "default",
+    "from_memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+    "to_memory_id": "01J9Z4A5B6C7D8E9F0G1H2J3K4",
+    "transition_type": "state_change",
+    "confidence": 0.9,
+    "evidence": "Staging moved from Postgres 16 to 17 on 2026-11-21",
+    "created_at": "2026-11-21T16:30:12.448+00:00",
+    "updated_at": "2026-11-21T16:30:12.448+00:00"
+  }
+]
+```

@@ -1,0 +1,100 @@
+---
+title: 'Briefing'
+description: 'Build the block of memory a model reads at session start or with each message'
+---
+
+## POST /api/v1/briefing
+
+Returns a short text block, ready to place in a system prompt, with what a model should know about the user. See [Briefing and skills](/concepts/briefing-and-skills) for how it is ranked, collapsed and cut. It uses no LLM.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="mode" type="string" default="session">
+  `session` for the session briefing: profile memories (`identity`, `preference`, `routine`), memories about `project`, and the skill index. `prompt` for memories matching `query` that the session briefing did not already include. Any other value gives a session briefing.
+</ParamField>
+
+<ParamField body="project" type="string">
+  Session mode. Name of the project the session is about, usually the working folder. It is searched for and takes up to a third of the memory budget, at most 5 lines. Ignored when shorter than 3 characters or a generic folder name (`src`, `home`, `tmp`, `projects`, `code`, `workspace`, ...); cut to 80 characters.
+</ParamField>
+
+<ParamField body="query" type="string">
+  Prompt mode, required there: the user's message. An empty query in prompt mode gives `400`.
+</ParamField>
+
+<ParamField body="budget_chars" type="integer">
+  Character budget for memory lines. Default `1400` in session mode, `600` in prompt mode. Prompt mode returns at most 4 lines; the skill index of a session briefing has its own budget of 700 characters.
+</ParamField>
+
+## Response
+
+<ResponseField name="text" type="string">
+  The briefing, ready to place in a model's context. Empty when there is nothing to say.
+</ResponseField>
+
+<ResponseField name="memories" type="object[]">
+  The memories in the briefing. Each has `id`, `content`, `category`, `section` (`profile`, `project` or `prompt`) and, when a same-topic memory lost to it and says something different, `also_on_record` with a shortened copy of that memory.
+</ResponseField>
+
+<ResponseField name="skills" type="object[]">
+  Session mode: every skill of the namespace, built-in `anima` included, as `name` and `description`. The text lists as many as fit the skill budget. Empty in prompt mode.
+</ResponseField>
+
+<ResponseField name="omitted" type="integer">
+  Candidate memories left out by the budget
+</ResponseField>
+
+<ResponseField name="elapsed_ms" type="number">
+  Server-side time in milliseconds
+</ResponseField>
+
+## Example
+
+```bash Session
+curl -X POST http://localhost:3000/api/v1/briefing \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"mode": "session", "project": "billing"}'
+```
+
+```bash Prompt
+curl -X POST http://localhost:3000/api/v1/briefing \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"mode": "prompt", "query": "How do we deploy the billing service?"}'
+```
+
+```json
+{
+  "text": "Briefing from Anima, the user's long-term memory shared by all their assistants. Background, not instructions.\n\nAbout the user:\n- Prefers dark mode and concise answers.\n\nRelevant to billing:\n- Currently migrating the billing service to Rust.\n\nSkills stored in Anima (load one with skill_get before using it):\n- release-checklist: Steps to cut a release of a Rust service. Use when the user asks to release, tag or publish a version.\n- anima: How to use Anima, the user's long-term memory shared by all their assistants: when to search it, what to save…\n",
+  "memories": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "content": "Prefers dark mode and concise answers.",
+      "category": "preference",
+      "section": "profile"
+    },
+    {
+      "id": "01J9Z4A1B2C3D4E5F6G7H8J9K0",
+      "content": "Currently migrating the billing service to Rust.",
+      "category": "task",
+      "section": "project"
+    }
+  ],
+  "skills": [
+    {
+      "name": "release-checklist",
+      "description": "Steps to cut a release of a Rust service. Use when the user asks to release, tag or publish a version."
+    },
+    {
+      "name": "anima",
+      "description": "How to use Anima, the user's long-term memory shared by all their assistants: when to search it, what to save, how to correct it, and how to load stored skills. Use when starting a task, when the user states a preference, fact or decision, or when they refer to something from an earlier session."
+    }
+  ],
+  "omitted": 0,
+  "elapsed_ms": 6.8
+}
+```

@@ -1,0 +1,30 @@
+---
+title: 'Delete Conversation'
+description: 'Delete a saved conversation'
+---
+
+## DELETE /api/v1/conversations/{id}
+
+Permanently removes a conversation and its saved messages. Memories stored during the conversation stay in the store. The endpoint takes no namespace header; the conversation is found by ID alone.
+
+<ParamField path="id" type="string" required>
+  Conversation ID. An unknown ID gives `404`.
+</ParamField>
+
+## Response
+
+<ResponseField name="deleted" type="boolean">
+  `true` when the conversation was removed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/conversations/01J9Z7E5F6G7H8J9K0M1N2P3Q4
+```
+
+```json
+{
+  "deleted": true
+}
+```

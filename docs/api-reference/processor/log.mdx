@@ -1,0 +1,95 @@
+---
+title: 'Processor Log'
+description: 'Runs of the processing pipelines, newest first'
+---
+
+## GET /api/v1/processor/log
+
+Lists the recorded runs of the processing pipelines, from the background processor and from the [Reflect](/api-reference/processor/reflect), [Reconsolidate](/api-reference/processor/reconsolidate) and [Run Retention](/api-reference/processor/retention) endpoints. The endpoint is server-wide: it takes no namespace header and returns runs of every namespace.
+
+## Query Parameters
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of entries (at most 200)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of entries to skip
+</ParamField>
+
+## Response
+
+Returns an array of entries ordered by `created_at`, newest first.
+
+<ResponseField name="id" type="string">
+  Entry ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace the run worked on
+</ResponseField>
+
+<ResponseField name="pipeline" type="string">
+  `reflection`, `deduction`, `induction`, `reconsolidation` or `retention`
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  `completed` or `failed`
+</ResponseField>
+
+<ResponseField name="input_count" type="integer">
+  Memories the run read
+</ResponseField>
+
+<ResponseField name="output_count" type="integer">
+  What the run produced: facts or memories created, memories superseded (reconsolidation), memories softened (retention)
+</ResponseField>
+
+<ResponseField name="prompt_tokens" type="integer">
+  LLM prompt tokens, `0` when the run made no LLM call or the usage was unreported
+</ResponseField>
+
+<ResponseField name="completion_tokens" type="integer">
+  LLM completion tokens
+</ResponseField>
+
+<ResponseField name="total_tokens" type="integer">
+  LLM total tokens
+</ResponseField>
+
+<ResponseField name="elapsed_ms" type="number">
+  Duration of the run in milliseconds
+</ResponseField>
+
+<ResponseField name="details" type="object | null">
+  Pipeline-specific details, e.g. `{"facts": 3}`, `{"deductions": 2}`, `{"superseded": 1}`, `{"softened": 12}`, or `{"error": "..."}` for a failed run
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the run was recorded (RFC 3339)
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/processor/log?limit=20"
+```
+
+```json
+[
+  {
+    "id": "3f7c2a91-5d4e-4b8a-9c1f-2e6d7a8b9c0d",
+    "namespace": "default",
+    "pipeline": "reflection",
+    "status": "completed",
+    "input_count": 3,
+    "output_count": 1,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "elapsed_ms": 2140.7,
+    "details": {"facts": 1},
+    "created_at": "2026-11-16T09:14:22.031856+00:00"
+  }
+]
+```

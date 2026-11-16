@@ -1,0 +1,37 @@
+---
+title: 'Delete Skill'
+description: 'Delete a skill'
+---
+
+## DELETE /api/v1/skills/{name}
+
+Removes a stored skill from the namespace. See [Briefing and skills](/concepts/briefing-and-skills).
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Skill name. An invalid name gives `400`, an unknown one `404`.
+</ParamField>
+
+## Response
+
+Deleting a stored `anima` skill brings the built-in one back. The built-in `anima` skill itself stays: deleting it while no stored version exists gives `400`.
+
+<ResponseField name="deleted" type="boolean">
+  `true` when the skill was removed
+</ResponseField>
+
+## Example
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/skills/release-checklist \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "deleted": true
+}
+```

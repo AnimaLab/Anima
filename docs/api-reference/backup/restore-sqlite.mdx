@@ -1,0 +1,42 @@
+---
+title: 'Restore SQLite'
+description: 'Replace the database file with an uploaded SQLite snapshot'
+---
+
+## POST /api/v1/restore/sqlite
+
+Replaces the whole database with a SQLite file, such as one from [Export Backup](/api-reference/backup/export) with `format=sqlite`. The request body is the raw file, up to 512 MiB, and must start with the SQLite header (`SQLite format 3`). The endpoint is server-wide and takes no namespace header.
+
+Before writing, the server copies the current database to `<database path>.pre-restore-backup` and checkpoints the WAL. **Restart the server afterwards**: the running process keeps serving the previous data until then.
+
+## Response
+
+<ResponseField name="restored" type="boolean">
+  `true`
+</ResponseField>
+
+<ResponseField name="backup_path" type="string">
+  Where the previous database was copied
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Reminder to restart the server
+</ResponseField>
+
+Returns `400` for an empty body, a file that is not SQLite, or a server running on an in-memory database.
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/restore/sqlite \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @anima-backup-20261116-100244.db
+```
+
+```json
+{
+  "restored": true,
+  "backup_path": "./anima.db.pre-restore-backup",
+  "message": "Database restored. Restart the server to load the new database."
+}
+```

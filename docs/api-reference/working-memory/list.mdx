@@ -1,0 +1,75 @@
+---
+title: 'List Working Memory'
+description: 'List provisional working-memory entries'
+---
+
+## GET /api/v1/working-memory
+
+Lists working-memory entries: short-lived, provisional notes held until they are committed to long-term memory, discarded or expired.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="status" type="string">
+  Only entries with this status: `pending`, `committed`, `discarded` or `expired`
+</ParamField>
+
+<ParamField query="conversation_id" type="string">
+  Only entries of this conversation
+</ParamField>
+
+<ParamField query="limit" type="integer" default="200">
+  Maximum number of entries, at most 1000
+</ParamField>
+
+## Response
+
+Entries are ordered oldest first (`created_at` ascending).
+
+<ResponseField name="entries" type="object[]">
+  Working-memory entries
+
+  <Expandable title="entry">
+    <ResponseField name="id" type="string">Entry ID</ResponseField>
+    <ResponseField name="namespace" type="string">Namespace of the entry</ResponseField>
+    <ResponseField name="content" type="string">Entry text</ResponseField>
+    <ResponseField name="metadata" type="object | null">Metadata given at creation</ResponseField>
+    <ResponseField name="provisional_score" type="number">Score (0.0-1.0) used to decide whether the entry is committed; replaced by the computed commit score once the entry is committed or discarded</ResponseField>
+    <ResponseField name="status" type="string">`pending`, `committed`, `discarded` or `expired`</ResponseField>
+    <ResponseField name="conversation_id" type="string | null">Conversation the entry belongs to</ResponseField>
+    <ResponseField name="expires_at" type="string | null">When a pending entry expires</ResponseField>
+    <ResponseField name="committed_memory_id" type="string | null">ID of the long-term memory created from the entry, once committed</ResponseField>
+    <ResponseField name="created_at" type="string">Creation time</ResponseField>
+    <ResponseField name="updated_at" type="string">Last update time</ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/working-memory?status=pending&conversation_id=conv-42" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "entries": [
+    {
+      "id": "01J9Z8C1D2E3F4G5H6J7K8M9N0",
+      "namespace": "default",
+      "content": "I prefer window seats on long flights.",
+      "metadata": null,
+      "provisional_score": 0.6,
+      "status": "pending",
+      "conversation_id": "conv-42",
+      "expires_at": "2026-11-16T12:15:00.000+00:00",
+      "committed_memory_id": null,
+      "created_at": "2026-11-16T10:15:00.000+00:00",
+      "updated_at": "2026-11-16T10:15:00.000+00:00"
+    }
+  ]
+}
+```

@@ -1,0 +1,55 @@
+---
+title: 'Set Telemetry Setting'
+description: 'Turn anonymous usage telemetry on or off'
+---
+
+## PUT /api/v1/telemetry/config
+
+Turns telemetry on or off, the switch behind the web UI's Settings page. The choice takes effect at once and is kept across restarts: turning it off creates `~/.anima/telemetry_opt_out`, turning it on removes that file. The endpoint is server-wide and takes no namespace header.
+
+When `config.toml` sets `[telemetry] enabled = false`, that setting wins: the request changes nothing and the response has `updated: false` and `locked: true`.
+
+## Request Body
+
+<ParamField body="enabled" type="boolean" required>
+  `true` to send reports, `false` to stop
+</ParamField>
+
+<ParamField body="feature_flags" type="object">
+  Feature flags reported in the next payloads, replacing the current ones: `vision` (default `false`), `tool_use`, `streaming`, `reflection_enabled`, `deduction_enabled`, `induction_enabled` (each default `true` when omitted from the object). Applied even when telemetry is locked.
+</ParamField>
+
+## Response
+
+<ResponseField name="updated" type="boolean">
+  `false` when telemetry is locked by `config.toml`
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean">
+  The resulting state
+</ResponseField>
+
+<ResponseField name="persisted" type="boolean">
+  Whether the choice was saved under `~/.anima/`. When `false`, it lasts until the next restart. Absent when locked.
+</ResponseField>
+
+<ResponseField name="locked" type="boolean">
+  `true` when `config.toml` sets `[telemetry] enabled = false`
+</ResponseField>
+
+## Example
+
+```bash
+curl -X PUT http://localhost:3000/api/v1/telemetry/config \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+
+```json
+{
+  "updated": true,
+  "enabled": false,
+  "persisted": true,
+  "locked": false
+}
+```

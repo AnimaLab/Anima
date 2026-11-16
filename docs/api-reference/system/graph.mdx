@@ -1,0 +1,118 @@
+---
+title: 'Memory Graph'
+description: 'Nodes and edges linking memories by similarity, supersession and causal relations'
+---
+
+## GET /api/v1/graph
+
+Builds the graph shown by the web UI. Nodes are the active memories of the namespace and its children that have an embedding, plus superseded memories and the endpoints of causal edges. Edges come from three sources:
+
+- `similarity`: each active memory is linked to its nearest neighbours (up to 10) whose similarity, `1 - distance / 2`, is at least `threshold`. Each pair appears once.
+- `superseded_by`: from a superseded memory to the memory that replaced it, with `similarity` 1.0.
+- causal edges recorded for the namespace, typed by their relation (for example `causal`, `correlational`, `mentioned_in`), with the edge confidence as `similarity`.
+
+Only memories embedded with the most common dimension take part, so memories left from an older model are skipped.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="threshold" type="number" default="0.5">
+  Minimum similarity for a `similarity` edge
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of active memories (and of superseded memories) loaded, at most 500. Up to four times this many causal edges are added.
+</ParamField>
+
+## Response
+
+<ResponseField name="nodes" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Memory ID
+    </ResponseField>
+    <ResponseField name="content" type="string">
+      First 100 bytes of the content, followed by `...` when longer
+    </ResponseField>
+    <ResponseField name="namespace" type="string">
+      Namespace of the memory
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      `active` or `superseded`
+    </ResponseField>
+    <ResponseField name="memory_type" type="string">
+      Memory type
+    </ResponseField>
+    <ResponseField name="importance" type="integer">
+      Importance (1-10)
+    </ResponseField>
+    <ResponseField name="created_at" type="string">
+      Creation time
+    </ResponseField>
+    <ResponseField name="access_count" type="integer">
+      Number of times the memory was accessed
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="edges" type="object[]">
+  <Expandable title="properties">
+    <ResponseField name="source" type="string">
+      Source memory ID
+    </ResponseField>
+    <ResponseField name="target" type="string">
+      Target memory ID
+    </ResponseField>
+    <ResponseField name="similarity" type="number">
+      Similarity, 1.0 for `superseded_by`, or the confidence of a causal edge (0 to 1)
+    </ResponseField>
+    <ResponseField name="edge_type" type="string">
+      `similarity`, `superseded_by`, or the relation type of a causal edge
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/graph?threshold=0.6&limit=200" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "nodes": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "content": "I love hiking on weekends.",
+      "namespace": "default",
+      "status": "active",
+      "memory_type": "raw",
+      "importance": 7,
+      "created_at": "2026-11-16T09:12:04.512+00:00",
+      "access_count": 4
+    },
+    {
+      "id": "01J9Z3M8P2R4T6V8X0Z2B4D6F8",
+      "content": "Went hiking in the Alps last Saturday.",
+      "namespace": "default",
+      "status": "active",
+      "memory_type": "raw",
+      "importance": 5,
+      "created_at": "2026-11-16T09:20:11.002+00:00",
+      "access_count": 1
+    }
+  ],
+  "edges": [
+    {
+      "source": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "target": "01J9Z3M8P2R4T6V8X0Z2B4D6F8",
+      "similarity": 0.81,
+      "edge_type": "similarity"
+    }
+  ]
+}
+```

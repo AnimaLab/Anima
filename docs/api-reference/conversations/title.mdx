@@ -1,0 +1,65 @@
+---
+title: 'Generate Conversation Title'
+description: 'Name a conversation from its messages with an LLM'
+---
+
+## POST /api/v1/conversations/{id}/title
+
+Asks an LLM for a short title (3 to 6 words) describing a conversation, saves it as the conversation's title and returns it.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Required by the route; the conversation is found by ID alone
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Conversation ID. An unknown ID gives `404`.
+</ParamField>
+
+## Request Body
+
+The body is the LLM to call, the same object as `llm` in [Chat](/api-reference/chat/chat), used as given.
+
+<ParamField body="base_url" type="string" required>
+  OpenAI-compatible base URL (e.g. `http://localhost:11434/v1`)
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Model name
+</ParamField>
+
+<ParamField body="api_key" type="string">
+  API key sent to the provider
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Sampling temperature
+</ParamField>
+
+<ParamField body="max_tokens" type="integer">
+  Maximum tokens in the reply
+</ParamField>
+
+## Behavior
+
+The prompt holds the conversation's `user` and `assistant` messages with text content, each cut to 150 characters, up to about 3,000 characters in all. `<think>` blocks and surrounding quotes are stripped from the reply. When the LLM call fails, the title is the first 50 characters of the first user message, or `New Chat` when there is none.
+
+## Response
+
+<ResponseField name="title" type="string">
+  The title now saved on the conversation
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/conversations/01J9Z7E5F6G7H8J9K0M1N2P3Q4/title \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"base_url": "http://localhost:11434/v1", "model": "qwen3:8b"}'
+```
+
+```json
+{
+  "title": "Weekend hiking plans"
+}
+```

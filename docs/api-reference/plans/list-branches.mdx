@@ -1,0 +1,99 @@
+---
+title: 'List Recovery Branches'
+description: 'List the recovery branches of a plan'
+---
+
+## GET /api/v1/plans/{id}/branches
+
+Lists the recovery branches opened on a plan, newest first.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Plan ID
+</ParamField>
+
+## Response
+
+Returns an array of branches ordered by `created_at` descending. An unknown plan ID returns an empty array. Each branch has the fields described in [Add Recovery Branch](/api-reference/plans/add-branch).
+
+<ResponseField name="id" type="string">
+  Branch ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the branch
+</ResponseField>
+
+<ResponseField name="plan_id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="source_checkpoint_id" type="string | null">
+  Checkpoint the branch starts from
+</ResponseField>
+
+<ResponseField name="branch_label" type="string">
+  Branch label
+</ResponseField>
+
+<ResponseField name="trigger_reason" type="string">
+  Why the branch was opened
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  `active`, `resolved` or `abandoned`
+</ResponseField>
+
+<ResponseField name="branch_plan" type="any | null">
+  Alternative steps
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Branch metadata
+</ResponseField>
+
+<ResponseField name="resolution_notes" type="string | null">
+  Notes recorded when the branch was resolved
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+<ResponseField name="resolved_at" type="string | null">
+  When the branch reached `resolved` or `abandoned`
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/plans/01JCP4Q8R2S3T4V5W6X7Y8Z9A0/branches \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01JCP7M3N4P5Q6R7S8T9V0W1X2",
+    "namespace": "default",
+    "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+    "source_checkpoint_id": "01JCP5A1B2C3D4E5F6G7H8J9K0",
+    "branch_label": "restore-from-snapshot",
+    "trigger_reason": "pg_upgrade failed on a corrupted index",
+    "status": "active",
+    "branch_plan": {"steps": ["restore snapshot", "reindex", "retry pg_upgrade"]},
+    "metadata": null,
+    "resolution_notes": null,
+    "created_at": "2026-11-18T14:10:27.031+00:00",
+    "updated_at": "2026-11-18T14:10:27.031+00:00",
+    "resolved_at": null
+  }
+]
+```

@@ -1,0 +1,85 @@
+---
+title: 'Capture Correction'
+description: 'Replace a wrong memory with corrected content'
+---
+
+## POST /api/v1/corrections
+
+Records a user correction: stores the corrected content as a new memory, marks the target memory as superseded by it, logs the correction and a contradiction resolution (`user_correction_supersede`), and feeds both beliefs to confidence calibration.
+
+The new memory is created in the target's namespace with the target's memory type and tier, confidence `1.0`, and a `correction` object in its metadata (`target_memory_id`, `reason`, `captured_at`, and the request `metadata` when given). An induction pass is then queued for that namespace.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the caller. A target memory outside it (or its children) gives `400`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="target_memory_id" type="string" required>
+  ID of the memory being corrected. Blank gives `400`, an unknown ID `404`.
+</ParamField>
+
+<ParamField body="corrected_content" type="string" required>
+  The correct content. Sensitive values are redacted; content empty after redaction gives `400`.
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Why the memory was wrong
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Extra details stored with the correction event and under `correction.metadata` of the new memory
+</ParamField>
+
+<ParamField body="importance" type="integer">
+  Importance of the new memory, clamped to 1-10. Defaults to the target's importance.
+</ParamField>
+
+<ParamField body="tags" type="string[]">
+  Tags of the new memory. Defaults to the target's tags.
+</ParamField>
+
+## Response
+
+<ResponseField name="correction_event_id" type="string">
+  ID of the recorded correction event
+</ResponseField>
+
+<ResponseField name="superseded_memory_id" type="string">
+  ID of the corrected (now superseded) memory
+</ResponseField>
+
+<ResponseField name="new_memory_id" type="string">
+  ID of the memory holding the corrected content
+</ResponseField>
+
+<ResponseField name="contradiction_logged" type="boolean">
+  Always `true` on success
+</ResponseField>
+
+<ResponseField name="recalibrated" type="boolean">
+  Whether the calibration models were recomputed after the correction
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/corrections \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "target_memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+    "corrected_content": "I love hiking on Sundays, not Saturdays.",
+    "reason": "user corrected the day"
+  }'
+```
+
+```json
+{
+  "correction_event_id": "01J9Z7B8C9D0E1F2G3H4J5K6M7",
+  "superseded_memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "new_memory_id": "01J9Z7B8C9D0E1F2G3H4J5K6M8",
+  "contradiction_logged": true,
+  "recalibrated": true
+}
+```

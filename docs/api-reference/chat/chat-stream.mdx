@@ -68,16 +68,15 @@ Returns an SSE stream. Each event's `data` is a JSON object with a `type` field.
 
 When the LLM backend is unreachable, the stream sends `memories`, one `token` with a reply built from the retrieved memories, and `done`.
 
-<RequestExample>
+## Example
+
 ```bash
 curl -N -X POST http://localhost:3000/api/v1/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-Anima-Namespace: default" \
   -d '{"message": "What should I cook tonight?", "mode": "tool", "llm": {"base_url": "http://localhost:11434/v1", "model": "qwen3:32b"}}'
 ```
-</RequestExample>
 
-<ResponseExample>
 ```text
 data: {"type":"memories","memories_used":[{"id":"01JXYZ8K3M2N4P5Q6R7S8T9V0W","content":"User is vegetarian","score":0.71,"source":"search","memory_type":"raw","importance":6}]}
 
@@ -91,4 +90,3 @@ data: {"type":"token","content":"how about a mushroom risotto?"}
 
 data: {"type":"done","full_reply":"Since you're vegetarian, how about a mushroom risotto?"}
 ```
-</ResponseExample>

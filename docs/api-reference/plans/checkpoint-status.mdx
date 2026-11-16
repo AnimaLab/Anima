@@ -1,0 +1,90 @@
+---
+title: 'Update Checkpoint Status'
+description: 'Record progress on a plan checkpoint'
+---
+
+## POST /api/v1/plans/checkpoints/{id}/status
+
+Sets the status of a checkpoint, with optional evidence of the progress. The change is written to the audit log.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the checkpoint
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Checkpoint ID. A checkpoint outside the namespace itself (child namespaces excluded) gives `404`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="status" type="string" required>
+  New status. Accepted values and aliases: `pending` (`todo`), `in_progress` (`running`, `active`), `completed` (`done`, `success`), `failed` (`error`), `skipped`. Any other value becomes `pending`. Empty status gives `400`.
+
+  `completed` and `failed` set `completed_at` to the current time; other statuses keep its previous value.
+</ParamField>
+
+<ParamField body="evidence" type="string">
+  What shows the new status, e.g. a log line or a ticket link. When omitted, the previous evidence is kept.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Replaces the checkpoint metadata. When omitted, the previous metadata is kept. Values under sensitive keys (`password`, `secret`, `token`, `auth`, ...) are stored as `"[redacted]"`.
+</ParamField>
+
+## Response
+
+Returns the updated checkpoint, with the fields described in [Add Checkpoint](/api-reference/plans/add-checkpoint).
+
+<ResponseField name="id" type="string">
+  Checkpoint ID
+</ResponseField>
+
+<ResponseField name="plan_id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Normalized status
+</ResponseField>
+
+<ResponseField name="completed_at" type="string | null">
+  When the checkpoint reached `completed` or `failed`
+</ResponseField>
+
+<ResponseField name="evidence" type="string | null">
+  Current evidence
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Time of this update
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/plans/checkpoints/01JCP5A1B2C3D4E5F6G7H8J9K0/status \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "status": "done",
+    "evidence": "Backup snapshot stg-2026-11-17 verified"
+  }'
+```
+
+```json
+{
+  "id": "01JCP5A1B2C3D4E5F6G7H8J9K0",
+  "namespace": "default",
+  "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+  "checkpoint_key": "backup-done",
+  "title": "Take a full backup of staging",
+  "order_index": 1,
+  "status": "completed",
+  "expected_by": "2026-11-20T12:00:00+00:00",
+  "completed_at": "2026-11-17T09:41:03.220+00:00",
+  "evidence": "Backup snapshot stg-2026-11-17 verified",
+  "metadata": null,
+  "created_at": "2026-11-16T10:05:12.402+00:00",
+  "updated_at": "2026-11-17T09:41:03.220+00:00"
+}
+```

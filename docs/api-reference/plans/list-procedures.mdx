@@ -1,0 +1,90 @@
+---
+title: 'List Plan Procedures'
+description: 'List the procedures bound to a plan'
+---
+
+## GET /api/v1/plans/{id}/procedures
+
+Lists the procedures bound to a plan and the role each one plays, most recently updated first.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Plan ID
+</ParamField>
+
+## Response
+
+Returns an array of bindings ordered by `updated_at` descending. An unknown plan ID returns an empty array. Each binding has the fields described in [Bind Procedure](/api-reference/plans/bind-procedure).
+
+<ResponseField name="id" type="string">
+  Binding ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the binding
+</ResponseField>
+
+<ResponseField name="plan_id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="procedure_name" type="string">
+  Procedure name
+</ResponseField>
+
+<ResponseField name="binding_role" type="string">
+  `primary`, `fallback`, `rollback` or `monitor`
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Confidence (0-1)
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Binding metadata
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the binding was first created
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/plans/01JCP4Q8R2S3T4V5W6X7Y8Z9A0/procedures \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01JCP6D2E3F4G5H6J7K8M9N0P1",
+    "namespace": "default",
+    "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+    "procedure_name": "postgres-major-upgrade",
+    "binding_role": "primary",
+    "confidence": 0.85,
+    "metadata": null,
+    "created_at": "2026-11-16T10:07:58.903+00:00",
+    "updated_at": "2026-11-16T10:07:58.903+00:00"
+  },
+  {
+    "id": "01JCP6F4G5H6J7K8M9N0P1Q2R3",
+    "namespace": "default",
+    "plan_id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+    "procedure_name": "restore-staging-snapshot",
+    "binding_role": "rollback",
+    "confidence": 0.75,
+    "metadata": null,
+    "created_at": "2026-11-16T10:06:30.117+00:00",
+    "updated_at": "2026-11-16T10:06:30.117+00:00"
+  }
+]
+```

@@ -1,0 +1,49 @@
+---
+title: 'Update Conversation'
+description: 'Rename a conversation or save its messages'
+---
+
+## PUT /api/v1/conversations/{id}
+
+Saves a conversation's title, its messages, or both. The endpoint takes no namespace header; the conversation is found by ID alone.
+
+<ParamField path="id" type="string" required>
+  Conversation ID. An unknown ID gives `404`.
+</ParamField>
+
+## Request Body
+
+Fields that are absent keep their value; `updated_at` is set to now in every case.
+
+<ParamField body="title" type="string">
+  New title
+</ParamField>
+
+<ParamField body="messages" type="any">
+  The full message list, which replaces the saved one. Any JSON value is accepted and stored as its JSON text; chat clients send an array of `{role, content}` objects.
+</ParamField>
+
+## Response
+
+<ResponseField name="updated" type="boolean">
+  `true` when the conversation was updated
+</ResponseField>
+
+## Example
+
+```bash
+curl -X PUT http://localhost:3000/api/v1/conversations/01J9Z7E5F6G7H8J9K0M1N2P3Q4 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "Where should I hike this weekend?"},
+      {"role": "assistant", "content": "You mentioned liking the Vercors trails..."}
+    ]
+  }'
+```
+
+```json
+{
+  "updated": true
+}
+```

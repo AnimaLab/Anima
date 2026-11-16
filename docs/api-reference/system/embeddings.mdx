@@ -1,0 +1,67 @@
+---
+title: 'Embedding Projection'
+description: 'Memories projected to 3D coordinates for visualisation'
+---
+
+## GET /api/v1/embeddings
+
+Projects the embeddings of the most recent active memories of a namespace (and its children) onto their first three principal components, for the web UI's embedding view. Memories whose embedding dimension differs from the most common one are left out. Content is redacted when `ANIMA_REDACTION_ENABLED` is on.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="integer" default="300">
+  Number of memories to project, newest first, at most 1000
+</ParamField>
+
+## Response
+
+<ResponseField name="points" type="object[]">
+  One point per memory; empty when the namespace has no embedded memories.
+
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Memory ID
+    </ResponseField>
+    <ResponseField name="content" type="string">
+      Memory content
+    </ResponseField>
+    <ResponseField name="memory_type" type="string">
+      Memory type
+    </ResponseField>
+    <ResponseField name="x" type="number">
+      Coordinate on the first principal component
+    </ResponseField>
+    <ResponseField name="y" type="number">
+      Coordinate on the second principal component
+    </ResponseField>
+    <ResponseField name="z" type="number">
+      Coordinate on the third principal component
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/embeddings?limit=500" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "points": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "content": "I love hiking on weekends.",
+      "memory_type": "raw",
+      "x": 0.214,
+      "y": -0.087,
+      "z": 0.031
+    }
+  ]
+}
+```
