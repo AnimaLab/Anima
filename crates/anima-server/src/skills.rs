@@ -59,6 +59,13 @@ now without this conversation: \"Uses pnpm, not npm, in all JavaScript
 projects\", not \"use pnpm here\". Set `category` to `identity`, `preference`,
 `environment`, `routine` or `task` when one fits.
 
+Memories are kept per project: by default `memory_add` stores a memory with the
+project you are working in. Pass `scope: \"global\"` for what holds in every
+project: who the user is, their general preferences, how they like to work.
+\"This repository tags releases X.Y.Z\" stays with the project; \"Prefers short
+answers\" is global. `memory_search` covers every project unless you pass
+`scope: \"project\"`.
+
 Do not save: secrets, tokens or passwords; content of files that are already
 on disk; steps of the current task; guesses the user has not confirmed.
 

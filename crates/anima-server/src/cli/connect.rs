@@ -34,6 +34,9 @@ next assistant will know.
 - Before starting a task, call `memory_search` with its topic.
 - When the user states a durable fact, preference, decision or correction, save
   it with `memory_add`: one fact per memory, written so it stands on its own.
+- Memories are kept with the current project. Pass `scope: \"global\"` to
+  `memory_add` for what holds in every project: who the user is, their general
+  preferences, how they like to work.
 - If a stored memory is wrong or outdated, fix it with `memory_update` instead of
   adding a contradicting one.
 - Skills named in the briefing are loaded with `skill_get`. The `anima` skill is

@@ -486,6 +486,30 @@ fn apply_usage_metrics(
     stage_total_tokens.fetch_add(usage.total_tokens, Ordering::Relaxed);
 }
 
+/// Where induction looks for patterns after new deductions in `namespace`:
+/// one level up, so the habits that recur across projects
+/// (`default/anima`, `default/proxy`) are seen together from `default`.
+fn induction_scope(namespace: &str) -> String {
+    Namespace::parse(namespace)
+        .ok()
+        .and_then(|ns| ns.parent())
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| namespace.to_string())
+}
+
+/// Where an induced pattern is stored: the deepest namespace holding all of
+/// its sources. A pattern seen in one project stays in that project; one
+/// seen across projects goes up to their common parent.
+fn induced_namespace(scope: &str, source_ids: &[String], fact_namespaces: &std::collections::HashMap<String, Namespace>) -> String {
+    let sources: Vec<&Namespace> = source_ids.iter().filter_map(|id| fact_namespaces.get(id)).collect();
+    if sources.is_empty() {
+        return scope.to_string();
+    }
+    Namespace::common_ancestor(sources)
+        .map(|ns| ns.as_str().to_string())
+        .unwrap_or_else(|| scope.to_string())
+}
+
 fn induction_trigger_new_deduced() -> usize {
     std::env::var("ANIMA_INDUCTION_TRIGGER_NEW_DEDUCED")
         .ok()
@@ -662,7 +686,7 @@ async fn run_worker(
                                             }
                                         }
                                         let counter = pending_induction_counts
-                                            .entry(namespace.clone())
+                                            .entry(induction_scope(&namespace))
                                             .or_insert(0);
                                         *counter += deduced_ids.len();
                                     }
@@ -757,7 +781,7 @@ async fn run_worker(
                                 }
                             }
                             let counter = pending_induction_counts
-                                .entry(namespace.clone())
+                                .entry(induction_scope(&namespace))
                                 .or_insert(0);
                             *counter += deduced_ids.len();
                         }
@@ -932,7 +956,7 @@ async fn run_worker(
                                                         }
                                                     }
                                                     let counter = pending_induction_counts
-                                                        .entry(namespace.clone())
+                                                        .entry(induction_scope(&namespace))
                                                         .or_insert(0);
                                                     *counter += deduced_ids.len();
                                                 }
@@ -2630,6 +2654,10 @@ async fn process_induction(
 
     let mut all_facts: Vec<Memory> = reflected;
     all_facts.extend(deduced);
+    let fact_namespaces: std::collections::HashMap<String, Namespace> = all_facts
+        .iter()
+        .filter_map(|m| Namespace::parse(&m.namespace).ok().map(|ns| (m.id.clone(), ns)))
+        .collect();
 
     if all_facts.len() < 5 {
         tracing::info!("Skipping induction for {namespace}: only {} facts", all_facts.len());
@@ -2754,7 +2782,7 @@ async fn process_induction(
         });
 
         let mut memory = Memory::new(
-            namespace.to_string(),
+            induced_namespace(namespace, &pattern.source_ids, &fact_namespaces),
             pattern.content.clone(),
             Some(metadata),
             vec!["induced".to_string()],
@@ -2849,6 +2877,23 @@ fn parse_induction_response(response: &str) -> anyhow::Result<Vec<InducedFact>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn induction_looks_one_level_up_and_stores_where_the_sources_meet() {
+        assert_eq!(induction_scope("default/anima"), "default");
+        assert_eq!(induction_scope("default"), "default");
+        let ns = |s: &str| Namespace::parse(s).unwrap();
+        let facts: std::collections::HashMap<String, Namespace> = [
+            ("a1".to_string(), ns("default/anima")),
+            ("a2".to_string(), ns("default/anima")),
+            ("p1".to_string(), ns("default/proxy")),
+        ]
+        .into();
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(induced_namespace("default", &ids(&["a1", "a2"]), &facts), "default/anima");
+        assert_eq!(induced_namespace("default", &ids(&["a1", "p1"]), &facts), "default");
+        assert_eq!(induced_namespace("default", &ids(&["unknown"]), &facts), "default");
+    }
     use anima_core::memory::MemoryStatus;
 
     #[test]

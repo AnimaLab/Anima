@@ -38,4 +38,6 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# Test LLM clients implement anima-consolidate's async trait.
+async-trait = "0.1"
 tempfile = "3"

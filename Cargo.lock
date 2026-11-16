@@ -102,6 +102,7 @@ dependencies = [
  "anima-embed",
  "anyhow",
  "async-stream",
+ "async-trait",
  "axum",
  "chrono",
  "dotenvy",

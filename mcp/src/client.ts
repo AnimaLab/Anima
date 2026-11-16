@@ -1,21 +1,25 @@
+import { detectProject, projectSegment } from "./project.js";
 // ANIMA_BASE_URL is the documented name; ANIMA_URL is kept for compatibility.
 const BASE_URL = (
   process.env.ANIMA_BASE_URL || process.env.ANIMA_URL || "http://127.0.0.1:3000"
 ).replace(/\/+$/, "");
 const NAMESPACE = process.env.ANIMA_NAMESPACE || "default";
+
+/** The project this session works on, detected once from the working folder. */
+export const PROJECT = detectProject();
 const API_KEY = (process.env.ANIMA_API_KEY || "").trim();
 
-function headers(): Record<string, string> {
+function headers(namespace: string = NAMESPACE): Record<string, string> {
   const h: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-Anima-Namespace": NAMESPACE,
+    "X-Anima-Namespace": namespace,
   };
   if (API_KEY) h["Authorization"] = `Bearer ${API_KEY}`;
   return h;
 }
 
-async function request(url: string, init?: RequestInit) {
-  const res = await fetch(url, { ...init, headers: { ...headers(), ...init?.headers } });
+async function request(url: string, init?: RequestInit, namespace?: string) {
+  const res = await fetch(url, { ...init, headers: { ...headers(namespace), ...init?.headers } });
   if (!res.ok) {
     const body = await res.text().catch(() => res.statusText);
     throw new Error(`HTTP ${res.status}: ${body}`);
@@ -34,7 +38,16 @@ export async function searchMemories(
   maxTier?: number,
   groupBy?: string,
   queryRewrite?: boolean,
+  scope?: "all" | "project",
+  project?: string,
 ) {
+  let namespace: string | undefined;
+  if (scope === "project") {
+    const name = PROJECT ?? project;
+    const segment = name ? projectSegment(name) : undefined;
+    if (!segment) throw new Error("no current project: pass project, or search with scope all");
+    namespace = `${NAMESPACE}/${segment}`;
+  }
   const body: Record<string, unknown> = {
     query,
     limit: limit ?? 10,
@@ -50,7 +63,7 @@ export async function searchMemories(
   return request(`${BASE_URL}/api/v1/memories/search`, {
     method: "POST",
     body: JSON.stringify(body),
-  });
+  }, namespace);
 }
 
 export async function addMemory(
@@ -58,6 +71,8 @@ export async function addMemory(
   tags?: string[],
   consolidate = true,
   category?: string,
+  scope?: "project" | "global",
+  project?: string,
 ) {
   return request(`${BASE_URL}/api/v1/memories`, {
     method: "POST",
@@ -66,6 +81,8 @@ export async function addMemory(
       tags,
       consolidate,
       category,
+      scope,
+      project: PROJECT ?? project,
     }),
   });
 }
@@ -189,6 +206,7 @@ export async function discover(
 }
 
 export async function briefing(project?: string) {
+  project = project ?? PROJECT;
   return request(`${BASE_URL}/api/v1/briefing`, {
     method: "POST",
     body: JSON.stringify({ mode: "session", project }),

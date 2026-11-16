@@ -2260,7 +2260,14 @@ fn search_sync(
     // Use pre-filtered search for exact namespace matches (no '/' hierarchy).
     // Fall back to global search + post-filter for hierarchical namespaces.
     let ns_str = namespace.as_str();
-    let is_exact_ns = !ns_str.contains('/');
+    // A top-level namespace with sub-namespaces (`default` holding
+    // `default/anima`) must reach their vectors too, so only a namespace
+    // without descendants takes the exact pre-filter.
+    let has_descendants: bool = conn
+        .prepare_cached("SELECT 1 FROM memories WHERE namespace GLOB ?1 || '/*' LIMIT 1")
+        .and_then(|mut s| s.exists(params![ns_str]))
+        .unwrap_or(true);
+    let is_exact_ns = !ns_str.contains('/') && !has_descendants;
 
     // Named vector search — query each configured vec table
     let mut per_vector_results: Vec<(&str, f64, Vec<(String, f64)>)> = Vec::new();
@@ -2927,14 +2934,30 @@ fn rename_namespace_sync(conn: &Connection, old_ns: &Namespace, new_ns: &Namespa
     let tx = conn.unchecked_transaction().map_err(DbError::Sqlite)?;
 
     let count: u64 = tx
-        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1")?
+        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1 OR namespace GLOB ?1 || '/*'")?
         .query_row(params![old], |r| r.get(0))?;
 
-    // Update vec_memories namespace metadata column
-    tx.execute(
-        "UPDATE vec_memories SET namespace = ?1 WHERE namespace = ?2",
-        params![new, old],
-    )?;
+    // The namespace and its descendants move together: `old/x` becomes `new/x`.
+    let moved: Vec<(String, String)> = {
+        let mut stmt = tx.prepare("SELECT id, namespace FROM memories WHERE namespace = ?1 OR namespace GLOB ?1 || '/*'")?;
+        let rows = stmt.query_map(params![old], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    // vec0 rejects an UPDATE of an int8 row (it re-reads the vector as float32),
+    // so each vector row is written again under its new namespace.
+    for (id, namespace) in &moved {
+        let embedding: Option<Vec<u8>> = tx
+            .query_row("SELECT embedding FROM vec_memories WHERE memory_id = ?1", params![id], |r| r.get(0))
+            .ok();
+        if let Some(embedding) = embedding {
+            let renamed = format!("{new}{}", &namespace[old.len()..]);
+            tx.execute("DELETE FROM vec_memories WHERE memory_id = ?1", params![id])?;
+            tx.execute(
+                "INSERT INTO vec_memories(memory_id, embedding, namespace) VALUES (?1, vec_int8(?2), ?3)",
+                params![id, embedding, renamed],
+            )?;
+        }
+    }
 
     // Update all namespace-scoped tables
     let tables = [
@@ -2960,14 +2983,14 @@ fn rename_namespace_sync(conn: &Connection, old_ns: &Namespace, new_ns: &Namespa
     ];
     for table in tables {
         tx.execute(
-            &format!("UPDATE {table} SET namespace = ?1 WHERE namespace = ?2"),
+            &format!("UPDATE {table} SET namespace = ?1 || substr(namespace, length(?2) + 1) WHERE (namespace = ?2 OR namespace GLOB ?2 || '/*')"),
             params![new, old],
         )?;
     }
 
     // Update FTS namespace
     tx.execute(
-        "UPDATE fts_memories SET namespace = ?1 WHERE namespace = ?2",
+        "UPDATE fts_memories SET namespace = ?1 || substr(namespace, length(?2) + 1) WHERE (namespace = ?2 OR namespace GLOB ?2 || '/*')",
         params![new, old],
     )?;
 
@@ -2979,14 +3002,14 @@ fn delete_namespace_sync(conn: &Connection, namespace: &Namespace) -> Result<u64
     let ns = namespace.as_str();
     let tx = conn.unchecked_transaction().map_err(DbError::Sqlite)?;
 
-    // Count memories to report
+    // The namespace and every namespace below it.
     let count: u64 = tx
-        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1")?
+        .prepare_cached("SELECT COUNT(*) FROM memories WHERE namespace = ?1 OR namespace GLOB ?1 || '/*'")?
         .query_row(params![ns], |r| r.get(0))?;
 
     // Delete from vec and fts indexes for all memories in the namespace
     let ids: Vec<String> = {
-        let mut stmt = tx.prepare("SELECT id FROM memories WHERE namespace = ?1")?;
+        let mut stmt = tx.prepare("SELECT id FROM memories WHERE namespace = ?1 OR namespace GLOB ?1 || '/*'")?;
         let rows = stmt.query_map(params![ns], |r| r.get(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -3021,7 +3044,7 @@ fn delete_namespace_sync(conn: &Connection, namespace: &Namespace) -> Result<u64
     ];
     for table in tables {
         tx.execute(
-            &format!("DELETE FROM {table} WHERE namespace = ?1"),
+            &format!("DELETE FROM {table} WHERE namespace = ?1 OR namespace GLOB ?1 || '/*'"),
             params![ns],
         )?;
     }
@@ -6534,6 +6557,32 @@ mod tests {
     }
 
     #[test]
+    fn vector_search_from_a_top_level_namespace_reaches_its_sub_namespaces() {
+        // Regression, 2026-11-16: a top-level namespace took the exact vector
+        // pre-filter, so `default` never found `default/anima` by meaning.
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let conn = pool.writer().await;
+            let dim = DbPool::DEFAULT_DIMENSION;
+            insert_test_memory(&conn, "default", "General memory", &make_embedding(dim, 1));
+            insert_test_memory(&conn, "default/anima", "Project memory", &make_embedding(dim, 2));
+            insert_test_memory(&conn, "other", "Unrelated memory", &make_embedding(dim, 2));
+            let config = ScorerConfig { min_score_spread: 0.0, ..Default::default() };
+            let results = search_sync(
+                &conn, &make_embedding(dim, 2), &anima_embed::SparseVector::default(), "", &Namespace::parse("default").unwrap(),
+                &SearchMode::Vector, 10, &config, &[("content".to_string(), 1.0)],
+            ).unwrap();
+            let id_in = |ns: &str| -> String {
+                conn.query_row("SELECT id FROM memories WHERE namespace = ?1", params![ns], |r| r.get(0)).unwrap()
+            };
+            let ids: Vec<&str> = results.iter().map(|r| r.memory_id.as_str()).collect();
+            assert!(ids.contains(&id_in("default/anima").as_str()), "got {ids:?}");
+            assert!(!ids.contains(&id_in("other").as_str()));
+        });
+    }
+
+    #[test]
     fn search_returns_vector_results_in_dense_namespace() {
         // Regression test: vector search must return results even when many memories
         // have similar embeddings (tight score spread). Previously, a min_score_spread
@@ -6572,6 +6621,41 @@ mod tests {
                 assert!(r.vector_score.is_some(), "Vector-mode results should have vector_score");
                 assert!(r.score > 0.0, "Score should be positive");
             }
+        });
+    }
+
+    #[test]
+    fn rename_and_delete_take_the_namespace_with_its_descendants() {
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let store = MemoryStore::new(pool.clone());
+            let dim = DbPool::DEFAULT_DIMENSION;
+            let ns = |s: &str| Namespace::parse(s).unwrap();
+            let mut batch = Vec::new();
+            for (i, n) in ["home", "home/anima", "home/anima/deep", "homework"].iter().enumerate() {
+                let m = Memory::new(n.to_string(), format!("memory in {n}"), None, vec![], Some("raw".to_string()));
+                batch.push((m, make_embedding(dim, i)));
+            }
+            store.insert_many(&batch).await.unwrap();
+
+            assert_eq!(store.rename_namespace(&ns("home"), &ns("perso")).await.unwrap(), 3);
+            let (moved, _) = store.list(&ns("perso"), Some("active"), None, None, 0, 50).await.unwrap();
+            let mut names: Vec<String> = moved.iter().map(|m| m.namespace.clone()).collect();
+            names.sort();
+            assert_eq!(names, ["perso", "perso/anima", "perso/anima/deep"]);
+            let (left, _) = store.list(&ns("homework"), Some("active"), None, None, 0, 50).await.unwrap();
+            assert_eq!(left.len(), 1, "a namespace that only starts with the same letters stays");
+            // The vectors moved too: vector search under the new name finds them.
+            let similar = store.find_similar(&make_embedding(dim, 1), &ns("perso"), 5, 0.0).await.unwrap();
+            assert_eq!(similar.len(), 3);
+            assert!(store.find_similar(&make_embedding(dim, 1), &ns("home"), 5, 0.0).await.unwrap().is_empty());
+
+            assert_eq!(store.delete_namespace(&ns("perso")).await.unwrap(), 3);
+            let (gone, _) = store.list(&ns("perso"), Some("active"), None, None, 0, 50).await.unwrap();
+            assert!(gone.is_empty());
+            let (kept, _) = store.list(&ns("homework"), Some("active"), None, None, 0, 50).await.unwrap();
+            assert_eq!(kept.len(), 1);
         });
     }
 

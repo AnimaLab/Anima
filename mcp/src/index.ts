@@ -24,24 +24,28 @@ server.tool(
     max_tier: z.number().min(1).max(4).optional().describe("Max memory tier: 1=raw, 2=reflected, 3=deduced, 4=induced"),
     group_by: z.enum(["episode_id", "category", "source"]).optional().describe("Deduplicate results by field, returning top result per group"),
     query_rewrite: z.boolean().optional().describe("Expand query with extracted keywords before searching (default: false)"),
+    scope: z.enum(["all", "project"]).optional().describe("all (default): every project and the general memories. project: only the current project's memories"),
+    project: z.string().optional().describe("Project name, when the server cannot tell it from the working folder"),
   },
-  async ({ query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite }) => {
-    const result = await client.searchMemories(query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite);
+  async ({ query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite, scope, project }) => {
+    const result = await client.searchMemories(query, limit, search_mode, temporal_weight, date_start, date_end, category, max_tier, group_by, query_rewrite, scope, project);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );
 
 server.tool(
   "memory_add",
-  "Store a new memory about the user. The server automatically deduplicates and consolidates with existing similar memories. Use for saving facts, preferences, stories, decisions, goals, relationships, emotions, habits, beliefs, skills, locations, or any personal information worth remembering.",
+  "Store a new memory about the user. The server automatically deduplicates and consolidates with existing similar memories. Use for saving facts, preferences, stories, decisions, goals, relationships, emotions, habits, beliefs, skills, locations, or any personal information worth remembering. It is stored with the current project unless scope is global; the answer says which namespace it went to.",
   {
     content: z.string().describe("The memory content to store"),
     tags: z.array(z.string()).optional().describe("Tags for categorization (e.g. ['food', 'health'])"),
     consolidate: z.boolean().optional().describe("Auto-consolidate with similar memories (default: true)"),
     category: z.string().optional().describe("Semantic category — controls decay rate and ranking. Built-in: identity, preference, environment, routine, task, inferred, general. Custom categories can be defined in config.toml"),
+    scope: z.enum(["project", "global"]).optional().describe("project (default): stored with the current project. global: a fact about the user that holds in every project (who they are, general preferences, ways of working)"),
+    project: z.string().optional().describe("Project name, when the server cannot tell it from the working folder"),
   },
-  async ({ content, tags, consolidate, category }) => {
-    const result = await client.addMemory(content, tags, consolidate ?? true, category);
+  async ({ content, tags, consolidate, category, scope, project }) => {
+    const result = await client.addMemory(content, tags, consolidate ?? true, category, scope, project);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   },
 );

@@ -19,6 +19,14 @@ pub struct AddMemoryRequest {
     /// How this memory was created: user_stated, agent_observed, inferred, promoted.
     #[serde(default)]
     pub source: Option<String>,
+    /// Project the memory belongs to. It is stored in `<namespace>/<project>`
+    /// unless `scope` is `global`.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// `project` (the default when a project is given) or `global`: a fact
+    /// about the user that holds in every project, stored in the namespace itself.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,6 +34,8 @@ pub struct AddMemoryResponse {
     pub id: String,
     pub action: String,
     pub merged_into: Option<String>,
+    /// Namespace the memory is stored in.
+    pub namespace: String,
 }
 
 #[derive(Debug, Deserialize)]
