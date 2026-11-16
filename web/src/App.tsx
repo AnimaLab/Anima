@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NamespaceContext } from './hooks/useNamespace'
-import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatFeatures, type ChatSegment } from './hooks/useChat'
+import { ChatContext, type DisplayMessage, type SendMessageParams, type ChatSegment } from './hooks/useChat'
 import { setNamespace as setApiNamespace, api } from './api/client'
 import type { LlmConfig, ConversationSummary, FileAttachment, ChatMessage, MemoryContext, StreamEvent } from './api/types'
 import { Layout } from './components/Layout'
@@ -41,25 +41,6 @@ export default function App() {
 
   // Chat state lifted to App so it survives tab switches
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([])
-  // Memory tools are on by default: without them the model cannot look
-  // anything up beyond what Recall found for the message.
-  const [chatFeatures, setChatFeatures] = useState<ChatFeatures>(() => {
-    try {
-      const saved = localStorage.getItem('anima-chat-features')
-      return saved ? JSON.parse(saved) : { recall: true, tools: true }
-    } catch {
-      return { recall: true, tools: true }
-    }
-  })
-  // Follows the saved features from the first render, not only after a toggle.
-  const [chatMode, setChatMode] = useState<'rag' | 'tool'>(() => chatFeatures.tools ? 'tool' : 'rag')
-  const setChatFeaturesAndSave = useCallback((f: ChatFeatures) => {
-    setChatFeatures(f)
-    localStorage.setItem('anima-chat-features', JSON.stringify(f))
-    // Derive server mode from features
-    if (f.tools) setChatMode('tool')
-    else setChatMode('rag')
-  }, [])
   const [chatConfig, setChatConfig] = useState<LlmConfig>(() => {
     try {
       const saved = localStorage.getItem('anima-llm-config')
@@ -108,9 +89,15 @@ export default function App() {
   loadingConvIdsRef.current = loadingConvIds
   const messagesRef = useRef(chatMessages)
   messagesRef.current = chatMessages
+  useEffect(() => {
+    try { localStorage.removeItem('anima-chat-features') } catch { /* storage unavailable */ }
+  }, [])
+
+  // Recall and memory tools are always on; only a model whose "Tool use"
+  // capability is off is sent rag mode, which recalls without tools.
+  const chatMode: 'rag' | 'tool' = chatConfig.tool_use === false ? 'rag' : 'tool'
   const modeRef = useRef(chatMode)
-  // A model whose "Tool use" capability is off is never sent the tools.
-  modeRef.current = chatConfig.tool_use === false ? 'rag' : chatMode
+  modeRef.current = chatMode
   const configRef = useRef(chatConfig)
   configRef.current = chatConfig
   const convIdRef = useRef(conversationId)
@@ -135,7 +122,6 @@ export default function App() {
         if (parsed.length > 0) {
           setChatMessages(parsed)
           messagesRef.current = parsed
-          setChatMode(conv.mode as 'rag' | 'tool')
           // Rebuild API history from loaded messages
           const history = parsed
             .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -223,6 +209,8 @@ export default function App() {
 
     const mode = modeRef.current
     const config = { ...configRef.current }
+    // The non-streaming endpoint only uses tools when the config says so.
+    config.tool_use = mode === 'tool'
 
     // Build system prompt from identity context
     const userName = localStorage.getItem('anima-user-name') || ''
@@ -519,9 +507,6 @@ export default function App() {
     messages: chatMessages,
     setMessages: setChatMessages,
     mode: chatMode,
-    setMode: setChatMode,
-    features: chatFeatures,
-    setFeatures: setChatFeaturesAndSave,
     config: chatConfig,
     setConfig: (cfg: LlmConfig) => {
       setChatConfig(cfg)
@@ -537,7 +522,7 @@ export default function App() {
     streamingSegments: visibleStreamingSegments,
     sendMessage,
     stopGeneration,
-  }), [chatMessages, chatMode, chatFeatures, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, visibleStreamingSegments, sendMessage, stopGeneration])
+  }), [chatMessages, chatMode, chatConfig, conversationId, conversations, visibleLoading, visibleStreamingContent, visibleStreamingMemories, visibleStreamingSegments, sendMessage, stopGeneration])
 
   return (
     <QueryClientProvider client={queryClient}>

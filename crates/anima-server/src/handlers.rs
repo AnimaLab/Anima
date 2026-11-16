@@ -4045,6 +4045,22 @@ async fn enriched_retrieval(
     Ok((memory_context, memories_used))
 }
 
+/// What a chat model is told about the user's memory, whether or not anything
+/// matched the message. Without it, a model given no memories answered that
+/// it had no persistent memory at all.
+fn memory_preamble(memory_context: &str) -> String {
+    let intro = "You are connected to the user's long-term memory (Anima), shared by all their assistants.";
+    if memory_context.is_empty() {
+        format!("{intro} No stored memory matched this message.")
+    } else {
+        format!(
+            "{intro} The following stored memories matched this message. Only reference them if they are \
+             directly relevant to what the user is currently asking about. Do not mention or allude to \
+             them otherwise.\n\n{memory_context}"
+        )
+    }
+}
+
 async fn chat_rag_mode(
     state: &AppState,
     client: &reqwest::Client,
@@ -4063,15 +4079,7 @@ async fn chat_rag_mode(
         "You are a helpful assistant."
     );
     let base_prompt = format!("{base_prompt}\n\nToday's date: {today}.");
-    let system_prompt = if memory_context.is_empty() {
-        base_prompt
-    } else {
-        format!(
-            "{base_prompt}\n\nThe following are memories about the user. Only reference them if they are \
-             directly relevant to what the user is currently asking about. Do not mention or allude to \
-             them otherwise.\n\n{memory_context}"
-        )
-    };
+    let system_prompt = format!("{base_prompt}\n\n{}", memory_preamble(&memory_context));
 
     let mut messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];
     for msg in &req.history {
@@ -4114,6 +4122,12 @@ async fn chat_tool_mode(
     req: &ChatRequest,
 ) -> Result<Json<ChatResponse>, AppError> {
     let llm = req.llm.as_ref().expect("llm must be resolved before calling chat_tool_mode");
+
+    // Memories matching the message are given up front, as in rag mode; the
+    // tools are for anything beyond them.
+    let (memory_context, recalled) =
+        enriched_retrieval(state, ns, &req.message, 20, 15, "chat_tool").await?;
+    let preamble = memory_preamble(&memory_context);
 
     let tools = serde_json::json!([
         serde_json::json!({
@@ -4182,7 +4196,7 @@ async fn chat_tool_mode(
     );
     let base_prompt = format!("{base_prompt}\n\nToday's date: {today}.");
     let system_prompt = format!(
-        "{base_prompt}\n\nYou have access to a persistent memory system about the user.\n\n\
+        "{base_prompt}\n\n{preamble}\n\n\
         MEMORY TOOLS:\n\
         - memory_search: Search the user's stored memories. Call this PROACTIVELY whenever:\n\
           * The user asks something that might relate to their personal info, preferences, or history\n\
@@ -4190,6 +4204,7 @@ async fn chat_tool_mode(
           * You need context about the user to give a personalized answer\n\
           * The conversation touches on topics where user preferences matter (food, tech, hobbies)\n\
           Use short, focused queries (e.g., \"allergies\", \"programming languages\", \"family\").\n\n\
+            - memory_recent: List the latest stored memories, newest first. Use it when the user asks what you remember, what is new, or for an overview.\n\n\
         - memory_add: Store a personal memory about the user. Use for facts, stories, experiences, preferences, events, decisions, reflections, goals, relationships, emotions, habits, beliefs, skills, or locations.\n\
           For facts, keep them atomic (ONE piece of info). For stories and experiences, capture the full narrative.\n\
           Include the subject (e.g., \"User's wife Sarah...\").\n\
@@ -4207,7 +4222,7 @@ async fn chat_tool_mode(
     }
     messages.push(build_user_message(&req.message, &req.attachments, llm.vision));
 
-    let mut memories_used = Vec::new();
+    let mut memories_used = recalled;
     let mut memories_added: Vec<AddedMemory> = Vec::new();
 
     // Tool call loop (max 5 rounds)
@@ -5549,6 +5564,20 @@ fn mock_chat_completion(body: &serde_json::Value) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use super::memory_preamble;
+
+    /// Regression, 2026-11-16: with no memory matching the message, the chat
+    /// prompt said nothing about memory, and the model told the user it had no
+    /// persistent memory.
+    #[test]
+    fn the_model_is_always_told_about_the_memory() {
+        let none = memory_preamble("");
+        assert!(none.contains("long-term memory"), "{none}");
+        assert!(none.contains("No stored memory matched"), "{none}");
+        let some = memory_preamble("- likes Rust");
+        assert!(some.contains("long-term memory") && some.ends_with("- likes Rust"), "{some}");
+    }
+
     use super::usable_api_key;
 
     /// Regression, 2026-11-13: a chat API key pasted with a leading space was
@@ -5847,6 +5876,7 @@ pub async fn chat_stream(
         expand_with_graph_neighbors(&state, &relevant, 12).await?;
 
     let is_tool_mode = req.mode == "tool";
+    let preamble = memory_preamble(&memory_context);
 
     // Build messages
     let today = chrono::Utc::now().format("%A, %B %-d, %Y");
@@ -5857,7 +5887,7 @@ pub async fn chat_stream(
     let base_prompt = format!("{base_prompt}\n\nToday's date: {today}.");
     let system_prompt = if is_tool_mode {
         format!(
-            "{base_prompt}\n\nYou have access to a persistent memory system about the user.\n\n\
+            "{base_prompt}\n\n{preamble}\n\n\
             MEMORY TOOLS:\n\
             - memory_search: Search the user's stored memories. Call this PROACTIVELY whenever:\n\
               * The user asks something that might relate to their personal info, preferences, or history\n\
@@ -5865,6 +5895,7 @@ pub async fn chat_stream(
               * You need context about the user to give a personalized answer\n\
               * The conversation touches on topics where user preferences matter (food, tech, hobbies)\n\
               Use short, focused queries (e.g., \"allergies\", \"programming languages\", \"family\").\n\n\
+            - memory_recent: List the latest stored memories, newest first. Use it when the user asks what you remember, what is new, or for an overview.\n\n\
             - memory_add: Store a personal memory about the user. Use for facts, stories, experiences, preferences, events, decisions, reflections, goals, relationships, emotions, habits, beliefs, skills, or locations.\n\
               For facts, keep them atomic (ONE piece of info). For stories and experiences, capture the full narrative.\n\
               Include the subject (e.g., \"User's wife Sarah...\").\n\
@@ -5879,14 +5910,8 @@ pub async fn chat_stream(
             When in doubt, search first — it's better to check memories than to miss relevant context.\n\
             Be natural and helpful."
         )
-    } else if memory_context.is_empty() {
-        base_prompt.clone()
     } else {
-        format!(
-            "{base_prompt}\n\nThe following are memories about the user. Only reference them if they are \
-             directly relevant to what the user is currently asking about. Do not mention or allude to \
-             them otherwise.\n\n{memory_context}"
-        )
+        format!("{base_prompt}\n\n{}", memory_preamble(&memory_context))
     };
 
     let mut messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];

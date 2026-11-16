@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Send, Brain, Wrench, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2 } from 'lucide-react'
+import { Send, Brain, ChevronDown, ChevronUp, ChevronRight, Sparkles, X, Copy, Check, Paperclip, File as FileIcon, Image as ImageIcon, ArrowDown, Square, RefreshCw, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -35,7 +35,7 @@ export function ChatPage() {
   const { id: urlConvId } = useParams<{ id?: string }>()
   const navigate = useNavigate()
   const {
-    messages, setMessages, features, setFeatures, config, setConfig,
+    messages, setMessages, config, setConfig,
     conversationId, setConversationId, conversations, setConversations,
     loading, streamingContent, streamingMemories, streamingSegments,
     sendMessage: contextSendMessage,
@@ -237,13 +237,9 @@ export function ChatPage() {
   const title = conversationId
     ? conversations.find(c => c.id === conversationId)?.title || 'Chat'
     : 'New chat'
-  const featureHint = features.recall && features.tools
-    ? 'Memories are recalled automatically, and the model can search and store them itself.'
-    : features.recall
-    ? 'Your memories are searched automatically to help the conversation.'
-    : features.tools
-    ? 'The model can search and store memories using tools.'
-    : 'Plain chat: no memory features are enabled.'
+  const featureHint = config.tool_use === false
+    ? 'Memories matching each message are recalled automatically. This model has tool use turned off, so it cannot search or store memories itself.'
+    : 'Memories matching each message are recalled automatically, and the model can search, list and store memories itself.'
 
   const applySuggestion = (text: string) => {
     setInput(text)
@@ -312,27 +308,6 @@ export function ChatPage() {
             </button>
           </div>
 
-          {/* Memory features: independent toggles */}
-          <div className="segmented" role="group" aria-label="Memory features">
-            <button
-              type="button"
-              onClick={() => setFeatures({ ...features, recall: !features.recall })}
-              aria-pressed={features.recall}
-              title="Automatically retrieve relevant memories for each message"
-              className="inline-flex items-center gap-1.5"
-            >
-              <Brain size={14} /> Recall
-            </button>
-            <button
-              type="button"
-              onClick={() => setFeatures({ ...features, tools: !features.tools })}
-              aria-pressed={features.tools}
-              title="Let the model search and store memories with tools"
-              className="inline-flex items-center gap-1.5"
-            >
-              <Wrench size={14} /> Tools
-            </button>
-          </div>
 
           {messages.length > 0 && (
             <button

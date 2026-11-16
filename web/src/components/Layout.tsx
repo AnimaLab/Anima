@@ -75,7 +75,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     document.title = title ? `${title} · Anima` : 'Anima'
   }, [location.pathname])
   const {
-    setMessages, mode, setMode,
+    setMessages,
     conversationId, setConversationId,
     conversations, setConversations,
   } = useChat()
@@ -140,12 +140,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       setConversationId(conv.id)
       const parsed: DisplayMessage[] = JSON.parse(conv.messages)
       setMessages(parsed)
-      setMode(conv.mode as 'rag' | 'tool')
       navigate(`/chat/${conv.id}`)
     } catch {
       // ignore
     }
-  }, [setConversationId, setMessages, setMode, navigate])
+  }, [setConversationId, setMessages, navigate])
 
   const deleteConv = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()

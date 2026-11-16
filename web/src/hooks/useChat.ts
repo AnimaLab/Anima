@@ -30,18 +30,10 @@ export interface SendMessageParams {
   }[]
 }
 
-export interface ChatFeatures {
-  recall: boolean
-  tools: boolean
-}
-
 export interface ChatState {
   messages: DisplayMessage[]
   setMessages: React.Dispatch<React.SetStateAction<DisplayMessage[]>>
   mode: 'rag' | 'tool'
-  setMode: (mode: 'rag' | 'tool') => void
-  features: ChatFeatures
-  setFeatures: (f: ChatFeatures) => void
   config: LlmConfig
   setConfig: (config: LlmConfig) => void
   conversationId: string | null
