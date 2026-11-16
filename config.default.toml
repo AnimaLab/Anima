@@ -185,6 +185,12 @@ top_n = 10
 # Anonymous usage telemetry. Set enabled = false to opt out.
 # Sends only: model names, memory counts, OS info, feature flags.
 # Never sends: memory content, namespace names, API keys.
+# Once a day the server looks up the latest release on GitHub (a read of the
+# public release list, nothing is downloaded) and the web UI and --version say
+# when a newer one exists.
+[updates]
+check = true
+
 [telemetry]
 enabled = true
 endpoint = "https://telemetry.anima-memory.dev/v1/report"

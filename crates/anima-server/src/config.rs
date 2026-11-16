@@ -41,6 +41,9 @@ pub struct AppConfig {
     pub processor: ProcessorLlmConfig,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    /// Daily check for a newer release on GitHub.
+    #[serde(default)]
+    pub updates: UpdatesConfig,
     /// Cross-encoder re-ranker for improved retrieval quality.
     #[serde(default)]
     pub reranker: RerankerConfig,
@@ -444,6 +447,22 @@ impl Default for TelemetryConfig {
     }
 }
 
+/// Release check configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdatesConfig {
+    /// Look up the latest release on GitHub once a day.
+    #[serde(default = "updates_default_check")]
+    pub check: bool,
+}
+
+fn updates_default_check() -> bool { true }
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { check: updates_default_check() }
+    }
+}
+
 /// Cross-encoder re-ranker configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RerankerConfig {
@@ -582,6 +601,7 @@ impl Default for AppConfig {
             llm: LlmServerConfig::default(),
             processor: ProcessorLlmConfig::default(),
             telemetry: TelemetryConfig::default(),
+            updates: UpdatesConfig::default(),
             reranker: RerankerConfig::default(),
             sparse: SparseConfig::default(),
             vectors: Vec::new(),

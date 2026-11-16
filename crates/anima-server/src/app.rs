@@ -46,6 +46,8 @@ pub struct AppState {
     pub vector_configs: Vec<(String, f64)>,
     /// Vec index status — DimensionMismatch means re-embedding is needed.
     pub vec_status: tokio::sync::RwLock<anima_db::vector::VecTableStatus>,
+    /// Latest release found by the update check, if any.
+    pub latest_release: tokio::sync::RwLock<Option<crate::updates::LatestRelease>>,
 }
 
 impl AppState {
@@ -251,6 +253,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/conversations/{id}/title",
             post(handlers::generate_title),
         )
+        .route("/api/v1/updates", get(handlers::get_updates))
         .route(
             "/api/v1/telemetry/config",
             get(handlers::get_telemetry_config).put(handlers::set_telemetry_config),

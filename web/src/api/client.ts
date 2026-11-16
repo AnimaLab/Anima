@@ -6,8 +6,7 @@ import type {
   AskRequest, AskResponse, EmbeddingsResponse,
   ContradictionEntry,
   Skill,
-  SkillSummary, SupersessionLink, ProfilesResponse
-} from './types'
+  SkillSummary, SupersessionLink, ProfilesResponse, UpdateStatus } from './types'
 
 let currentNamespace = 'default'
 
@@ -123,6 +122,7 @@ export const api = {
     }),
 
   getStats: () => request<NamespaceStats>('/api/v1/stats'),
+  getUpdates: () => request<UpdateStatus>('/api/v1/updates'),
   getVecStatus: () => request<{ status: string; needs_reindex: boolean; existing_dimension?: number; requested_dimension?: number }>('/api/v1/vec/status'),
   reindex: () => request<{ reindexed: number; dimension: number }>('/api/v1/vec/reindex', { method: 'POST' }),
   listNamespaces: () => request<NamespaceInfo[]>('/api/v1/namespaces'),
