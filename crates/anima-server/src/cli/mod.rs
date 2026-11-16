@@ -37,6 +37,7 @@ Usage:
   anima-server recall                   Print a briefing for a harness hook
                                         (--prompt, --project=<name>)
   anima-server --install | --uninstall | --service-status
+  anima-server --version                Show the version, and a newer release if one was found
 
 Harnesses: claude, claude-desktop, codex, cursor, hermes, all, print
 
@@ -117,6 +118,13 @@ pub async fn dispatch(args: &[String]) -> Option<anyhow::Result<()>> {
     let result = match command {
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
+            Ok(())
+        }
+        "version" | "--version" | "-V" => {
+            println!("anima-server {}", crate::updates::CURRENT_VERSION);
+            if let Some(notice) = crate::updates::notice(&crate::telemetry::anima_dir()) {
+                println!("{notice}");
+            }
             Ok(())
         }
         "connect" => run(rest, |o| async move { connect::run(&o, true) }).await,

@@ -6543,6 +6543,15 @@ pub async fn delete_conversation(
     Ok(Json(serde_json::json!({"deleted": true})))
 }
 
+// ── Updates ──────────────────────────────────────────────
+
+/// GET /api/v1/updates — the running version and the latest release found by
+/// the daily check.
+pub async fn get_updates(State(state): State<Arc<AppState>>) -> Json<crate::updates::UpdateStatus> {
+    let latest = state.latest_release.read().await;
+    Json(crate::updates::UpdateStatus::new(state.config.updates.check, latest.as_ref()))
+}
+
 // ── Telemetry ──────────────────────────────────────────────
 
 pub async fn get_telemetry_config(

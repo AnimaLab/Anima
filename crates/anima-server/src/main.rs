@@ -10,6 +10,7 @@ mod prompts;
 mod service;
 mod skills;
 mod telemetry;
+mod updates;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -459,7 +460,16 @@ async fn start_server(
         ingested_started_at: std::time::Instant::now(),
         vector_configs,
         vec_status: tokio::sync::RwLock::new(vec_status),
+        latest_release: tokio::sync::RwLock::new(
+            config.updates.check.then(|| updates::read_cache(&telemetry::anima_dir())).flatten(),
+        ),
     });
+
+    if config.updates.check {
+        updates::spawn_update_check(state.clone(), telemetry::anima_dir());
+    } else {
+        tracing::info!(domain = "updates", "Release check disabled by config");
+    }
 
     // Spawn telemetry loop
     if config.telemetry.enabled {

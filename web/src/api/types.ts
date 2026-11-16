@@ -113,6 +113,15 @@ export interface GraphData {
 
 // --- Chat ---
 
+export interface UpdateStatus {
+  enabled: boolean
+  current: string
+  latest: string | null
+  url: string | null
+  checked_at: string | null
+  update_available: boolean
+}
+
 export interface LlmConfig {
   base_url: string
   model: string

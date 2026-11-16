@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen, Info } from 'lucide-react'
+import { LayoutDashboard, Database, Search, Share2, Network, MessageSquare, Trash2, PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Settings, Menu, X, Layers, GitCompareArrows, Activity, Sun, Moon, Monitor, Plus, BookOpen, Info, ArrowUpCircle } from 'lucide-react'
 import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme'
 import { AboutAnima, aboutSeen } from './AboutAnima'
 import { useChat } from '../hooks/useChat'
@@ -8,7 +8,7 @@ import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
 import { api } from '../api/client'
 import type { DisplayMessage } from '../hooks/useChat'
-import type { NamespaceInfo } from '../api/types'
+import type { NamespaceInfo, UpdateStatus } from '../api/types'
 
 const navGroups = [
   {
@@ -87,6 +87,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     api.listNamespaces().then(setNamespaces).catch(() => {})
+  }, [])
+
+  // The server checks GitHub once a day; this only reads its answer.
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  useEffect(() => {
+    api.getUpdates().then(setUpdate).catch(() => {})
   }, [])
 
   // Poll processor status for LLM errors
@@ -216,6 +222,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Navigation */}
       <nav aria-label="Main" className="flex-1 px-2 pb-2 overflow-y-auto space-y-4">
+        {update?.update_available && update.url && (
+          <a
+            href={update.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Anima ${update.latest} is available, you run ${update.current}. Open the release notes`}
+            title={`Anima ${update.latest} is available (you run ${update.current})`}
+            className={`flex items-center rounded-md border border-accent/40 bg-accent/10 text-ink hover:bg-accent/20 transition-colors ${showLabels ? 'gap-2.5 px-2 py-2' : 'justify-center w-8 h-8 mx-auto'}`}
+          >
+            <ArrowUpCircle size={16} className="shrink-0 text-accent" />
+            {showLabels && (
+              <span className="min-w-0 leading-tight">
+                <span className="block text-[13px] font-medium">Update available</span>
+                <span className="block text-xs text-ink-muted">v{update.latest} · you run v{update.current}</span>
+              </span>
+            )}
+          </a>
+        )}
         {navGroups.map((group, gi) => (
           <div key={group.label}>
             {showLabels
