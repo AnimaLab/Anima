@@ -21,15 +21,17 @@ Returns contradiction ledger entries — records of when one memory superseded a
 
 ## Response
 
-Array of contradiction entries, each with:
+Array of contradiction entries, newest first. Entries from child namespaces (`<namespace>/...`) are included. Each entry:
 
 - `id` — unique entry ID
+- `namespace` — namespace the entry was recorded in
 - `old_memory_id` — the superseded memory
 - `new_memory_id` — the superseding memory
 - `resolution` — how the conflict was resolved (`user_correction_supersede`, `reconsolidation_supersede`)
-- `old_content` — content of the old memory (if still in DB)
-- `new_content` — content of the new memory
+- `provenance` — JSON context recorded with the resolution (e.g. `source`, `reason`), or `null`
 - `created_at` — when the resolution happened
+- `old_content` — content of the old memory, present while it is still in the database
+- `new_content` — content of the new memory, present while it is still in the database
 
 ## Example
 

@@ -6,27 +6,63 @@ description: 'Merge multiple memories into one'
 ## POST /api/v1/memories/merge
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace. Every source memory must be in it (or its children); otherwise `403`.
+</ParamField>
+
+<ParamField header="X-Anima-Principal" type="string">
+  Actor recorded on the revisions and audit event. Default: `api`
 </ParamField>
 
 ## Request Body
 
 <ParamField body="source_memory_ids" type="string[]" required>
-  IDs of the memories to merge
+  IDs of the memories to merge. Must be non-empty, without duplicates, and every source must be `active`.
 </ParamField>
 
-<ParamField body="content" type="string">
-  Content for the merged memory. If omitted, content is synthesized from sources.
+<ParamField body="content" type="string" required>
+  Content of the merged memory. Empty content gives `400`.
 </ParamField>
 
 <ParamField body="tags" type="string[]">
-  Tags for the merged memory
+  Tags for the merged memory. Default: the union of the sources' tags.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Metadata for the merged memory. A `merge` key with the source IDs and merge time is added.
+</ParamField>
+
+<ParamField body="memory_type" type="string" default="merged">
+  Memory type of the merged memory
+</ParamField>
+
+<ParamField body="importance" type="integer">
+  Importance of the merged memory (1-10). Default: the average of the sources.
 </ParamField>
 
 <ParamField body="reason" type="string">
-  Reason for the merge (recorded in audit trail)
+  Reason for the merge (recorded in the revisions and audit trail)
 </ParamField>
 
 ## Response
 
-Returns the newly created merged memory. Source memories are marked as merged.
+A new memory is created with a `merge_created` revision. Each source is marked `superseded` (with `superseded_by` set to the new memory), removed from the search indexes, and gets a `merge_source` revision.
+
+<ResponseField name="merged_memory_id" type="string">
+  ID of the new merged memory
+</ResponseField>
+
+<ResponseField name="superseded_source_ids" type="string[]">
+  IDs of the source memories, now superseded
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Revision number of the merged memory's first revision
+</ResponseField>
+
+```json
+{
+  "merged_memory_id": "01J9Z4A1B2C3D4E5F6G7H8J9K0",
+  "superseded_source_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3", "01J9Z3K4M5N6P7Q8R9S0T1V2W4"],
+  "revision_number": 1
+}
+```

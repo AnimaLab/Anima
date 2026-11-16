@@ -1,0 +1,110 @@
+---
+title: 'Top Accessed Memories'
+description: 'Rank active memories by how often they were accessed'
+---
+
+## GET /api/v1/memories/top-accessed
+
+Ranks the active memories of a namespace by `access_count`, most accessed first by default, to show which memories are used most (or least).
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="order" type="string" default="desc">
+  `asc` lists the least accessed memories first; any other value sorts most accessed first
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Maximum number of memories to return, at most 100
+</ParamField>
+
+## Response
+
+Returns an array of memory objects, the same shape as [Get Memory](/api-reference/memories/get), with sensitive values redacted.
+
+<ResponseField name="id" type="string">
+  Memory ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the memory
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  Memory content
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Memory metadata
+</ResponseField>
+
+<ResponseField name="tags" type="string[]">
+  Tags
+</ResponseField>
+
+<ResponseField name="memory_type" type="string">
+  Memory type
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  Semantic category
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Confidence
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  How the memory was created
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Always `active` here
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+<ResponseField name="access_count" type="integer">
+  Number of times the memory was accessed
+</ResponseField>
+
+<ResponseField name="importance" type="integer">
+  Importance (1-10)
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/memories/top-accessed?limit=5" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+    "namespace": "default",
+    "content": "I love hiking on weekends.",
+    "metadata": null,
+    "tags": ["preference", "outdoors"],
+    "memory_type": "raw",
+    "category": "preference",
+    "confidence": 1.0,
+    "source": "user_stated",
+    "status": "active",
+    "created_at": "2026-11-16T09:12:04.512+00:00",
+    "updated_at": "2026-11-16T09:12:04.512+00:00",
+    "access_count": 42,
+    "importance": 7
+  }
+]
+```

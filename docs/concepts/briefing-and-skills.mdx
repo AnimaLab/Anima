@@ -29,7 +29,7 @@ Skills stored in Anima (load one with skill_get before using it):
 
 ### How it is built
 
-1. **Candidates.** Active memories in the `identity`, `preference` and `routine` categories, plus a search for the project name when one is given.
+1. **Candidates.** Active memories in the `identity`, `preference` and `routine` categories, from the namespace itself and from the current project's namespace (`<namespace>/<project>`, see [Projects](/concepts/namespaces#projects)); other projects' preferences stay out. With a project, also the memories of its namespace, and a search for the project name, which finds older memories stored before projects had their own namespace.
 2. **Rank.** Importance and confidence count most, then how often the memory was retrieved and how recently it changed.
 3. **Collapse.** Memories about the same thing are reduced to one. The more trusted one wins, then the more recent. If the loser says something different, it stays visible as a short note: `(also on record, less trusted: "...")`. A plain restatement is dropped.
 4. **Budget.** Lines are taken in rank order until the character budget is spent. The response reports how many were left out.

@@ -1,0 +1,88 @@
+---
+title: 'Security'
+description: 'API key, Host check, CORS, namespace ACL, and running Anima as a service'
+---
+
+Anima usually runs on a developer machine, where the main risk is a web page in the user's browser calling `localhost`. Three layers guard the API: an API key, a `Host` header check when there is no key, and a CORS allowlist. A namespace ACL adds per-caller access rules on top.
+
+## API key
+
+The key comes from `[server] api_key` in `config.toml`, or from the `ANIMA_API_KEY` environment variable when that value is empty (see [Configuration](/configuration#server)). With a key set, every request whose path starts with `/api/` must carry it in one of two headers:
+
+```bash
+curl http://localhost:3000/api/v1/stats \
+  -H "Authorization: Bearer $ANIMA_API_KEY" \
+  -H "X-Anima-Namespace: default"
+
+curl http://localhost:3000/api/v1/stats \
+  -H "X-Anima-Api-Key: $ANIMA_API_KEY" \
+  -H "X-Anima-Namespace: default"
+```
+
+A missing or wrong key gets `401` with `WWW-Authenticate: Bearer`. The server compares SHA-256 digests of the keys in constant time. The health checks (`/health`, `/health/ready`) and the web UI's static files stay public, so probes work and the UI can load and then ask for the key.
+
+### When a key is required
+
+The server decides at startup from `[server] host`:
+
+| Bind address | API key | Result |
+|--------------|---------|--------|
+| Loopback (`127.0.0.1`, `::1`, `localhost`) | set | Key required on `/api/*` |
+| Loopback | not set | Open API, with the [Host check](#host-check) |
+| Any other address | set | Key required on `/api/*` |
+| Any other address | not set | Startup refused, unless `allow_unauthenticated = true` |
+
+`allow_unauthenticated = true` is meant for a server behind a reverse proxy or a private network that authenticates on its own; the server then logs a warning at startup and serves the API without a key.
+
+The `anima-server` client subcommands (`connect`, `mcp`, `recall`, `export`, `import`, `skills`) send the key given by `--api-key`, `ANIMA_API_KEY` or `~/.anima/client.json`; see [Connect a harness](/integrations/connect#options).
+
+## Host check
+
+On a loopback bind without a key, every request must name a loopback host in its `Host` header: `localhost`, a name ending in `.localhost`, or a loopback IP, with or without a port. Any other `Host` gets `403`. This blocks DNS rebinding, where an attacker's domain resolves to `127.0.0.1` so that a web page can reach the local server. Setting an API key replaces this check.
+
+## CORS
+
+`[server] cors_allowed_origins` lists the browser origins allowed to call the API from another origin:
+
+```toml
+[server]
+cors_allowed_origins = ["http://localhost:5173"]
+```
+
+With the default empty list, no `Access-Control-Allow-Origin` header is ever sent, so browsers keep other origins from reading responses, and from sending the API's custom headers at all. The bundled web UI is served by the same server and needs no entry. Trailing slashes are ignored and `*` is skipped with a warning: origins are listed one by one. Allowed origins may use `GET`, `POST`, `PUT`, `DELETE` and `OPTIONS` with the `Authorization`, `Content-Type`, `X-Anima-Api-Key`, `X-Anima-Namespace` and `X-Anima-Principal` headers. Preflight requests are answered before the API key check.
+
+## Namespace ACL
+
+`ANIMA_NAMESPACE_ACL` restricts which caller reads or writes which namespace on every endpoint that takes `X-Anima-Namespace`. The caller is named by the `X-Anima-Principal` header, `anonymous` when absent. Rules are separated by `;`, each one `principal=pattern[:mode],...`:
+
+- `pattern` is a namespace, `prefix/*` (the prefix and its children) or `*`;
+- `mode` is `r`, `w` or `rw` (the default);
+- a principal of `*` applies to every caller.
+
+`GET`, `HEAD` and `OPTIONS` need read access, every other method write access. A request is allowed when any rule for its principal, or for `*`, grants the mode on a matching pattern; otherwise it gets `403`. With the variable unset or empty, every namespace is open. The variable is read on each request.
+
+```bash
+ANIMA_NAMESPACE_ACL="alice=default/*:rw,private/*:r;bob=default:r;*=public/*:r"
+```
+
+Here `alice` reads and writes `default` and its children and reads `private/*`; `bob` reads `default` only; everyone reads `public/*`.
+
+`X-Anima-Principal` is chosen by the client, so the ACL separates well-behaved callers, such as several agents sharing one key, rather than untrusted ones. Server-wide endpoints that take no namespace header (listed in the [API introduction](/api-reference/introduction#namespaces)) are outside the ACL; guard them with the API key.
+
+## Running as a service
+
+`anima-server` installs itself to start automatically. Run the command from the folder that holds `config.toml` and the data: that folder becomes the service's working directory and `config.toml` in it is passed as the config path.
+
+```bash
+anima-server --install          # install and start
+anima-server --service-status   # installed? running?
+anima-server --uninstall        # stop and remove
+```
+
+| Platform | What `--install` creates |
+|----------|--------------------------|
+| Linux | systemd unit `/etc/systemd/system/anima-server.service` (run with `sudo`), running as the current `$USER`, restarted on failure, reading environment variables from `.env` in the folder; logs in `journalctl -u anima-server` |
+| macOS | launchd agent `~/Library/LaunchAgents/dev.anima.server.plist`, started at login and restarted after a crash; logs in `logs/anima-server.log` and `logs/anima-server.err` |
+| Windows | per-user scheduled task "Anima Server", started at logon with no console window and no administrator rights, through `anima-service.cmd` in the folder; log in `anima-server.log`. `config.toml` must exist in the folder. |
+
+`--uninstall` removes the unit, agent or task and leaves the data and configuration in place. On every platform the server also reads `.env` from its working directory at startup, so `ANIMA_API_KEY` and provider keys can live there instead of in `config.toml`; keep that file readable by its owner only.

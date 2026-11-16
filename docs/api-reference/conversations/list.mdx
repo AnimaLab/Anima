@@ -1,0 +1,50 @@
+---
+title: 'List Conversations'
+description: 'List saved chat conversations'
+---
+
+## GET /api/v1/conversations
+
+Lists the saved chat conversations, without their messages. The endpoint is server-wide: it takes no namespace header and returns the conversations of every namespace.
+
+## Response
+
+Returns an array of conversations, most recently updated first.
+
+<ResponseField name="id" type="string">
+  Conversation ID
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Conversation title
+</ResponseField>
+
+<ResponseField name="mode" type="string">
+  Chat mode the conversation was created with, e.g. `rag` or `tool`
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time (RFC 3339)
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last change (RFC 3339)
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/conversations
+```
+
+```json
+[
+  {
+    "id": "01J9Z7E5F6G7H8J9K0M1N2P3Q4",
+    "title": "Weekend hiking plans",
+    "mode": "rag",
+    "created_at": "2026-11-16T08:40:12.118204+00:00",
+    "updated_at": "2026-11-16T08:52:47.903511+00:00"
+  }
+]
+```

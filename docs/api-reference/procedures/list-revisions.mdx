@@ -1,0 +1,100 @@
+---
+title: 'List Procedure Revisions'
+description: 'Get the revision history of a named procedure'
+---
+
+## GET /api/v1/procedures/{name}/revisions
+
+Returns the history of a procedure, newest revision first; the first entry is the current specification.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Procedure name. A blank name gives `400`.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of revisions to return (1-500)
+</ParamField>
+
+## Response
+
+Returns an array of revisions ordered by `revision_number` descending. An unknown procedure returns an empty array.
+
+<ResponseField name="id" type="string">
+  Revision ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the revision
+</ResponseField>
+
+<ResponseField name="procedure_name" type="string">
+  Procedure name
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Sequence number of the revision for this procedure, starting at 1
+</ResponseField>
+
+<ResponseField name="operation" type="string">
+  Operation recorded with the revision
+</ResponseField>
+
+<ResponseField name="spec" type="any">
+  Procedure specification at that revision
+</ResponseField>
+
+<ResponseField name="actor" type="string | null">
+  Who made the change
+</ResponseField>
+
+<ResponseField name="reason" type="string | null">
+  Reason given with the change
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the revision was recorded
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/procedures/postgres-major-upgrade/revisions?limit=10" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01JCP8T5V6W7X8Y9Z0A1B2C3D4",
+    "namespace": "default",
+    "procedure_name": "postgres-major-upgrade",
+    "revision_number": 2,
+    "operation": "update",
+    "spec": {
+      "steps": ["take snapshot", "run pg_upgrade --check", "run pg_upgrade", "compare checksums"]
+    },
+    "actor": "alice",
+    "reason": "Add the pg_upgrade dry run",
+    "created_at": "2026-11-16T11:20:04.355+00:00"
+  },
+  {
+    "id": "01JCP4Z9A0B1C2D3E4F5G6H7J8",
+    "namespace": "default",
+    "procedure_name": "postgres-major-upgrade",
+    "revision_number": 1,
+    "operation": "create",
+    "spec": {
+      "steps": ["take snapshot", "run pg_upgrade", "compare checksums"]
+    },
+    "actor": "api",
+    "reason": null,
+    "created_at": "2026-11-16T10:04:18.002+00:00"
+  }
+]
+```

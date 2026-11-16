@@ -13,13 +13,29 @@ All API endpoints are prefixed with `/api/v1/` except for the health checks at `
 
 ## Authentication
 
-When the server has an API key (`ANIMA_API_KEY` or `[server] api_key`), every `/api/v1/` request must send `Authorization: Bearer <key>`; requests without it get `401`. A key is mandatory when the server binds a non-loopback address. Without a key, the API only answers requests addressed to a loopback host.
+When the server has an API key (`ANIMA_API_KEY` or `[server] api_key`), every `/api/v1/` request must send it, either as `Authorization: Bearer <key>` or as `X-Anima-Api-Key: <key>`. A missing or wrong key gets `401`. A key is mandatory when the server binds a non-loopback address. Without a key, the API only answers requests addressed to a loopback host; any other `Host` gets `403`. The health checks stay public.
 
-Data is isolated by namespace. Include the `X-Anima-Namespace` header on all `/api/v1/` requests:
+## Namespaces
+
+Data is isolated by namespace. Most endpoints read the target namespace from the `X-Anima-Namespace` header and answer `400` when it is missing or invalid:
 
 ```
 X-Anima-Namespace: default
 ```
+
+A request on a namespace also covers its children: `team` reads and writes `team` and `team/*`. A memory outside the request's namespace gets `403`.
+
+These endpoints are server-wide and take no namespace header: `GET /api/v1/namespaces`, `GET /api/v1/profiles`, `GET /api/v1/models`, `GET /api/v1/calibration/weights`, `GET /api/v1/vec/status`, `GET /api/v1/vectors/status`, `POST /api/v1/vec/reindex`, `POST /api/v1/memories/purge`, `POST /api/v1/restore/sqlite`, `GET /api/v1/processor/status`, `GET /api/v1/processor/log`, `GET`/`PUT`/`DELETE` on existing conversations (`GET /api/v1/conversations`, `/api/v1/conversations/{id}`), and `/api/v1/telemetry/config`.
+
+## Namespace ACL
+
+`ANIMA_NAMESPACE_ACL` restricts which caller may read or write which namespace. The caller is named by the `X-Anima-Principal` header (`anonymous` when absent). Rules are separated by `;`, each one `principal=pattern[:mode],...`, where `pattern` is a namespace, `prefix/*` (the prefix and its children) or `*`, and `mode` is `r`, `w` or `rw` (default `rw`). A principal of `*` applies to every caller. `GET` requests need read access, every other method write access; a denied request gets `403`. With the variable unset, every namespace is open.
+
+```
+ANIMA_NAMESPACE_ACL="alice=default/*:rw,private/*:r;bob=default:r;*=public/*:r"
+```
+
+`X-Anima-Principal` is also recorded as the actor of revisions made through patch, rollback and merge.
 
 ## Error Format
 
@@ -27,15 +43,17 @@ Errors are returned as JSON with an `error` field:
 
 ```json
 {
-  "error": "Memory not found"
+  "error": "memory 01J9Z3K4M5N6P7Q8R9S0T1V2W3 not found"
 }
 ```
 
-HTTP status codes follow standard conventions: `400` for bad requests, `404` for not found, `500` for internal errors.
+Status codes: `400` for bad requests, `401` for a missing or invalid API key, `403` for a namespace denied by the ACL, a memory outside the namespace or a non-loopback `Host`, `404` for not found, `500` for internal errors.
 
 ## Common Headers
 
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Content-Type` | Yes (for POST/PUT) | Always `application/json` |
-| `X-Anima-Namespace` | Yes | Target namespace for the request |
+| `X-Anima-Namespace` | On namespaced endpoints | Target namespace for the request |
+| `Authorization` / `X-Anima-Api-Key` | When an API key is configured | The API key |
+| `X-Anima-Principal` | No | Caller identity for the namespace ACL and revision actor |

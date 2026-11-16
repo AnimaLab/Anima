@@ -1,0 +1,126 @@
+---
+title: 'Simulate Counterfactual'
+description: 'Estimate which memories a hypothetical change would affect'
+---
+
+## POST /api/v1/counterfactuals/simulate
+
+Answers "what if": starting from seed memories, the simulation follows causal edges and [state transitions](/api-reference/transitions/list) for a few hops and returns the memories most likely affected by the intervention, each with a confidence band and the path that led to it.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="intervention" type="string" required>
+  The hypothetical change, e.g. "Staging stays on Postgres 16". Empty intervention gives `400`.
+</ParamField>
+
+<ParamField body="seed_memory_ids" type="string[]">
+  Memories to start from. Each must exist (otherwise `404`) and belong to the namespace or one of its child namespaces (otherwise `403`). When empty or omitted, the seeds are found by a hybrid search on `query`: up to 8 results with a score of at least 0.15.
+</ParamField>
+
+<ParamField body="query" type="string">
+  Search text used to find seeds when `seed_memory_ids` is empty. Default: the intervention
+</ParamField>
+
+<ParamField body="max_hops" type="integer" default="2">
+  How many edges to follow from a seed (1-4)
+</ParamField>
+
+<ParamField body="top_k" type="integer" default="6">
+  Maximum number of hypotheses (1-20)
+</ParamField>
+
+<ParamField body="include_correlational" type="boolean" default="true">
+  Whether to follow `correlational` causal edges as well as `causal` ones
+</ParamField>
+
+<ParamField body="include_transitions" type="boolean" default="true">
+  Whether to follow state transitions as well as causal edges
+</ParamField>
+
+### Scoring
+
+A seed scores 1.0. Each hop multiplies the score by the edge confidence, a weight for the edge type and a decay of `0.82^hop`. Edge type weights: `causal` 1.0, `correlational` 0.6, other causal relations 0.5; transitions `dependency` 0.9, `state_change` 0.85, `temporal` 0.75, `supersession` 0.65. Scores at or below 0.01 stop the walk; a memory keeps its best score. Edges are read from the namespace itself; hypotheses are limited to active memories of the namespace and its child namespaces, and seeds are left out of them.
+
+## Response
+
+<ResponseField name="intervention" type="string">
+  Intervention, trimmed
+</ResponseField>
+
+<ResponseField name="seed_memory_ids" type="string[]">
+  Seeds used, sorted and deduplicated. Empty when no seed was given or found, in which case `hypotheses` is empty too.
+</ResponseField>
+
+<ResponseField name="hypotheses" type="object[]">
+  Affected memories, highest `confidence_mid` first
+
+  <Expandable title="properties">
+    <ResponseField name="memory_id" type="string">
+      Affected memory ID
+    </ResponseField>
+    <ResponseField name="statement" type="string">
+      `If intervention '<intervention>' holds, this is likely affected: <memory content>`
+    </ResponseField>
+    <ResponseField name="confidence_low" type="number">
+      `confidence_mid - 0.14`, clamped to 0-1
+    </ResponseField>
+    <ResponseField name="confidence_mid" type="number">
+      Propagated score (0-1)
+    </ResponseField>
+    <ResponseField name="confidence_high" type="number">
+      `confidence_mid + 0.11`, clamped to 0-1
+    </ResponseField>
+    <ResponseField name="evidence_ids" type="string[]">
+      Memory IDs on the path, from the seed to this memory
+    </ResponseField>
+    <ResponseField name="source_kinds" type="string[]">
+      Edge kinds along the path: `seed`, then the causal relation type (`causal`, `correlational`, ...) or `transition:<type>` for each hop
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="considered_nodes" type="integer">
+  Number of hypotheses returned
+</ResponseField>
+
+<ResponseField name="generated_at" type="string">
+  When the simulation ran
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/counterfactuals/simulate \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "intervention": "Staging stays on Postgres 16",
+    "seed_memory_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3"],
+    "max_hops": 2,
+    "top_k": 5
+  }'
+```
+
+```json
+{
+  "intervention": "Staging stays on Postgres 16",
+  "seed_memory_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3"],
+  "hypotheses": [
+    {
+      "memory_id": "01J9Z4A5B6C7D8E9F0G1H2J3K4",
+      "statement": "If intervention 'Staging stays on Postgres 16' holds, this is likely affected: Staging runs Postgres 17 since 2026-11-21",
+      "confidence_low": 0.4873,
+      "confidence_mid": 0.6273,
+      "confidence_high": 0.7373,
+      "evidence_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3", "01J9Z4A5B6C7D8E9F0G1H2J3K4"],
+      "source_kinds": ["seed", "transition:state_change"]
+    }
+  ],
+  "considered_nodes": 1,
+  "generated_at": "2026-11-21T17:02:45.019+00:00"
+}
+```

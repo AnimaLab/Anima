@@ -5,39 +5,54 @@ description: 'Check if the server is running'
 
 ## GET /health
 
-Returns the server health status. This endpoint does not require the `X-Anima-Namespace` header.
+Liveness probe: returns `200` while the process is up. It works without the `X-Anima-Namespace` header.
 
 ## Response
 
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "service": "anima",
+  "version": "0.3.0"
 }
 ```
 
 ## GET /health/ready
 
-Deep readiness check that verifies the database, embedder, and processor are operational. Use this for orchestration and load-balancer health probes.
+Deep readiness check that pings the database, runs a test embedding, and reports the background processor. Use this for orchestration and load-balancer health probes.
 
 ### Response
 
-Returns `200` when all components are healthy:
+`checks` is always present. `db` and `embedder` are `"ok"` or `{"error": "..."}`. `processor` is `"disabled"` when the processor is off, or its live state:
 
 ```json
 {
-  "status": "ready"
+  "status": "ready",
+  "service": "anima",
+  "version": "0.3.0",
+  "checks": {
+    "db": "ok",
+    "embedder": "ok",
+    "processor": {
+      "status": "running",
+      "queue_depth": 0,
+      "in_flight": 1
+    }
+  }
 }
 ```
 
-Returns `503` when one or more components are unhealthy:
+Returns `503` with `"status": "degraded"` when the database or the embedder check fails:
 
 ```json
 {
   "status": "degraded",
+  "service": "anima",
+  "version": "0.3.0",
   "checks": {
     "db": "ok",
-    "embedder": "ok",
-    "processor": "unavailable"
+    "embedder": { "error": "model not loaded" },
+    "processor": "disabled"
   }
 }
 ```

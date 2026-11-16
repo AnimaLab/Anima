@@ -1,0 +1,48 @@
+---
+title: 'Run Retention'
+description: 'Lower the importance of old, little-used memories'
+---
+
+## POST /api/v1/processor/retention/run
+
+Runs the retention pass on the namespace now: old memories that are rarely used lose importance, and the memories themselves stay stored and active. It uses no LLM.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Request Body
+
+<ParamField body="limit_per_namespace" type="integer" default="1000">
+  Number of active memories to examine, most recent first (at most 5000). The body is required; send `{}` for the default.
+</ParamField>
+
+## Behavior
+
+A memory is examined when it is at least `ANIMA_RETENTION_CUTOFF_DAYS` old (default `45`, minimum `1`). It keeps its importance when it was accessed at least 3 times and has an importance of 4 or more. Otherwise its importance drops by 1, or by 2 once it is `ANIMA_RETENTION_COLD_DAYS` old (default `180`, always more than the cutoff), down to a floor that depends on its tier: 3 for tier 4 and above, 2 for tier 3, 1 below. A softened memory records `retention_last_run`, `retention_age_days`, `retention_importance_before` and `retention_importance_after` in its metadata. The run is written to the [processor log](/api-reference/processor/log) as `retention`.
+
+## Response
+
+<ResponseField name="processed" type="integer">
+  Memories old enough to be examined
+</ResponseField>
+
+<ResponseField name="softened" type="integer">
+  Memories whose importance was lowered
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/processor/retention/run \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"limit_per_namespace": 2000}'
+```
+
+```json
+{
+  "processed": 214,
+  "softened": 37
+}
+```

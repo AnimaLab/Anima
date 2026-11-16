@@ -1,0 +1,95 @@
+---
+title: 'Reflect'
+description: 'Extract reflected facts from raw memories'
+---
+
+## POST /api/v1/reflect
+
+Runs the reflection pipeline: an LLM reads raw memories and extracts facts, stored as `reflected` memories (tier 2, see [Memory Types](/concepts/memory-types)). It uses the `processor` LLM profile, falling back to the `[processor]` config and then to the consolidation LLM.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included when memories are found automatically)
+</ParamField>
+
+## Request Body
+
+<ParamField body="memory_ids" type="string[]">
+  Memories to reflect on. Empty or absent: the oldest active raw memories of the namespace not yet reflected, up to `limit`.
+</ParamField>
+
+<ParamField body="limit" type="integer" default="50">
+  Maximum number of raw memories to pick when `memory_ids` is empty
+</ParamField>
+
+<ParamField body="async" type="boolean" default="false">
+  `true` queues the work on the background processor and returns at once. Without a background processor this gives `500`.
+</ParamField>
+
+## Behavior
+
+In synchronous mode the memories are grouped by meaning and each group is sent to the LLM. A fact is stored when its calibrated confidence is at least `0.5`; it carries `metadata.tier: 2`, the `source_ids` it came from and the most common `episode_id` of its group. The source memories are marked `reflected`. The new memories are then queued for reconsolidation, and for deduction when there are at least two. The run is written to the [processor log](/api-reference/processor/log) as `reflection`.
+
+No configured LLM gives `500`.
+
+## Response
+
+<ResponseField name="status" type="string">
+  `completed`, `queued` (async), or `no_work` when there was nothing to reflect on
+</ResponseField>
+
+<ResponseField name="raw_processed" type="integer">
+  Number of raw memories handled (or queued)
+</ResponseField>
+
+<ResponseField name="facts_extracted" type="integer">
+  Number of facts the LLM returned. Absent when `status` is `queued`.
+</ResponseField>
+
+<ResponseField name="elapsed_ms" type="number">
+  Server-side time in milliseconds
+</ResponseField>
+
+<ResponseField name="reflected" type="object[]">
+  Synchronous mode: the facts the LLM returned, each with `content`, `confidence` (as given by the LLM), `source_ids` and `corrections` (a correction to earlier information, or `null`). Absent when empty.
+</ResponseField>
+
+## Example
+
+```bash Synchronous
+curl -X POST http://localhost:3000/api/v1/reflect \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"limit": 20}'
+```
+
+```bash Queued
+curl -X POST http://localhost:3000/api/v1/reflect \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"memory_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3"], "async": true}'
+```
+
+```json Completed
+{
+  "status": "completed",
+  "raw_processed": 3,
+  "facts_extracted": 1,
+  "elapsed_ms": 2140.7,
+  "reflected": [
+    {
+      "content": "The user goes hiking most weekends.",
+      "confidence": 0.9,
+      "source_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3", "01J9Z3M8N9P0Q1R2S3T4V5W6X7"],
+      "corrections": null
+    }
+  ]
+}
+```
+
+```json Queued
+{
+  "status": "queued",
+  "raw_processed": 1,
+  "elapsed_ms": 0.4
+}
+```

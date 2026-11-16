@@ -1,0 +1,83 @@
+---
+title: 'Patch Memory'
+description: 'Change selected fields of a memory and record a revision'
+---
+
+## POST /api/v1/memories/{id}/patch
+
+Changes one or more fields of an active memory in place and records the change as a revision (operation `patch`), so it can be listed and rolled back.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace. A memory outside it (or its children) gives `403`.
+</ParamField>
+
+<ParamField header="X-Anima-Principal" type="string">
+  Recorded as the revision's `actor`. Default: `"api"`
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Memory ID. An unknown ID gives `404`; a memory whose status is not `active` gives `500`.
+</ParamField>
+
+## Request Body
+
+At least one of `content`, `metadata`, `memory_type`, `importance` or `tags` is required, otherwise `400`. Fields left out keep their current value.
+
+<ParamField body="content" type="string">
+  New content. Sensitive values are redacted before storage, and the memory is re-embedded and re-indexed. Content that is empty after redaction gives `400`.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  New metadata, replacing the current metadata as a whole. Sensitive values are redacted.
+</ParamField>
+
+<ParamField body="memory_type" type="string">
+  New memory type
+</ParamField>
+
+<ParamField body="importance" type="integer">
+  New importance, clamped to 1-10
+</ParamField>
+
+<ParamField body="tags" type="string[]">
+  New tags, replacing the current tags
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Reason for the change, stored on the revision
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string">
+  ID of the patched memory
+</ResponseField>
+
+<ResponseField name="patched" type="boolean">
+  Always `true` on success
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Number of the revision recorded for this change
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories/01J9Z3K4M5N6P7Q8R9S0T1V2W3/patch \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "importance": 8,
+    "tags": ["preference", "outdoors", "weekend"],
+    "reason": "user confirmed this is a strong preference"
+  }'
+```
+
+```json
+{
+  "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "patched": true,
+  "revision_number": 3
+}
+```

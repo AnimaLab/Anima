@@ -1,0 +1,96 @@
+---
+title: 'Set Plan Outcome'
+description: 'Record the status and outcome of a plan'
+---
+
+## POST /api/v1/plans/{id}/outcome
+
+Records how a plan turned out: its status, an outcome text and an optional confidence. The change is written to the audit log.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the plan
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Plan ID. A plan outside the namespace itself (child namespaces excluded) gives `404`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="status" type="string" required>
+  New plan status. Accepted values and aliases: `active` (`in_progress`, `running`), `completed` (`done`, `success`), `failed` (`error`), `abandoned` (`cancelled`, `canceled`). Any other value becomes `active`.
+
+  `completed`, `failed` and `abandoned` set `finished_at` to the current time; `active` keeps its previous value.
+</ParamField>
+
+<ParamField body="outcome" type="string" required>
+  What happened, stored trimmed. Replaces the previous outcome.
+</ParamField>
+
+<ParamField body="outcome_confidence" type="number">
+  Confidence in the outcome, clamped to 0-1. Replaces the previous value; omitting it stores `null`.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Replaces the plan metadata. When omitted, the previous metadata is kept. Values under sensitive keys (`password`, `secret`, `token`, `auth`, ...) are stored as `"[redacted]"`.
+</ParamField>
+
+An empty `status` or `outcome` gives `400`.
+
+## Response
+
+Returns the updated plan, with the fields described in [Create Plan](/api-reference/plans/create).
+
+<ResponseField name="id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Normalized status
+</ResponseField>
+
+<ResponseField name="outcome" type="string">
+  Outcome text
+</ResponseField>
+
+<ResponseField name="outcome_confidence" type="number | null">
+  Confidence in the outcome (0-1)
+</ResponseField>
+
+<ResponseField name="finished_at" type="string | null">
+  When the plan reached `completed`, `failed` or `abandoned`
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Time of this update
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/plans/01JCP4Q8R2S3T4V5W6X7Y8Z9A0/outcome \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "status": "completed",
+    "outcome": "Staging runs on Postgres 17; no data loss after checksum comparison.",
+    "outcome_confidence": 0.9
+  }'
+```
+
+```json
+{
+  "id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+  "namespace": "default",
+  "goal": "Migrate the staging database to Postgres 17",
+  "status": "completed",
+  "priority": 7,
+  "due_at": "2026-11-30T17:00:00+00:00",
+  "metadata": {"ticket": "OPS-412"},
+  "outcome": "Staging runs on Postgres 17; no data loss after checksum comparison.",
+  "outcome_confidence": 0.9,
+  "finished_at": "2026-11-21T16:22:09.874+00:00",
+  "created_at": "2026-11-16T10:03:41.118+00:00",
+  "updated_at": "2026-11-21T16:22:09.874+00:00"
+}
+```

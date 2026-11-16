@@ -1,0 +1,106 @@
+---
+title: 'Add Procedure Revision'
+description: 'Record a new revision of a named procedure'
+---
+
+## POST /api/v1/procedures/{name}/revisions
+
+A procedure is a named, versioned specification of how to carry out a task. Each call appends a revision with the next `revision_number` for that procedure in the namespace, starting at 1; earlier revisions stay readable. The revision is also written to the audit log.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace
+</ParamField>
+
+<ParamField header="X-Anima-Principal" type="string">
+  Recorded as the revision's `actor`. Default: `api`
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Procedure name. A blank name gives `400`.
+</ParamField>
+
+## Request Body
+
+<ParamField body="operation" type="string" required>
+  What this revision does to the procedure, e.g. `create` or `update`; stored as given
+</ParamField>
+
+<ParamField body="spec" type="any" required>
+  The procedure specification, any JSON value
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Why the revision was made
+</ParamField>
+
+## Response
+
+Returns the stored revision.
+
+<ResponseField name="id" type="string">
+  Revision ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the revision
+</ResponseField>
+
+<ResponseField name="procedure_name" type="string">
+  Procedure name
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Sequence number of the revision for this procedure, starting at 1
+</ResponseField>
+
+<ResponseField name="operation" type="string">
+  Operation given in the request
+</ResponseField>
+
+<ResponseField name="spec" type="any">
+  Procedure specification
+</ResponseField>
+
+<ResponseField name="actor" type="string | null">
+  Who made the change (`X-Anima-Principal`, `api` by default)
+</ResponseField>
+
+<ResponseField name="reason" type="string | null">
+  Reason given with the change
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the revision was recorded
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/procedures/postgres-major-upgrade/revisions \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -H "X-Anima-Principal: alice" \
+  -d '{
+    "operation": "update",
+    "spec": {
+      "steps": ["take snapshot", "run pg_upgrade --check", "run pg_upgrade", "compare checksums"]
+    },
+    "reason": "Add the pg_upgrade dry run"
+  }'
+```
+
+```json
+{
+  "id": "01JCP8T5V6W7X8Y9Z0A1B2C3D4",
+  "namespace": "default",
+  "procedure_name": "postgres-major-upgrade",
+  "revision_number": 2,
+  "operation": "update",
+  "spec": {
+    "steps": ["take snapshot", "run pg_upgrade --check", "run pg_upgrade", "compare checksums"]
+  },
+  "actor": "alice",
+  "reason": "Add the pg_upgrade dry run",
+  "created_at": "2026-11-16T11:20:04.355+00:00"
+}
+```

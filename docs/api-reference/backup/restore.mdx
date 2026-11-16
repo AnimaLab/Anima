@@ -1,0 +1,76 @@
+---
+title: 'Restore Backup'
+description: 'Import a JSON backup, merging into or replacing a namespace'
+---
+
+## POST /api/v1/restore
+
+Imports a JSON envelope produced by [Export Backup](/api-reference/backup/export) (format versions `1.0`, `1.1` and `1.2`). Each memory is re-embedded with the current model and keeps its original `id` (unless that ID already exists), `created_at` and `updated_at`. Memories with status `deleted` stay out. The body may be up to 512 MiB. `anima-server import` calls this endpoint.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace to restore into
+</ParamField>
+
+## Request Body
+
+<ParamField body="backup" type="object" required>
+  The backup envelope, as returned by the export
+</ParamField>
+
+<ParamField body="mode" type="string" default="merge">
+  - `merge`: skip a memory whose content already exists in the target namespace; keep an existing skill when it was updated at the same time as or later than the backup's copy.
+  - `replace`: first soft-delete every active memory of the target namespace (of every namespace in the backup, with `preserve_namespaces`), then import everything; skills from the backup overwrite existing ones.
+</ParamField>
+
+<ParamField body="preserve_namespaces" type="boolean" default="false">
+  Restore each memory and skill into the namespace it was exported from instead of the header's namespace
+</ParamField>
+
+## Response
+
+<ResponseField name="imported" type="integer">
+  Memories imported
+</ResponseField>
+
+<ResponseField name="skipped" type="integer">
+  Memories skipped: deleted, of an unknown status, or duplicates in `merge` mode
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Memories in the backup
+</ResponseField>
+
+<ResponseField name="skills_imported" type="integer">
+  Skills written
+</ResponseField>
+
+<ResponseField name="skills_skipped" type="integer">
+  Skills skipped: invalid name, or an existing newer copy in `merge` mode
+</ResponseField>
+
+<ResponseField name="elapsed_ms" type="number">
+  Server-side time in milliseconds
+</ResponseField>
+
+Returns `400` for an unsupported backup version or an invalid namespace in the backup.
+
+## Example
+
+```bash
+jq '{mode: "merge", preserve_namespaces: true, backup: .}' anima-backup-20261116-100244.json \
+  | curl -X POST http://localhost:3000/api/v1/restore \
+      -H "Content-Type: application/json" \
+      -H "X-Anima-Namespace: default" \
+      --data-binary @-
+```
+
+```json
+{
+  "imported": 1498,
+  "skipped": 25,
+  "total": 1523,
+  "skills_imported": 4,
+  "skills_skipped": 0,
+  "elapsed_ms": 48211.7
+}
+```

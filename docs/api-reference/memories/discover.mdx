@@ -1,0 +1,81 @@
+---
+title: 'Discover Memories'
+description: 'Find memories similar to examples, steered away from counter-examples'
+---
+
+## POST /api/v1/memories/discover
+
+Finds memories by example: the search vector is the average embedding of the `positive_ids` minus the average embedding of the `negative_ids`, optionally blended with a text query, then used for a vector search in the namespace.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace searched (its child namespaces are included)
+</ParamField>
+
+## Request Body
+
+<ParamField body="positive_ids" type="string[]" required>
+  IDs of memories to find more of. An empty list gives `400`, and so does a list where none of the memories has a `content` embedding.
+</ParamField>
+
+<ParamField body="negative_ids" type="string[]">
+  IDs of memories to steer away from. Default: `[]`
+</ParamField>
+
+<ParamField body="query" type="string">
+  Optional text. When non-blank, its embedding is blended in at 30% (the example vector keeps 70%).
+</ParamField>
+
+<ParamField body="limit" type="integer" default="10">
+  Maximum number of results (1-100)
+</ParamField>
+
+## Response
+
+Same shape as [Search Memories](/api-reference/memories/search). The memories given in `positive_ids` and `negative_ids` are left out of the results.
+
+<ResponseField name="results" type="object[]">
+  Memories ranked by similarity. Each result has `id`, `content`, `metadata`, `tags`, `memory_type`, `category`, `confidence`, `source`, `created_at`, `updated_at`, the fused `score`, and the per-signal `vector_score`, `sparse_score`, `keyword_score` and `temporal_score` (`null` when that signal did not contribute). `episode_id` is present when the memory has one.
+</ResponseField>
+
+<ResponseField name="query_time_ms" type="number">
+  Server-side time in milliseconds
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/memories/discover \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{
+    "positive_ids": ["01J9Z3K4M5N6P7Q8R9S0T1V2W3"],
+    "negative_ids": ["01J9Z4A1B2C3D4E5F6G7H8J9K0"],
+    "query": "outdoor activities",
+    "limit": 5
+  }'
+```
+
+```json
+{
+  "results": [
+    {
+      "id": "01J9Z6M7N8P9Q0R1S2T3V4W5X6",
+      "content": "Went climbing at Fontainebleau last Saturday.",
+      "metadata": null,
+      "tags": ["outdoors"],
+      "memory_type": "raw",
+      "category": "routine",
+      "confidence": 1.0,
+      "source": "user_stated",
+      "score": 0.78,
+      "vector_score": 0.81,
+      "sparse_score": null,
+      "keyword_score": null,
+      "temporal_score": 0.9,
+      "created_at": "2026-11-15T18:40:11.204+00:00",
+      "updated_at": "2026-11-15T18:40:11.204+00:00"
+    }
+  ],
+  "query_time_ms": 8.7
+}
+```

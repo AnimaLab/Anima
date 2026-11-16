@@ -1,0 +1,104 @@
+---
+title: 'Save Model Setup'
+description: 'Write the model choice into config.toml and restart the server'
+---
+
+## PUT /api/v1/setup
+
+Writes the embedding, chat and re-ranking models into the configuration file and, by default, restarts the server so they take effect. This is what the web UI's first-run dialog and Settings > Server models send. The endpoint is server-wide and takes no namespace header.
+
+The file is the one [`GET /api/v1/setup`](/api-reference/system/setup-get) reports as `config_file`: the loaded file, or a new `config.toml` built from `config.default.toml` when the server runs on the template or the defaults. The edit keeps the file's comments, key order and every key it does not cover (the keys it sets are listed in [Configuration](/configuration#setting-up-the-models-from-the-web-ui)). The result must load as a valid configuration, otherwise `400` and the file is left as it was. It is written with owner-only permissions (`0600`), since it may hold API keys.
+
+A remote embedding model is called once with a short text before anything is written: this checks the URL, model and key, and the length of the returned vector becomes `dimension`. A model that fails or returns no embedding gives `400`.
+
+## Request Body
+
+<ParamField body="embedding" type="object" required>
+  <Expandable>
+    <ParamField body="backend" type="string" required>
+      `local` for the built-in BGE-M3, or `openai_compat` (`openai` is accepted) for an OpenAI-compatible API. Any other value gives `400`.
+    </ParamField>
+    <ParamField body="base_url" type="string">
+      API base URL. Required for a remote backend.
+    </ParamField>
+    <ParamField body="model" type="string">
+      Model name. Required for a remote backend.
+    </ParamField>
+    <ParamField body="api_key" type="string">
+      New key. Empty or absent keeps the saved key.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="llm" type="object">
+  Chat model, written to `[llm]`, `[processor]` and `[consolidation.openai_compat]`. Absent: those sections are left as they are.
+
+  <Expandable>
+    <ParamField body="base_url" type="string" required>
+      API base URL, `http://` or `https://`
+    </ParamField>
+    <ParamField body="model" type="string" required>
+      Model name. Empty gives `400`.
+    </ParamField>
+    <ParamField body="api_key" type="string">
+      New key. Empty or absent keeps the saved key.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="reranker" type="object" required>
+  <Expandable>
+    <ParamField body="enabled" type="boolean" required>
+      `false` turns re-ranking off
+    </ParamField>
+    <ParamField body="backend" type="string" default="local">
+      `local` for the built-in bge-reranker-v2-m3, or `openai_compat`
+    </ParamField>
+    <ParamField body="base_url" type="string">
+      API base URL. Required for a remote backend.
+    </ParamField>
+    <ParamField body="model" type="string">
+      Model name. Required for a remote backend.
+    </ParamField>
+    <ParamField body="api_key" type="string">
+      New key. Empty or absent keeps the saved key.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="restart" type="boolean" default="true">
+  Restart the server once the file is written. The restart starts the same binary with the same arguments, shortly after the response is sent; on Unix the process keeps its PID. With a built-in model that is not on disk yet, the first start downloads it (BGE-M3 is about 2.3 GB, bge-reranker-v2-m3 about 570 MB).
+</ParamField>
+
+<Warning>
+  Memories stay embedded with the previous model. After changing the embedding model, [re-index](/api-reference/system/vec-reindex) them; search is limited until then.
+</Warning>
+
+## Response
+
+<ResponseField name="config_file" type="string">
+  File that was written
+</ResponseField>
+
+<ResponseField name="restarting" type="boolean">
+  Whether the server is restarting
+</ResponseField>
+
+## Example
+
+```bash
+curl -X PUT http://localhost:3000/api/v1/setup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "embedding": {"backend": "openai_compat", "base_url": "https://llm.example.com/v1", "model": "bge-m3", "api_key": "sk-..."},
+    "llm": {"base_url": "https://llm.example.com/v1", "model": "qwen3-32b", "api_key": "sk-..."},
+    "reranker": {"enabled": true, "backend": "openai_compat", "base_url": "https://llm.example.com/v1", "model": "bge-reranker-v2-m3"}
+  }'
+```
+
+```json
+{
+  "config_file": "config.toml",
+  "restarting": true
+}
+```

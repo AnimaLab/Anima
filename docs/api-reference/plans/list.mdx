@@ -1,0 +1,100 @@
+---
+title: 'List Plans'
+description: 'List plans, optionally filtered by status'
+---
+
+## GET /api/v1/plans
+
+Lists the plans of the namespace and its child namespaces, most recently updated first.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="status" type="string">
+  Only plans with this status. Accepted values and aliases: `active` (`in_progress`, `running`), `completed` (`done`, `success`), `failed` (`error`), `abandoned` (`cancelled`, `canceled`). Any other value filters on `active`.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of plans to return (1-500)
+</ParamField>
+
+## Response
+
+Returns an array of plans, ordered by `updated_at` descending. Each plan has the fields described in [Create Plan](/api-reference/plans/create).
+
+<ResponseField name="id" type="string">
+  Plan ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the plan
+</ResponseField>
+
+<ResponseField name="goal" type="string">
+  Goal
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  `active`, `completed`, `failed` or `abandoned`
+</ResponseField>
+
+<ResponseField name="priority" type="integer">
+  Priority (1-10)
+</ResponseField>
+
+<ResponseField name="due_at" type="string | null">
+  Due date
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Plan metadata
+</ResponseField>
+
+<ResponseField name="outcome" type="string | null">
+  Outcome text
+</ResponseField>
+
+<ResponseField name="outcome_confidence" type="number | null">
+  Confidence in the outcome (0-1)
+</ResponseField>
+
+<ResponseField name="finished_at" type="string | null">
+  When the plan reached `completed`, `failed` or `abandoned`
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Creation time
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Last update time
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/plans?status=active&limit=20" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+[
+  {
+    "id": "01JCP4Q8R2S3T4V5W6X7Y8Z9A0",
+    "namespace": "default",
+    "goal": "Migrate the staging database to Postgres 17",
+    "status": "active",
+    "priority": 7,
+    "due_at": "2026-11-30T17:00:00+00:00",
+    "metadata": {"ticket": "OPS-412"},
+    "outcome": null,
+    "outcome_confidence": null,
+    "finished_at": null,
+    "created_at": "2026-11-16T10:03:41.118+00:00",
+    "updated_at": "2026-11-16T10:03:41.118+00:00"
+  }
+]
+```

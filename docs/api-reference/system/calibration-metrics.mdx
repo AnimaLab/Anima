@@ -1,0 +1,122 @@
+---
+title: 'Calibration Metrics'
+description: 'Calibration models and reliability bins of a namespace'
+---
+
+## GET /api/v1/calibration/metrics
+
+Returns how well Anima's confidence predictions match observed outcomes, for a namespace and its children. Models and bins are recomputed in the background every 300 seconds (`ANIMA_CALIBRATION_RECOMPUTE_SECS`) from the resolved calibration observations.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included)
+</ParamField>
+
+## Response
+
+<ResponseField name="namespace" type="string">
+  The requested namespace
+</ResponseField>
+
+<ResponseField name="models" type="object[]">
+  One linear calibration model per namespace and prediction kind, ordered by `prediction_kind`.
+
+  <Expandable title="properties">
+    <ResponseField name="namespace" type="string">
+      Namespace the model was fitted on
+    </ResponseField>
+    <ResponseField name="prediction_kind" type="string">
+      `extraction`, `deduction`, `induction`, `procedure_selection` or `retrieval_relevance`
+    </ResponseField>
+    <ResponseField name="samples" type="integer">
+      Number of resolved observations
+    </ResponseField>
+    <ResponseField name="avg_prediction" type="number">
+      Mean predicted confidence
+    </ResponseField>
+    <ResponseField name="avg_outcome" type="number">
+      Mean observed outcome
+    </ResponseField>
+    <ResponseField name="mse" type="number">
+      Mean squared error between prediction and outcome
+    </ResponseField>
+    <ResponseField name="slope" type="number">
+      Slope of the fitted line from prediction to outcome
+    </ResponseField>
+    <ResponseField name="intercept" type="number">
+      Intercept of the fitted line
+    </ResponseField>
+    <ResponseField name="updated_at" type="string">
+      Time of the last recompute
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="bins" type="object[]">
+  Reliability bins: observations grouped by predicted confidence in ten bins of width 0.1 (`bin_index` 0 to 9), ordered by `prediction_kind` then `bin_index`.
+
+  <Expandable title="properties">
+    <ResponseField name="namespace" type="string">
+      Namespace of the bin
+    </ResponseField>
+    <ResponseField name="prediction_kind" type="string">
+      Prediction kind, as in `models`
+    </ResponseField>
+    <ResponseField name="bin_index" type="integer">
+      `floor(predicted_confidence * 10)`, from 0 to 9
+    </ResponseField>
+    <ResponseField name="sample_count" type="integer">
+      Observations in the bin
+    </ResponseField>
+    <ResponseField name="avg_prediction" type="number">
+      Mean predicted confidence in the bin
+    </ResponseField>
+    <ResponseField name="avg_outcome" type="number">
+      Mean observed outcome in the bin
+    </ResponseField>
+    <ResponseField name="updated_at" type="string">
+      Time of the last recompute
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="unresolved_observations" type="integer">
+  Observations still waiting for an outcome
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/calibration/metrics \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "namespace": "default",
+  "models": [
+    {
+      "namespace": "default",
+      "prediction_kind": "retrieval_relevance",
+      "samples": 412,
+      "avg_prediction": 0.64,
+      "avg_outcome": 0.58,
+      "mse": 0.071,
+      "slope": 0.91,
+      "intercept": -0.002,
+      "updated_at": "2026-11-16T09:15:00.000+00:00"
+    }
+  ],
+  "bins": [
+    {
+      "namespace": "default",
+      "prediction_kind": "retrieval_relevance",
+      "bin_index": 6,
+      "sample_count": 87,
+      "avg_prediction": 0.65,
+      "avg_outcome": 0.61,
+      "updated_at": "2026-11-16T09:15:00.000+00:00"
+    }
+  ],
+  "unresolved_observations": 23
+}
+```

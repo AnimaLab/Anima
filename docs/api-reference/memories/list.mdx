@@ -6,7 +6,7 @@ description: 'Retrieve memories with pagination and filtering'
 ## GET /api/v1/memories
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace (its child namespaces are included)
 </ParamField>
 
 ## Query Parameters
@@ -16,15 +16,15 @@ description: 'Retrieve memories with pagination and filtering'
 </ParamField>
 
 <ParamField query="limit" type="integer" default="50">
-  Number of memories to return
+  Number of memories to return, at most 200
 </ParamField>
 
 <ParamField query="status" type="string">
-  Filter by memory status
+  Filter by memory status (e.g. `active`, `superseded`)
 </ParamField>
 
 <ParamField query="memory_type" type="string">
-  Filter by memory type: `raw`, `reflected`, `deduced`, or `induced`
+  Filter by memory type: `raw`, `reflected`, `deduced`, `induced`, or `merged`
 </ParamField>
 
 <ParamField query="category" type="string">
@@ -37,4 +37,50 @@ description: 'Retrieve memories with pagination and filtering'
 
 ## Response
 
-Returns a paginated list of memory objects. When using cursor pagination, the response includes `next_cursor` (null when there are no more results).
+Memories are ordered newest first.
+
+<ResponseField name="memories" type="object[]">
+  Memory objects, with the same fields as [Get Memory](/api-reference/memories/get)
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Number of memories matching the filters
+</ResponseField>
+
+<ResponseField name="offset" type="integer">
+  Offset of this page
+</ResponseField>
+
+<ResponseField name="limit" type="integer">
+  Page size applied
+</ResponseField>
+
+<ResponseField name="next_cursor" type="string">
+  Cursor for the next page, present when the page is full. Absent on the last page.
+</ResponseField>
+
+```json
+{
+  "memories": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "namespace": "default",
+      "content": "I love hiking on weekends.",
+      "metadata": null,
+      "tags": ["preference", "outdoors"],
+      "memory_type": "raw",
+      "category": "general",
+      "confidence": 1.0,
+      "source": "user_stated",
+      "status": "active",
+      "created_at": "2026-11-16T09:12:04.512+00:00",
+      "updated_at": "2026-11-16T09:12:04.512+00:00",
+      "access_count": 3,
+      "importance": 5
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 50
+}
+```

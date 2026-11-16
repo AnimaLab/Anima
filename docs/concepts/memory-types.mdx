@@ -11,7 +11,7 @@ The original memory as ingested. This is the verbatim content provided via the A
 
 ## Reflected
 
-A distilled version of one or more raw memories. During background consolidation, Anima's reflection pipeline extracts key facts, preferences, and patterns from raw memories and produces reflected summaries. This requires an LLM backend (not available in smoke mode).
+A distilled version of one or more raw memories. During background consolidation, Anima's reflection pipeline extracts key facts, preferences, and patterns from raw memories and produces reflected summaries. This requires an LLM backend (the `[processor]` model).
 
 ## Deduced
 
@@ -21,9 +21,15 @@ Higher-order inferences drawn from reflected memories. The deduction pipeline id
 
 The highest tier. Induced memories represent broad generalizations or principles synthesized from deduced memories. These capture overarching behavioral patterns and long-term preferences.
 
+## Merged
+
+A memory created with `POST /api/v1/memories/merge`, which combines several memories into one and supersedes the sources. Its `memory_type` is `merged` unless the request sets another, and its metadata records the source IDs under `merge`.
+
 ## Tier Filtering
 
-When searching or using the ask endpoint, you can filter by `max_tier` to control which levels of memory are included in results. You can also filter by `memory_type` when listing memories.
+Each memory's tier is read from `metadata.tier`: `1` raw, `2` reflected, `3` deduced, `4` induced. A memory without `metadata.tier`, such as a raw or merged memory, counts as tier 1.
+
+When searching or using the ask endpoint, you can filter by `max_tier` (default `4`, all tiers) to control which levels of memory are included in results. You can also filter by `memory_type` when listing memories.
 
 ## Categories
 

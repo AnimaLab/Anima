@@ -6,7 +6,7 @@ description: 'Get revision history for a memory'
 ## GET /api/v1/memories/\{id\}/revisions
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace (its child namespaces are included)
 </ParamField>
 
 <ParamField path="id" type="string" required>
@@ -15,10 +15,102 @@ description: 'Get revision history for a memory'
 
 ## Query Parameters
 
-<ParamField query="limit" type="integer">
-  Maximum number of revisions to return
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of revisions to return (1-500)
 </ParamField>
 
 ## Response
 
-Returns an array of revision objects ordered by revision number, each containing the memory content at that point in time, the `revision_number`, and `created_at` timestamp.
+Returns an array of revisions, newest first (`revision_number` descending). Each revision is a snapshot of the memory taken by an operation; a memory with no revision in the namespace gives `404`. Revisions outlive a hard delete, so the history of a deleted memory stays readable.
+
+<ResponseField name="id" type="string">
+  Revision ID
+</ResponseField>
+
+<ResponseField name="namespace" type="string">
+  Namespace of the memory
+</ResponseField>
+
+<ResponseField name="memory_id" type="string">
+  Memory ID
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Sequence number of the revision for this memory, starting at 1
+</ResponseField>
+
+<ResponseField name="operation" type="string">
+  Operation that produced the snapshot: `create`, `update_content`, `update_metadata`, `update_metadata_json`, `patch`, `rollback`, `supersede`, `soft_delete`, `hard_delete`, `merge_created` or `merge_source`
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  Memory content at that point
+</ResponseField>
+
+<ResponseField name="metadata" type="object | null">
+  Memory metadata at that point
+</ResponseField>
+
+<ResponseField name="tags" type="string[]">
+  Tags at that point
+</ResponseField>
+
+<ResponseField name="memory_type" type="string">
+  Memory type at that point
+</ResponseField>
+
+<ResponseField name="importance" type="integer">
+  Importance at that point
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Memory status at that point (`active`, `superseded`, ...)
+</ResponseField>
+
+<ResponseField name="superseded_by" type="string | null">
+  ID of the memory that superseded this one, if any
+</ResponseField>
+
+<ResponseField name="hash" type="string">
+  Content hash
+</ResponseField>
+
+<ResponseField name="actor" type="string | null">
+  Who made the change (`X-Anima-Principal`, `api` by default on patch, rollback and merge)
+</ResponseField>
+
+<ResponseField name="reason" type="string | null">
+  Reason given with the change
+</ResponseField>
+
+<ResponseField name="provenance" type="object | null">
+  Operation details, e.g. `{"rolled_back_to_revision": 2}` or `{"merged_into": "..."}`
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  When the revision was recorded
+</ResponseField>
+
+```json
+[
+  {
+    "id": "01J9Z5P0Q1R2S3T4V5W6X7Y8Z9",
+    "namespace": "default",
+    "memory_id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+    "revision_number": 2,
+    "operation": "update_content",
+    "content": "I love hiking and climbing on weekends.",
+    "metadata": null,
+    "tags": ["preference", "outdoors"],
+    "memory_type": "raw",
+    "importance": 5,
+    "status": "active",
+    "superseded_by": null,
+    "hash": "9f2c4e...",
+    "actor": null,
+    "reason": null,
+    "provenance": {"source": "update_content"},
+    "created_at": "2026-11-16T10:03:41.118+00:00"
+  }
+]
+```

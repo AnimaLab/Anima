@@ -11,4 +11,56 @@ description: 'Get memory store statistics'
 
 ## Response
 
-Returns statistics about the memory store for the given namespace, including total memory count, counts by type and status, and storage metrics.
+Memory counts and access statistics for the namespace and its child namespaces (`<namespace>/...`).
+
+<ResponseField name="total" type="integer">
+  All memories, whatever their status
+</ResponseField>
+
+<ResponseField name="active" type="integer">
+  Memories with status `active`
+</ResponseField>
+
+<ResponseField name="superseded" type="integer">
+  Memories replaced by a newer version
+</ResponseField>
+
+<ResponseField name="deleted" type="integer">
+  Memories with status `deleted`
+</ResponseField>
+
+<ResponseField name="avg_access_count" type="number">
+  Average number of retrievals per memory
+</ResponseField>
+
+<ResponseField name="max_access_count" type="integer">
+  Highest retrieval count of a single memory
+</ResponseField>
+
+<ResponseField name="oldest_memory" type="string">
+  `created_at` of the oldest memory, or `null` when the namespace is empty
+</ResponseField>
+
+<ResponseField name="newest_memory" type="string">
+  `created_at` of the newest memory, or `null` when the namespace is empty
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/stats \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "total": 1523,
+  "active": 1401,
+  "superseded": 118,
+  "deleted": 4,
+  "avg_access_count": 2.7,
+  "max_access_count": 64,
+  "oldest_memory": "2026-03-02T08:14:51.203+00:00",
+  "newest_memory": "2026-11-16T09:12:44.512+00:00"
+}
+```

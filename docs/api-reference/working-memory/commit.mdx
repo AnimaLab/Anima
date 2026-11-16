@@ -1,0 +1,68 @@
+---
+title: 'Commit Working Memory'
+description: 'Promote pending working-memory entries to long-term memory'
+---
+
+## POST /api/v1/working-memory/commit
+
+Evaluates pending working-memory entries and promotes the ones that score high enough to long-term memories. Entries past their `expires_at` are first marked `expired`.
+
+Each pending entry gets a commit score: its `provisional_score`, raised by stable phrasing ("always", "prefer", "my name is", ...) and by longer content, lowered by hedging ("maybe", "i think", "probably", ...). Entries below `min_score` become `discarded`. The others become raw memories tagged `working_memory` and `raw`, with importance derived from the score, the entry's `conversation_id` as `episode_id`, and `working_memory_id` and `commit_score` in their metadata; the entry becomes `committed`. Committed memories are queued for reflection.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Target namespace (its child namespaces are included); committed memories are created in this namespace
+</ParamField>
+
+## Request Body
+
+<ParamField body="conversation_id" type="string">
+  Only commit entries of this conversation
+</ParamField>
+
+<ParamField body="limit" type="integer" default="64">
+  Maximum number of pending entries evaluated, at most 512
+</ParamField>
+
+<ParamField body="min_score" type="number" default="0.55">
+  Minimum commit score to keep an entry, clamped to 0.0-1.0
+</ParamField>
+
+<ParamField body="async" type="boolean" default="false">
+  Queue the commit on the background processor and return at once with status `queued`. Without a background processor this gives `500`.
+</ParamField>
+
+## Response
+
+<ResponseField name="status" type="string">
+  `completed`, or `queued` when `async` is true
+</ResponseField>
+
+<ResponseField name="evaluated" type="integer">
+  Number of pending entries evaluated (`0` when queued)
+</ResponseField>
+
+<ResponseField name="committed" type="integer">
+  Number of memories created (`0` when queued)
+</ResponseField>
+
+<ResponseField name="committed_memory_ids" type="string[]">
+  IDs of the memories created (empty when queued)
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/working-memory/commit \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"conversation_id": "conv-42", "min_score": 0.6}'
+```
+
+```json
+{
+  "status": "completed",
+  "evaluated": 3,
+  "committed": 1,
+  "committed_memory_ids": ["01J9Z9D2E3F4G5H6J7K8M9N0P1"]
+}
+```

@@ -12,28 +12,109 @@ description: 'Memory-augmented chat with LLM reasoning'
 ## Request Body
 
 <ParamField body="message" type="string" required>
-  The user message
+  The user message. An empty message returns `400`.
 </ParamField>
 
 <ParamField body="history" type="object[]">
   Previous messages in the conversation. Each object has `role` and `content` fields.
 </ParamField>
 
-<ParamField body="mode" type="string">
-  Chat mode: `rag` (retrieval-augmented) or `tool` (tool-calling)
+<ParamField body="mode" type="string" default="rag">
+  Chat mode: `rag` (retrieval-augmented) or `tool` (tool-calling). See [Modes](#modes).
 </ParamField>
 
-<ParamField body="llm" type="string">
-  Optional LLM override (model name or endpoint)
+<ParamField body="llm" type="object">
+  Optional LLM override. When omitted, the server's `chat` profile is used.
+
+  <Expandable title="properties">
+    <ParamField body="base_url" type="string" required>
+      OpenAI-compatible base URL (e.g. `http://localhost:11434/v1`). A `localhost` URL is replaced by the server profile's URL and model when that profile points to a remote provider.
+    </ParamField>
+    <ParamField body="model" type="string" required>
+      Model name. An empty string takes the server profile's model.
+    </ParamField>
+    <ParamField body="api_key" type="string">
+      API key. When absent, the profile's key, then `OPENAI_API_KEY`, is used.
+    </ParamField>
+    <ParamField body="temperature" type="number">
+      Sampling temperature
+    </ParamField>
+    <ParamField body="max_tokens" type="integer">
+      Maximum tokens in the reply
+    </ParamField>
+    <ParamField body="system_prompt" type="string">
+      Replaces the default system prompt (`You are a helpful assistant.`). Anima appends today's date and the memory instructions to it.
+    </ParamField>
+    <ParamField body="vision" type="boolean" default="false">
+      The model accepts images. Image attachments are sent to the model only when `true`.
+    </ParamField>
+    <ParamField body="tool_use" type="boolean" default="true">
+      The model supports function calling. `mode: "tool"` runs in tool mode only when this is `true`.
+    </ParamField>
+  </Expandable>
 </ParamField>
 
 <ParamField body="attachments" type="object[]">
-  Optional file attachments
+  Optional file attachments.
+
+  <Expandable title="properties">
+    <ParamField body="type" type="string" required>
+      `image` or `text`
+    </ParamField>
+    <ParamField body="data" type="string" required>
+      For images, base64 data or a `data:` URL. For text, the extracted text content.
+    </ParamField>
+    <ParamField body="media_type" type="string">
+      MIME type (e.g. `image/png`, `text/plain`). Images default to `image/png`.
+    </ParamField>
+    <ParamField body="name" type="string">
+      Original file name
+    </ParamField>
+  </Expandable>
+
+  Text attachments are prepended to the message as `<file name="...">` blocks. Image attachments are sent as OpenAI-style `image_url` parts when `llm.vision` is `true`.
 </ParamField>
+
+## Modes
+
+**`rag`** (default) retrieves up to 15 memories through the same enriched pipeline as [`/ask`](/api-reference/chat/ask), adds them to the system prompt, calls the LLM once, then extracts memorable facts from the exchange and stores them. The stored facts are returned in `memories_added`.
+
+**`tool`** gives the LLM memory tools and lets it call them for up to 5 rounds before answering:
+
+| Tool | Arguments | Effect |
+|------|-----------|--------|
+| `memory_search` | `query` | Searches the namespace |
+| `memory_recent` | `limit` (1-30, default 10) | Lists the most recent memories, newest first |
+| `memory_add` | `content` | Stores a new memory |
+| `memory_update` | `id`, `content` | Corrects an existing memory |
+
+Memories found by the tools are returned in `memories_used`, memories stored by `memory_add` in `memories_added`. Tool mode needs an `llm` object with `tool_use` left at `true`; otherwise the request runs in `rag` mode. The [streaming endpoint](/api-reference/chat/chat-stream) adds a fifth tool, `send_message`.
 
 ## Response
 
-Returns a response object with the assistant's `message` and any `memories` that were retrieved to inform the response.
+<ResponseField name="reply" type="string">
+  The assistant's reply. Sensitive values are redacted.
+</ResponseField>
+
+<ResponseField name="memories_used" type="object[]">
+  Memories given to the LLM, each with `id`, `content`, `score`, `source` (`search`, or `recent` for `memory_recent` results), `memory_type` and `importance`.
+</ResponseField>
+
+<ResponseField name="memories_added" type="object[]">
+  Memories stored during the exchange, each with `id` and `content`.
+</ResponseField>
+
+<ResponseField name="mode" type="string">
+  The mode that actually ran: `rag` or `tool`.
+</ResponseField>
+
+<ResponseField name="provenance" type="object">
+  `namespace`, `generated_at`, `source_ids` (IDs of `memories_used`), `redaction_applied`, and `sources` (each with `memory_id`, `score`, `source`, `memory_type`; omitted when empty).
+</ResponseField>
+
+<ResponseField name="degraded" type="boolean">
+  Present and `true` when the LLM backend was unavailable and the reply was built from retrieval results only. No facts are extracted in that case.
+</ResponseField>
 
 ## Example
 
@@ -45,4 +126,36 @@ curl -X POST http://localhost:3000/api/v1/chat \
     "message": "What do you know about my hobbies?",
     "mode": "rag"
   }'
+```
+
+```json
+{
+  "reply": "You enjoy rock climbing on weekends and you have been learning the cello.",
+  "memories_used": [
+    {
+      "id": "01JXYZ8K3M2N4P5Q6R7S8T9V0W",
+      "content": "User goes rock climbing most weekends",
+      "score": 0.82,
+      "source": "search",
+      "memory_type": "raw",
+      "importance": 5
+    }
+  ],
+  "memories_added": [],
+  "mode": "rag",
+  "provenance": {
+    "namespace": "default",
+    "generated_at": "2026-11-16T09:12:44.512+00:00",
+    "source_ids": ["01JXYZ8K3M2N4P5Q6R7S8T9V0W"],
+    "redaction_applied": false,
+    "sources": [
+      {
+        "memory_id": "01JXYZ8K3M2N4P5Q6R7S8T9V0W",
+        "score": 0.82,
+        "source": "search",
+        "memory_type": "raw"
+      }
+    ]
+  }
+}
 ```

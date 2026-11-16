@@ -1,0 +1,37 @@
+---
+title: 'List Models'
+description: 'Models offered by the LLM provider of the chat profile'
+---
+
+## GET /api/v1/models
+
+Forwards a `GET {base_url}/models` request to the provider of the profile routed to `chat` (see [Profiles](/api-reference/system/profiles)) and returns its body unchanged. The profile's API key, when it has one, is sent as a bearer token. The endpoint is server-wide and takes no namespace header.
+
+## Response
+
+The provider's own `/models` response, usually the OpenAI list format:
+
+<ResponseField name="object" type="string">
+  `list`
+</ResponseField>
+
+<ResponseField name="data" type="object[]">
+  Available models, each with at least an `id`
+</ResponseField>
+
+Returns `500` when no chat profile is configured, when the provider cannot be reached, or when it answers with a non-success status.
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/models
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "qwen3.5:4b", "object": "model", "created": 1762300000, "owned_by": "library" }
+  ]
+}
+```

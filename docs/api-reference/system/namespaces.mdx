@@ -1,16 +1,72 @@
 ---
-title: 'List Namespaces'
-description: 'Get all known namespaces'
+title: 'Namespaces'
+description: 'List, delete and rename namespaces'
 ---
 
 ## GET /api/v1/namespaces
 
-Returns a list of all namespace identifiers that have been used in the current database. This endpoint does not require the `X-Anima-Namespace` header.
+Returns every namespace that holds memories in the current database, with its memory counts. It works without the `X-Anima-Namespace` header.
 
-## Response
-
-Returns an array of namespace strings.
+### Response
 
 ```json
-["default", "project-alpha", "testing"]
+[
+  { "namespace": "default", "total_count": 1523, "active_count": 1401 },
+  { "namespace": "project-alpha", "total_count": 87, "active_count": 80 }
+]
+```
+
+## DELETE /api/v1/namespaces
+
+Permanently deletes the namespace given in the header and every namespace below it (`<namespace>/...`): their memories, the vector, full-text and sparse index entries of those memories, and every namespace-scoped record (conversations, revisions, contradictions, audit log, calibration data, identities, plans).
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace to delete, with its descendants
+</ParamField>
+
+### Response
+
+`deleted_memories` counts the memories of the namespace and of every namespace below it.
+
+```json
+{
+  "namespace": "testing",
+  "deleted_memories": 42
+}
+```
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/namespaces \
+  -H "X-Anima-Namespace: testing"
+```
+
+## POST /api/v1/namespaces/rename
+
+Moves the namespace given in the header and every namespace below it, with all their namespace-scoped records, to a new name in one transaction: renaming `testing` to `archive/testing` moves `testing/alpha` to `archive/testing/alpha`.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace to rename
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  New namespace name. A missing or invalid name returns `400`, as does a name equal to the namespace or inside it (`testing/old` for `testing`): a namespace cannot move into itself.
+</ParamField>
+
+### Response
+
+`renamed_memories` counts the memories moved, descendants included.
+
+```json
+{
+  "old_namespace": "testing",
+  "new_namespace": "archive/testing",
+  "renamed_memories": 42
+}
+```
+
+```bash
+curl -X POST http://localhost:3000/api/v1/namespaces/rename \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: testing" \
+  -d '{"name": "archive/testing"}'
 ```

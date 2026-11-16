@@ -1,0 +1,61 @@
+---
+title: 'Add Identity Alias'
+description: 'Link another name to an identity entity'
+---
+
+## POST /api/v1/identities/entities/{id}/aliases
+
+Links an alias (nickname, short form, other spelling) to an identity entity so that [Resolve Identity](/api-reference/identities/resolve) finds the entity under that name. Adding an alias the entity already has keeps the higher of the two confidences. The ambiguity of every entity sharing the alias is recomputed.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace of the entity. An entity that exists outside this exact namespace gives `500`.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Entity ID
+</ParamField>
+
+## Request Body
+
+<ParamField body="alias" type="string" required>
+  Alias text. Blank gives `400`.
+</ParamField>
+
+<ParamField body="language" type="string">
+  Language code of the alias. Default: `"und"` (undetermined)
+</ParamField>
+
+<ParamField body="confidence" type="number" default="0.8">
+  Confidence that the alias names this entity, clamped to 0.0-1.0
+</ParamField>
+
+## Response
+
+<ResponseField name="entity_id" type="string">
+  Entity ID from the path
+</ResponseField>
+
+<ResponseField name="alias" type="string">
+  Alias as sent
+</ResponseField>
+
+<ResponseField name="linked" type="boolean">
+  Always `true` on success
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/identities/entities/01J9ZA1B2C3D4E5F6G7H8J9K0M/aliases \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"alias": "Lena", "language": "fr", "confidence": 0.85}'
+```
+
+```json
+{
+  "entity_id": "01J9ZA1B2C3D4E5F6G7H8J9K0M",
+  "alias": "Lena",
+  "linked": true
+}
+```

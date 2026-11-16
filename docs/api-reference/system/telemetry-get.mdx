@@ -1,0 +1,31 @@
+---
+title: 'Get Telemetry Setting'
+description: 'Whether anonymous usage telemetry is on, and whether it can be changed'
+---
+
+## GET /api/v1/telemetry/config
+
+Returns the current telemetry state. The endpoint is server-wide and takes no namespace header. What telemetry sends and how to turn it off are described in [Configuration](/configuration#telemetry).
+
+## Response
+
+<ResponseField name="enabled" type="boolean">
+  Whether reports are being sent
+</ResponseField>
+
+<ResponseField name="locked" type="boolean">
+  `true` when `config.toml` sets `[telemetry] enabled = false`. Telemetry is then off for good and [Set Telemetry Setting](/api-reference/system/telemetry-set) cannot turn it on.
+</ResponseField>
+
+## Example
+
+```bash
+curl http://localhost:3000/api/v1/telemetry/config
+```
+
+```json
+{
+  "enabled": true,
+  "locked": false
+}
+```

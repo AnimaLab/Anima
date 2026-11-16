@@ -1,0 +1,262 @@
+---
+title: 'Configuration'
+description: 'Every config.toml setting and environment variable the server reads'
+---
+
+## Where the configuration comes from
+
+`anima-server` reads one TOML file, chosen in this order:
+
+1. the path given on the command line, the first argument that does not start with `--` (`anima-server /etc/anima/config.toml`);
+2. `config.toml` in the working directory;
+3. `config.default.toml` in the working directory;
+4. built-in defaults, when none of these files exists or parses.
+
+A file that fails to parse is skipped (the command-line one with a warning in the log) and the next candidate is tried. Relative paths in the file, such as `database.path` and the model folders, resolve against the working directory.
+
+Before reading the file, the server loads a `.env` file from the working directory, if there is one, into its environment. Log verbosity follows `RUST_LOG` (default `anima_server=info,anima_db=info,anima_embed=info`).
+
+The tables below give the value shipped in `config.default.toml`. Keys marked *required* must be present when their section is; other keys may be left out and then take the value shown in parentheses where it differs.
+
+<Note>
+The built-in defaults used when no file is found differ from `config.default.toml` in a few places: the embedding model is Qwen3-Embedding-0.6B (`./models/qwen3-embedding-0.6b`, `pooling = "last_token"`, `dimension = 1024`), `rrf_k = 10`, `min_vector_similarity = 0.55`, `min_score_spread = 0.055`, `tier_boost = 0`, and the `openai_compat` consolidation entry points at `gpt-4o-mini` on OpenAI.
+</Note>
+
+## Setting up the models from the web UI
+
+When the server runs on `config.default.toml` or on the built-in defaults, the web UI opens a first-run dialog asking where the models run (**Later** postpones it for the browser session); **Settings > Server models** changes the same choice later. Saving writes the choice into the file the server loaded, or into a new `config.toml` (next to `config.default.toml`, else in the working directory) when it runs on the template or the defaults, keeping its comments and every other key. It sets:
+
+- `[embedding]`: `backend`, and `api_base_url`, `api_model`, `api_key` and `dimension` for a remote model (the dimension is read from one test call, and `request_dimensions` is set to `false`), or, for the built-in model, `backend = "local"` with the BGE-M3 `model_dir`, download URLs, `pooling` and `dimension = 1024` when coming from a remote model (whose keys are then removed);
+- `[sparse] enabled`: `true` with the built-in BGE-M3, `false` with a remote embedding model;
+- `[llm]`, `[processor]` and `[consolidation.openai_compat]`: `base_url`, `model` and `api_key` of the chat model, with `[consolidation] backend = "openai_compat"`;
+- `[reranker]`: `enabled`, `backend`, and `api_base_url`, `api_model` and `api_key` for a remote re-ranker.
+
+An empty key keeps the saved one. The file is checked to load before it is written, gets owner-only permissions (`0600`) since it may hold keys, and the server then restarts itself with the same arguments. The [setup API](/api-reference/system/setup-get) does the same over HTTP.
+
+## [server]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `host` | `"127.0.0.1"` | Bind address. *Required.* |
+| `port` | `3000` | Bind port. *Required.* |
+| `api_key` | `""` | API key required on every `/api/*` request. Empty falls back to `ANIMA_API_KEY`. |
+| `cors_allowed_origins` | `[]` | Browser origins allowed to call the API cross-origin. Empty means same-origin only. `*` is ignored. |
+| `allow_unauthenticated` | `false` | Allow a non-loopback `host` with no API key, for deployments where another layer authenticates. |
+
+How these combine is described in [Security](/security).
+
+## [database]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `path` | `"./anima.db"` | SQLite database file, created on first start. *Required.* |
+
+## [embedding]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `backend` | `"local"` | `local` runs an ONNX model in process, offline. `openai` and `openai_compat` (equivalent) call an OpenAI-compatible `/embeddings` API. |
+| `dimension` | `1024` | Embedding dimension. *Required.* Changing it requires a [re-index](/api-reference/system/vec-reindex). |
+| `model_dir` | `"./models/bge-m3"` | Local: folder holding `model.onnx` and `tokenizer.json`. |
+| `model_url` | BGE-M3 ONNX on Hugging Face | Local: where to download the model when it is missing. |
+| `tokenizer_url` | BGE-M3 tokenizer on Hugging Face | Local: where to download the tokenizer when it is missing. |
+| `pooling` | `"mean"` | Local: `mean` or `last_token` (Qwen3-Embedding). |
+| `query_instruction` | unset | Prefix added to search queries, never to stored documents. Applies to every backend. |
+| `api_base_url` | unset (`https://api.openai.com/v1`) | Remote: API base URL. |
+| `api_model` | unset (`text-embedding-3-small`) | Remote: model name. |
+| `api_key` | unset | Remote: key. Falls back to `EMBEDDING_API_KEY`, then `OPENAI_API_KEY`; startup fails without one. |
+| `request_dimensions` | `true` | Remote: send `dimensions` with each request. Set `false` for models that reject it, and set `dimension` to the model's native size. |
+
+`config.default.toml` carries commented examples for Qwen3-Embedding-0.6B, OpenAI, Cohere and Voyage.
+
+## [sparse]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Compute BGE-M3 sparse vectors alongside dense ones (local backend). |
+| `weights_path` | `"./models/bge-m3/sparse_linear.bin"` | Weights of the sparse head. |
+
+## [[vectors]]
+
+Optional list of named vectors: several embeddings per memory, each in its own index, blended at search time. Without any entry, a single `content` vector is used. See [Multi-Vector Search](/concepts/retrieval#multi-vector-search).
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `name` | | Unique name; the index table is `vec_<name>` (`vec_memories` for `content`). *Required.* |
+| `source` | | Text to embed: `content`, or `summary` (written by the processor). *Required.* |
+| `weight` | `1.0` | Base search weight, adjusted per query by heuristics. |
+| `populate` | `"ingestion"` | `ingestion` embeds on create; `async` lets the background processor fill it later. |
+
+## [search]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `rrf_k` | `60.0` | Reciprocal-rank-fusion constant. *Required.* |
+| `weight_vector` | `0.6` | Weight of dense vector results. *Required.* Auto-tuned at runtime, see [Hybrid Weights](/api-reference/system/weights). |
+| `weight_keyword` | `0.4` | Weight of keyword (FTS) results. *Required.* Auto-tuned at runtime. |
+| `weight_sparse` | `0.0` | Weight of sparse vector results. |
+| `temporal_weight` | `0.2` | Weight of recency in the final score. *Required.* |
+| `temporal_lambda` | `0.001` | Decay rate for categories without their own (see `[categories]`). *Required.* |
+| `similarity_threshold` | `0.85` | Similarity above which consolidation treats a new memory as related to an existing one. *Required.* |
+| `min_vector_similarity` | `0.50` (`0.55`) | Cosine similarity below which vector results are dropped. |
+| `min_score_spread` | `0.0` | Minimum spread between the best and worst vector score for the results to be kept. `0` turns the check off. |
+| `tier_boost` | `0.05` (`0.0`) | Score bonus for higher tiers: `tier_boost × (tier − 1) / 2`, so +0.025 for reflected and +0.05 for deduced at `0.05`. `0` turns it off. |
+| `access_weight` | (`0.02`) | Weight of how often a memory was accessed. |
+| `importance_weight` | (`0.03`) | Weight of memory importance. |
+| `max_tier` | (`4`) | Highest memory tier searched by default: 1 raw, 2 +reflected, 3 +deduced, 4 all. |
+
+## [categories]
+
+Per-category decay of the temporal score. Built-in half-lives: `identity` 2888 days, `preference` 289, `environment` 58, `routine` 96, `task` 6, `inferred` and `general` 29. Each `[categories.<name>]` table overrides a built-in or adds a category:
+
+| Key | Meaning |
+|-----|---------|
+| `half_life_days` | Days after which the temporal score is halved. Wins over `lambda`. |
+| `lambda` | Raw decay rate per hour, for advanced use. |
+
+```toml
+[categories.health]
+half_life_days = 144
+
+[categories.task]
+half_life_days = 3
+```
+
+## [reranker]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` (`false` when the section exists without the key) | Re-rank the top candidates with a cross-encoder. The local model is about 571 MB, downloaded on first start. |
+| `backend` | `"local"` | `local` (ONNX) or `openai` / `openai_compat`, a cross-encoder behind an OpenAI-style `/rerank` endpoint (vLLM, TEI, Cohere, Jina, Voyage). |
+| `model_dir` | `"./models/bge-reranker-v2-m3"` | Local: model folder. |
+| `model_url` | bge-reranker-v2-m3 INT8 ONNX | Local: model download URL. |
+| `tokenizer_url` | bge-reranker-v2-m3 tokenizer | Local: tokenizer download URL. |
+| `max_length` | `512` | Local: maximum tokens per query and document pair. |
+| `top_n` | `10` | Number of candidates re-ranked. |
+| `api_base_url` | unset | Remote: base URL. *Required for a remote backend.* |
+| `api_model` | unset | Remote: model name. *Required for a remote backend.* |
+| `api_key` | unset | Remote: key. Falls back to `RERANKER_API_KEY`, then `OPENAI_API_KEY`; startup fails without one. |
+
+## [consolidation]
+
+LLM used to merge, update or supersede related memories when they are written.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Run consolidation. *Required.* |
+| `backend` | `"ollama"` | `ollama` or `openai_compat`. Any other value turns consolidation off. *Required.* |
+| `ollama.base_url` | `"http://localhost:11434"` | Ollama server. |
+| `ollama.model` | `"qwen3.5:4b"` | Ollama model. |
+| `openai_compat.base_url` | `"https://api.example.com/v1"` | OpenAI-compatible endpoint. |
+| `openai_compat.api_key` | `""` | Key. Falls back to `OPENAI_API_KEY`. |
+| `openai_compat.model` | `"your-model-name"` | Model name. |
+
+## [llm]
+
+LLM for `/ask`, `/chat` and answer generation, any OpenAI-compatible endpoint. It becomes the `default` [profile](/concepts/profiles) when `[profiles]` is absent.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `base_url` | `"http://localhost:11434/v1"` | Endpoint. *Required in the section.* |
+| `model` | `"qwen3.5:4b"` | Model. *Required in the section.* |
+| `api_key` | `""` | Key. Falls back to `DEFAULT_API_KEY`, then `OPENAI_API_KEY`. |
+
+## [processor]
+
+LLM for the background processor (reflection, deduction, induction, summaries).
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Run the background processor. |
+| `base_url` | `"http://localhost:11434/v1"` (`https://api.groq.com/openai/v1`) | Endpoint. |
+| `model` | `"qwen3.5:4b"` (`qwen/qwen3-32b`) | Model. |
+| `api_key` | `""` | Key. Falls back to `PROCESSOR_API_KEY`, then `OPENAI_API_KEY`. Without a key, the processor uses the consolidation LLM, and is off when consolidation is off too. |
+
+## [profiles] and [routing]
+
+Named OpenAI-compatible endpoints and the operation each one serves. When `[profiles]` is present it replaces `[llm]`, `[processor]` and `[consolidation]` for routing. See [Provider Profiles](/concepts/profiles).
+
+| Key | Meaning |
+|-----|---------|
+| `profiles.<name>.base_url` | Endpoint. *Required.* |
+| `profiles.<name>.model` | Model. *Required.* |
+| `profiles.<name>.api_key` | Key. Falls back to `<NAME>_API_KEY` (upper case, `-` as `_`), then `OPENAI_API_KEY`. A profile on `localhost` or `127.0.0.1` works without a key. |
+| `routing.ask` / `routing.chat` / `routing.processor` / `routing.consolidation` | Profile for each operation. An operation left out uses the first profile. |
+
+## [telemetry]
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Send anonymous usage reports. `false` turns telemetry off for good. |
+| `endpoint` | `"https://telemetry.anima-memory.dev/v1/report"` | Where reports are posted. |
+| `interval_secs` | `86400` | Seconds between reports, at least 60. |
+
+### What is sent, and when
+
+The first report goes out 60 seconds after start, then one every `interval_secs`, as a JSON `POST` to `endpoint` with a 10-second timeout. A failed send is logged at debug level and retried at the next interval. Each report holds:
+
+- `schema_version`, `app_version`, `os`, `os_version`, `arch`, `timestamp`, `uptime_secs`;
+- `installation_id`: the SHA-256 of a random UUID stored in `~/.anima/telemetry_id`;
+- `config`: embedding backend and dimension, whether consolidation and the processor are on, the consolidation backend, the `[llm]` and `[processor]` model names, and the host name only of their `base_url`;
+- `feature_flags`: `vision`, `tool_use`, `streaming`, `reflection_enabled`, `deduction_enabled`, `induction_enabled`, as last set through the web UI;
+- `usage`: the number of namespaces, of memories and of active memories;
+- `processor_metrics` (when the processor runs): completed and failed jobs, reflected and deduced memories created, LLM calls and total tokens.
+
+Memory content, namespace names and API keys are never part of a report.
+
+### Turning it off
+
+- **In `config.toml`**: `[telemetry] enabled = false`. The reporting loop never starts, and the web UI and the API show telemetry as locked off.
+- **From the web UI** (Settings) or `PUT /api/v1/telemetry/config` with `{"enabled": false}`: takes effect at once and is remembered across restarts by the file `~/.anima/telemetry_opt_out`. Turning it back on there, or deleting the file, resumes reports.
+
+## Environment variables
+
+### Server
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `ANIMA_API_KEY` | unset | API key, when `[server] api_key` is empty. |
+| `ANIMA_NAMESPACE_ACL` | unset (all open) | Per-caller namespace access rules, see [Security](/security#namespace-acl). Read on each request. |
+| `ANIMA_REDACTION_ENABLED` | `false` | `1`, `true`, `yes` or `on` masks e-mail addresses, SSN-like numbers, API-key-like tokens and card numbers in stored content and in answers (`[redacted:email]`, ...), and the values of metadata keys such as `password`, `token`, `secret` or `api_key`. |
+| `ANIMA_QUERY_EMBED_CACHE_SIZE` | `256` | Number of query embeddings kept in memory (at least 32). |
+| `ANIMA_CALIBRATION_RECOMPUTE_SECS` | `300` | Interval of the calibration recompute and hybrid weight auto-tune. |
+| `ANIMA_RETENTION_RECOMPUTE_SECS` | `900` | Interval of the retention pass (at least 10). |
+| `ANIMA_RETENTION_LIMIT_PER_NAMESPACE` | `1000` | Active memories examined per namespace on each retention pass. |
+| `ANIMA_RETENTION_CUTOFF_DAYS` | `45` | Age after which a memory that is rarely accessed or of low importance loses one importance point per pass, down to a floor set by its tier. |
+| `ANIMA_RETENTION_COLD_DAYS` | `180` | Age after which it loses two points per pass instead (always above the cutoff). |
+| `ANIMA_PROCESSOR_QUEUE_CAPACITY` | `1024` | Size of the background processor queue (at least 8). |
+| `ANIMA_PROCESSOR_LLM_CONCURRENCY` | `2` | Concurrent processor LLM calls (1 to 16). |
+| `ANIMA_REFLECT_BATCH_SIZE` | `64` | New memories grouped into one reflection job (8 to 1024). |
+| `ANIMA_REFLECT_BATCH_WAIT_MS` | `80` | Time a reflection batch waits to fill (10 to 2000 ms). |
+| `ANIMA_INDUCTION_TRIGGER_NEW_DEDUCED` | `12` | New deduced facts in a namespace that trigger an induction pass (1 to 10000). |
+| `ANIMA_INDUCTION_MAX_FACTS` | `24` | Facts given to one induction prompt (8 to 96). |
+| `ANIMA_INDUCTION_MAX_CHARS_PER_FACT` | `160` | Characters kept per fact in that prompt (64 to 512). |
+| `ANIMA_INDUCTION_DEDUP_JACCARD` | `0.92` | Word-overlap (Jaccard) similarity above which a fact is dropped from the induction prompt as a near-duplicate (0.75 to 0.99). |
+| `ANIMA_LLM_MODE` | unset | `mock` (or `1`, `true`, `yes`, `on`) answers LLM calls from fixture files instead of the provider, for tests. |
+| `ANIMA_LLM_FIXTURES_DIR` | unset | Folder of the fixture files used in mock mode. |
+| `RUST_LOG` | see above | Log filter. |
+
+`MEMI_LLM_MODE` and `MEMI_LLM_FIXTURES_DIR` are read as older names of the two mock variables.
+
+### Provider keys
+
+| Variable | Used for |
+|----------|----------|
+| `OPENAI_API_KEY` | Last fallback for every provider key below and for `openai_compat` consolidation. |
+| `EMBEDDING_API_KEY` | Remote embedding backend. |
+| `RERANKER_API_KEY` | Remote re-ranker. |
+| `PROCESSOR_API_KEY` | `[processor]`. |
+| `<PROFILE>_API_KEY` | Profile `<profile>`, e.g. `CLOUD_API_KEY` for `[profiles.cloud]`, `DEFAULT_API_KEY` for `[llm]`. |
+
+### Client subcommands
+
+`connect`, `mcp`, `recall`, `export`, `import` and `skills` read these, after their command-line flags and before `~/.anima/client.json` (see [Connect a harness](/integrations/connect#options)):
+
+| Variable | Meaning |
+|----------|---------|
+| `ANIMA_BASE_URL` (or `ANIMA_URL`) | Server address, default `http://127.0.0.1:3000`. |
+| `ANIMA_API_KEY` | API key sent to the server. |
+| `ANIMA_NAMESPACE` | Namespace, default `default`. |
+| `ANIMA_PROJECT` | Project of the session, for `mcp` and `recall` (and the TypeScript MCP bridge). Unset, it is detected from the git repository or the working folder; see [Projects](/concepts/namespaces#projects). |
+
+`~/.anima` is under `HOME`, or `USERPROFILE` on Windows.

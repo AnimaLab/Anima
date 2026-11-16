@@ -1,0 +1,40 @@
+---
+title: 'List Server Models'
+description: 'List the models an OpenAI-compatible server offers'
+---
+
+## POST /api/v1/setup/models
+
+Asks an OpenAI-compatible server for its models (`GET <base_url>/models`, 20-second timeout), for the model pickers of the setup dialog and of Settings > Server models. The endpoint is server-wide and takes no namespace header.
+
+## Request Body
+
+<ParamField body="base_url" type="string" required>
+  API base URL, such as `https://api.openai.com/v1`. It must start with `http://` or `https://`, otherwise `400`; a trailing `/` is dropped.
+</ParamField>
+
+<ParamField body="api_key" type="string">
+  Key sent as `Authorization: Bearer`. Empty or absent: a key already saved for the same URL in `[llm]`, `[embedding]` or `[reranker]` (or `EMBEDDING_API_KEY` / `RERANKER_API_KEY` for those), then `OPENAI_API_KEY`.
+</ParamField>
+
+A server that cannot be reached, answers with an error status, or returns something other than a model list gives `400` with the reason.
+
+## Response
+
+<ResponseField name="models" type="string[]">
+  Model IDs, sorted and without duplicates, from the `data` list (or a `models` list), using each entry's `id` or else its `name`
+</ResponseField>
+
+## Example
+
+```bash
+curl -X POST http://localhost:3000/api/v1/setup/models \
+  -H "Content-Type: application/json" \
+  -d '{"base_url": "https://llm.example.com/v1", "api_key": "sk-..."}'
+```
+
+```json
+{
+  "models": ["bge-m3", "bge-reranker-v2-m3", "qwen3-32b"]
+}
+```

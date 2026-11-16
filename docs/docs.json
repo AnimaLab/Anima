@@ -3,9 +3,13 @@
   "theme": "mint",
   "name": "Anima",
   "colors": {
-    "primary": "#7C3AED",
-    "light": "#A78BFA",
-    "dark": "#5B21B6"
+    "primary": "#7A5E00",
+    "light": "#FCEE0A",
+    "dark": "#5C4700"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -37,6 +41,13 @@
               "integrations/mcp",
               "integrations/web-ui"
             ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "configuration",
+              "security"
+            ]
           }
         ]
       },
@@ -59,7 +70,12 @@
               "api-reference/memories/update",
               "api-reference/memories/delete",
               "api-reference/memories/search",
-              "api-reference/memories/merge"
+              "api-reference/memories/merge",
+              "api-reference/memories/patch",
+              "api-reference/memories/discover",
+              "api-reference/memories/top-accessed",
+              "api-reference/memories/purge",
+              "api-reference/memories/corrections"
             ]
           },
           {
@@ -67,6 +83,22 @@
             "pages": [
               "api-reference/revisions/list",
               "api-reference/revisions/rollback"
+            ]
+          },
+          {
+            "group": "Working Memory",
+            "pages": [
+              "api-reference/working-memory/add",
+              "api-reference/working-memory/list",
+              "api-reference/working-memory/commit"
+            ]
+          },
+          {
+            "group": "Identities",
+            "pages": [
+              "api-reference/identities/create-entity",
+              "api-reference/identities/add-alias",
+              "api-reference/identities/resolve"
             ]
           },
           {
@@ -91,13 +123,95 @@
             ]
           },
           {
+            "group": "Briefing & Skills",
+            "pages": [
+              "api-reference/briefing/briefing",
+              "api-reference/skills/list",
+              "api-reference/skills/get",
+              "api-reference/skills/put",
+              "api-reference/skills/delete"
+            ]
+          },
+          {
+            "group": "Processor",
+            "pages": [
+              "api-reference/processor/reflect",
+              "api-reference/processor/status",
+              "api-reference/processor/log",
+              "api-reference/processor/reconsolidate",
+              "api-reference/processor/retention"
+            ]
+          },
+          {
+            "group": "Conversations",
+            "pages": [
+              "api-reference/conversations/list",
+              "api-reference/conversations/create",
+              "api-reference/conversations/get",
+              "api-reference/conversations/update",
+              "api-reference/conversations/delete",
+              "api-reference/conversations/title"
+            ]
+          },
+          {
+            "group": "Plans",
+            "pages": [
+              "api-reference/plans/list",
+              "api-reference/plans/create",
+              "api-reference/plans/list-checkpoints",
+              "api-reference/plans/add-checkpoint",
+              "api-reference/plans/checkpoint-status",
+              "api-reference/plans/outcome",
+              "api-reference/plans/list-branches",
+              "api-reference/plans/add-branch",
+              "api-reference/plans/resolve-branch",
+              "api-reference/plans/list-procedures",
+              "api-reference/plans/bind-procedure"
+            ]
+          },
+          {
+            "group": "Procedures",
+            "pages": [
+              "api-reference/procedures/list-revisions",
+              "api-reference/procedures/upsert-revision"
+            ]
+          },
+          {
+            "group": "Transitions & Counterfactuals",
+            "pages": [
+              "api-reference/transitions/list",
+              "api-reference/transitions/upsert",
+              "api-reference/counterfactuals/simulate"
+            ]
+          },
+          {
             "group": "System",
             "pages": [
               "api-reference/system/health",
               "api-reference/system/stats",
               "api-reference/system/namespaces",
               "api-reference/system/profiles",
-              "api-reference/system/weights"
+              "api-reference/system/weights",
+              "api-reference/system/vectors",
+              "api-reference/system/models",
+              "api-reference/system/calibration-metrics",
+              "api-reference/system/vec-status",
+              "api-reference/system/vec-reindex",
+              "api-reference/system/graph",
+              "api-reference/system/embeddings",
+              "api-reference/system/telemetry-get",
+              "api-reference/system/telemetry-set",
+              "api-reference/system/setup-get",
+              "api-reference/system/setup-models",
+              "api-reference/system/setup-put"
+            ]
+          },
+          {
+            "group": "Backup",
+            "pages": [
+              "api-reference/backup/export",
+              "api-reference/backup/restore",
+              "api-reference/backup/restore-sqlite"
             ]
           }
         ]

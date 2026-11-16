@@ -1,0 +1,87 @@
+---
+title: 'Resolve Identity'
+description: 'Find which identity entity a name refers to'
+---
+
+## GET /api/v1/identities/resolve
+
+Resolves a name to candidate identity entities by matching it against their aliases, and says whether the answer is ambiguous.
+
+The query is normalized like entity names (lowercase, accents folded, punctuation as spaces). Aliases are matched in three passes, each run only while fewer than `limit` entities are found: `exact`, then `prefix` (aliases starting with the query), then `fuzzy` (string similarity of at least 0.68 among the 200 most recently updated aliases). Each candidate's score is `0.55 × match + 0.25 × alias_confidence + 0.20 × entity_confidence − 0.20 × ambiguity`, clamped to 0.0-1.0, where `match` is 1.0 for an exact match, 0.86 for a prefix match and the similarity for a fuzzy one. An entity appears once, with its best-scoring alias.
+
+<ParamField header="X-Anima-Namespace" type="string" required>
+  Namespace searched (its child namespaces are included)
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="query" type="string" required>
+  Name to resolve. Blank gives `400`.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="5">
+  Maximum number of candidates (1-20)
+</ParamField>
+
+## Response
+
+<ResponseField name="query" type="string">
+  Query as sent
+</ResponseField>
+
+<ResponseField name="normalized_query" type="string">
+  Normalized query used for matching
+</ResponseField>
+
+<ResponseField name="best_confidence" type="number">
+  Score of the top candidate, `0.0` when there is none
+</ResponseField>
+
+<ResponseField name="ambiguous" type="boolean">
+  `true` when the top score is below 0.62, or, with two or more candidates, when the top two are less than 0.10 apart or the top entity's ambiguity is above 0.35
+</ResponseField>
+
+<ResponseField name="candidates" type="object[]">
+  Candidates, highest score first
+
+  <Expandable title="candidate">
+    <ResponseField name="entity_id" type="string">Entity ID</ResponseField>
+    <ResponseField name="canonical_name" type="string">Canonical name of the entity</ResponseField>
+    <ResponseField name="matched_alias" type="string">Alias that matched the query</ResponseField>
+    <ResponseField name="language" type="string">Language of the entity</ResponseField>
+    <ResponseField name="match_kind" type="string">`exact`, `prefix` or `fuzzy`</ResponseField>
+    <ResponseField name="score" type="number">Candidate score (0.0-1.0)</ResponseField>
+    <ResponseField name="entity_confidence" type="number">Confidence of the entity</ResponseField>
+    <ResponseField name="alias_confidence" type="number">Confidence of the matched alias</ResponseField>
+    <ResponseField name="ambiguity" type="number">Ambiguity of the entity</ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/identities/resolve?query=lena&limit=5" \
+  -H "X-Anima-Namespace: default"
+```
+
+```json
+{
+  "query": "lena",
+  "normalized_query": "lena",
+  "best_confidence": 0.9425,
+  "ambiguous": false,
+  "candidates": [
+    {
+      "entity_id": "01J9ZA1B2C3D4E5F6G7H8J9K0M",
+      "canonical_name": "Hélène Martin",
+      "matched_alias": "Lena",
+      "language": "fr",
+      "match_kind": "exact",
+      "score": 0.9425,
+      "entity_confidence": 0.9,
+      "alias_confidence": 0.85,
+      "ambiguity": 0.0
+    }
+  ]
+}
+```

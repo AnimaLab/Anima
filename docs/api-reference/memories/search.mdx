@@ -38,11 +38,11 @@ description: 'Search memories using hybrid, vector, keyword, or ask-retrieval mo
 </ParamField>
 
 <ParamField body="date_start" type="string">
-  ISO 8601 date to filter memories created after this time
+  ISO 8601 date (inclusive, e.g. `2023-01-01`). Excludes memories whose `event_date` is earlier; memories without an `event_date` are kept.
 </ParamField>
 
 <ParamField body="date_end" type="string">
-  ISO 8601 date to filter memories created before this time
+  ISO 8601 date (inclusive, e.g. `2023-12-31`). Excludes memories whose `event_date` is later; memories without an `event_date` are kept.
 </ParamField>
 
 <ParamField body="category" type="string">
@@ -53,13 +53,40 @@ description: 'Search memories using hybrid, vector, keyword, or ask-retrieval mo
   Group results by a memory field, returning only the top-scoring result per group. Valid values: `episode_id`, `category`, `source`. Each result includes `group_size` (count in group) and `group_value` (field value).
 </ParamField>
 
-<ParamField body="vectors" type="string">
-  Comma-separated list of named vectors to search (e.g. `content,summary`). Defaults to all configured vectors. Only useful when `[[vectors]]` is configured in `config.toml`.
-</ParamField>
-
 ## Response
 
-Returns an object with `results` (array of memory objects ranked by relevance) and `query_time_ms`. Each result includes `score`, `vector_score`, `keyword_score`, `temporal_score`, `category`, `confidence`, `source`, and `vector_scores` (per-named-vector similarity breakdown when multi-vector is configured).
+<ResponseField name="results" type="object[]">
+  Memories ranked by relevance. Each result has `id`, `content`, `metadata`, `tags`, `memory_type`, `category`, `confidence`, `source`, `created_at`, `updated_at`, the fused `score`, and the per-signal `vector_score`, `sparse_score`, `keyword_score` and `temporal_score` (`null` when that signal did not contribute). `episode_id` is present when the memory has one; `group_size` and `group_value` when `group_by` is set.
+</ResponseField>
+
+<ResponseField name="query_time_ms" type="number">
+  Server-side search time in milliseconds
+</ResponseField>
+
+```json
+{
+  "results": [
+    {
+      "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      "content": "I love hiking on weekends.",
+      "metadata": null,
+      "tags": ["preference", "outdoors"],
+      "memory_type": "raw",
+      "category": "general",
+      "confidence": 1.0,
+      "source": "user_stated",
+      "score": 0.82,
+      "vector_score": 0.71,
+      "sparse_score": null,
+      "keyword_score": 0.64,
+      "temporal_score": 0.93,
+      "created_at": "2026-11-16T09:12:04.512+00:00",
+      "updated_at": "2026-11-16T09:12:04.512+00:00"
+    }
+  ],
+  "query_time_ms": 12.4
+}
+```
 
 ## Examples
 
