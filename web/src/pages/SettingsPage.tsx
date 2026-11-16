@@ -4,6 +4,7 @@ import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
 import { api, apiFetch } from '../api/client'
+import { isWithin, renamed, subtree } from '../lib/namespaces'
 import type { LlmConfig, NamespaceInfo, ProfilesResponse, SetupStatus } from '../api/types'
 import { ModelFields, RestartWait, saveAndRestart, useModelForm } from '../components/ModelSetup'
 
@@ -401,9 +402,11 @@ export function SettingsPage() {
     setDeletingNs(true)
     try {
       const result = await api.deleteNamespace(deleteNsModal.namespace)
-      setNamespaces(prev => prev.filter(n => n.namespace !== deleteNsModal.namespace))
-      if (namespace === deleteNsModal.namespace) {
-        const remaining = namespaces.filter(n => n.namespace !== deleteNsModal.namespace)
+      // The namespace goes with every namespace below it.
+      const gone = (n: NamespaceInfo) => isWithin(n.namespace, deleteNsModal.namespace)
+      setNamespaces(prev => prev.filter(n => !gone(n)))
+      if (isWithin(namespace, deleteNsModal.namespace)) {
+        const remaining = namespaces.filter(n => !gone(n))
         setNamespaceRaw(remaining[0]?.namespace || 'default')
       }
       showToast(`Deleted "${deleteNsModal.namespace}" (${result.deleted_memories} memories)`)
@@ -422,10 +425,9 @@ export function SettingsPage() {
     setRenamingNs(true)
     try {
       await api.renameNamespace(renameNsModal.namespace, renameNewName.trim())
-      setNamespaces(prev => prev.map(n =>
-        n.namespace === renameNsModal.namespace ? { ...n, namespace: renameNewName.trim() } : n
-      ))
-      if (namespace === renameNsModal.namespace) setNamespaceRaw(renameNewName.trim())
+      const to = renameNewName.trim()
+      setNamespaces(prev => prev.map(n => ({ ...n, namespace: renamed(n.namespace, renameNsModal.namespace, to) })))
+      setNamespaceRaw(renamed(namespace, renameNsModal.namespace, to))
       showToast(`Renamed to "${renameNewName.trim()}"`)
       refreshSidebar()
     } catch (e: unknown) {
@@ -437,6 +439,8 @@ export function SettingsPage() {
     }
   }
 
+  const deleteTree = deleteNsModal ? subtree(namespaces, deleteNsModal.namespace) : { descendants: 0, memories: 0 }
+  const renameTree = renameNsModal ? subtree(namespaces, renameNsModal.namespace) : { descendants: 0, memories: 0 }
   const hasProfiles = !!profiles && Object.keys(profiles.profiles).length > 1
   const sections = [
     { id: 'namespaces', label: 'Namespaces' },
@@ -1043,7 +1047,8 @@ export function SettingsPage() {
               autoFocus
             />
             <p className={helpText}>
-              Renaming <strong className="font-semibold text-ink">{renameNsModal.namespace}</strong> ({renameNsModal.total_count} memories)
+              Renaming <strong className="font-semibold text-ink">{renameNsModal.namespace}</strong> ({renameTree.memories} memories
+              {renameTree.descendants > 0 && <>, with the {renameTree.descendants} namespace{renameTree.descendants === 1 ? '' : 's'} below it</>})
             </p>
           </div>
         </Dialog>
@@ -1071,7 +1076,9 @@ export function SettingsPage() {
           }
         >
           <p className="text-[13px] text-ink-light">
-            This will permanently delete <strong className="font-semibold text-ink">{deleteNsModal.namespace}</strong> and all <strong className="font-semibold text-ink">{deleteNsModal.total_count}</strong> memories in it. This cannot be undone.
+            This will permanently delete <strong className="font-semibold text-ink">{deleteNsModal.namespace}</strong>
+            {deleteTree.descendants > 0 && <>, the <strong className="font-semibold text-ink">{deleteTree.descendants}</strong> namespace{deleteTree.descendants === 1 ? '' : 's'} below it,</>}
+            {' '}and all <strong className="font-semibold text-ink">{deleteTree.memories}</strong> memories in {deleteTree.descendants > 0 ? 'them' : 'it'}. This cannot be undone.
           </p>
           <div>
             <label htmlFor="delete-confirm" className={fieldLabel}>

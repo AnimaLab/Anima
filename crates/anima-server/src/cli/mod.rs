@@ -12,6 +12,7 @@ mod client;
 mod connect;
 mod mcp;
 mod portable;
+mod project;
 mod recall;
 mod skills;
 

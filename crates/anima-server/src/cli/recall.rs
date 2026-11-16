@@ -79,14 +79,22 @@ fn project(opts: &Options, payload: &str) -> Option<String> {
     if let Some(name) = opts.flags.iter().find_map(|f| f.strip_prefix("--project=")) {
         return Some(name.to_string()).filter(|n| !n.is_empty());
     }
-    let from_payload = serde_json::from_str::<Value>(payload)
+    // The same detection as `anima-server mcp`, so the briefing reads the
+    // project namespace the assistant writes to.
+    let cwd = serde_json::from_str::<Value>(payload)
         .ok()
-        .and_then(|v| v.get("cwd").and_then(Value::as_str).and_then(folder_name));
-    from_payload.or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .and_then(|d| folder_name(&d.to_string_lossy()))
-    })
+        .and_then(|v| v.get("cwd").and_then(Value::as_str).map(str::to_string));
+    match cwd {
+        Some(dir) => {
+            let path = std::path::Path::new(dir.trim_end_matches(['/', '\\']));
+            if path.is_dir() {
+                super::project::detect(path).or_else(|| folder_name(&dir))
+            } else {
+                super::project::from_env().or_else(|| folder_name(&dir))
+            }
+        }
+        None => super::project::detect_here(),
+    }
 }
 
 #[cfg(test)]

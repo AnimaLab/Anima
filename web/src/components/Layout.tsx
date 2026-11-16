@@ -5,6 +5,7 @@ import { useTheme, setThemePreference, type ThemePreference } from '../lib/theme
 import { AboutAnima, aboutSeen } from './AboutAnima'
 import { ReleaseNotes } from './ReleaseNotes'
 import { SetupDialog, setupPostponed } from './ModelSetup'
+import { sortedTree, treeLabel } from '../lib/namespaces'
 import { useChat } from '../hooks/useChat'
 import { useNamespace } from '../hooks/useNamespace'
 import { useToast } from '../hooks/useToast'
@@ -214,9 +215,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
               {namespaces.length === 0 && (
                 <option value={namespace}>{namespace}</option>
               )}
-              {namespaces.map((ns) => (
+              {sortedTree(namespaces).map((ns) => (
                 <option key={ns.namespace} value={ns.namespace}>
-                  {ns.namespace} ({ns.active_count})
+                  {treeLabel(ns.namespace)} ({ns.active_count})
                 </option>
               ))}
             </select>

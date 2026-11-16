@@ -17,7 +17,9 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 const INSTRUCTIONS: &str = "Anima is the user's long-term memory, shared by every assistant and \
 machine they use. At the start of a session call memory_briefing unless a briefing from Anima is \
 already in context. Search memory before starting a task, and save durable facts, preferences, \
-decisions and corrections as they come up. Skills listed in the briefing are loaded with skill_get. \
+decisions and corrections as they come up. Memories are kept with the current project; pass \
+scope global to memory_add for what holds in every project (who the user is, general preferences). \
+Skills listed in the briefing are loaded with skill_get. \
 For the full guide, call skill_get with the name anima. Do not store secrets or credentials.";
 
 pub async fn serve(opts: &Options) -> anyhow::Result<()> {
@@ -116,6 +118,7 @@ pub fn tools() -> Vec<Value> {
                 "max_tier": { "type": "number", "minimum": 1, "maximum": 4, "description": "Max memory tier: 1=raw, 2=reflected, 3=deduced, 4=induced" },
                 "group_by": { "type": "string", "enum": ["episode_id", "category", "source"], "description": "Return the top result per group" },
                 "query_rewrite": { "type": "boolean", "description": "Expand the query with extracted keywords (default: false)" },
+                "scope": { "type": "string", "enum": ["all", "project"], "description": "all (default): every project and the general memories. project: only the current project's memories" },
             }),
             &["query"],
         ),
@@ -124,12 +127,15 @@ pub fn tools() -> Vec<Value> {
             "Store a new memory about the user. The server deduplicates and consolidates with \
              similar memories. Use it for facts, preferences, decisions, goals, relationships, \
              habits, skills, or any personal information worth remembering. One fact per memory, \
-             written so it stands on its own.",
+             written so it stands on its own. It is stored with the current project unless \
+             scope is global; the answer says which namespace it went to.",
             json!({
                 "content": { "type": "string", "description": "The memory content to store" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
                 "consolidate": { "type": "boolean", "description": "Consolidate with similar memories (default: true)" },
                 "category": { "type": "string", "description": "Category, which controls decay and ranking: identity, preference, environment, routine, task, inferred, general, or a custom one" },
+                "scope": { "type": "string", "enum": ["project", "global"], "description": "project (default): stored with the current project. global: a fact about the user that holds in every project (who they are, general preferences, ways of working)" },
+                "project": { "type": "string", "description": "Project name, when the server cannot tell it from the working folder" },
             }),
             &["content"],
         ),
@@ -282,6 +288,16 @@ async fn search_ids(api: &Api, query: &str) -> anyhow::Result<Vec<Value>> {
         .unwrap_or_default())
 }
 
+/// The project this session works on, detected once from the folder the
+/// harness started the server in; the tool argument is the fallback.
+fn current_project(args: &Value) -> Option<String> {
+    static DETECTED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    DETECTED
+        .get_or_init(super::project::detect_here)
+        .clone()
+        .or_else(|| args.get("project").and_then(Value::as_str).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string))
+}
+
 async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
     use reqwest::Method;
     match name {
@@ -293,12 +309,25 @@ async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
             ]);
             body.entry("limit").or_insert(json!(10));
             body.entry("search_mode").or_insert(json!("hybrid"));
+            if args.get("scope").and_then(Value::as_str) == Some("project") {
+                let project = current_project(args).ok_or_else(|| {
+                    anyhow::anyhow!("no current project: pass project, or search with scope all")
+                })?;
+                let ns = anima_core::namespace::Namespace::parse(api.namespace())?
+                    .child(&project)
+                    .ok_or_else(|| anyhow::anyhow!("'{project}' cannot name a namespace"))?;
+                let req = api.request_in(Method::POST, "/api/v1/memories/search", ns.as_str());
+                return api.json(req.json(&Value::Object(body))).await;
+            }
             api.post("/api/v1/memories/search", &Value::Object(body)).await
         }
         "memory_add" => {
             required_str(args, "content")?;
-            let mut body = pick(args, &["content", "tags", "consolidate", "category"]);
+            let mut body = pick(args, &["content", "tags", "consolidate", "category", "scope"]);
             body.entry("consolidate").or_insert(json!(true));
+            if let Some(project) = current_project(args) {
+                body.insert("project".into(), json!(project));
+            }
             api.post("/api/v1/memories", &Value::Object(body)).await
         }
         "memory_update" => {
@@ -355,6 +384,9 @@ async fn call(api: &Api, name: &str, args: &Value) -> anyhow::Result<Value> {
         }
         "memory_briefing" => {
             let mut body = pick(args, &["project"]);
+            if let Some(project) = current_project(&Value::Null) {
+                body.entry("project").or_insert(json!(project));
+            }
             body.insert("mode".into(), json!("session"));
             let briefing = api.post("/api/v1/briefing", &Value::Object(body)).await?;
             // The text is the briefing; the structured fields would only repeat it.

@@ -1081,7 +1081,10 @@ pub async fn add_memory(
         episode_id,
         category,
         source,
+        project,
+        scope,
     } = req;
+    let target = write_target(&ns, project.as_deref(), scope.as_deref())?;
     let parsed_category = category.unwrap_or_else(|| "general".to_string());
     let parsed_source = source.filter(|s| !s.is_empty()).unwrap_or_else(|| "user_stated".to_string());
     let source_confidence = anima_core::memory::default_confidence_for_source(&parsed_source);
@@ -1099,11 +1102,14 @@ pub async fn add_memory(
 
     // Step 1: Exact dedup by hash
     let hash = content_hash(&content);
+    // Across the whole namespace tree: the same text stored in another project
+    // or at the root is the same memory.
     if let Some(existing) = state.store.find_by_hash(&ns, &hash).await? {
         return Ok(Json(AddMemoryResponse {
             id: existing.id,
             action: "deduplicated".into(),
             merged_into: None,
+            namespace: existing.namespace,
         }));
     }
 
@@ -1112,15 +1118,19 @@ pub async fn add_memory(
     let mut novel_content_override: Option<String> = None;
     if consolidate {
         if let Some(consolidator) = &state.consolidator {
-            let similar = state
+            // Only memories of the target namespace itself: a project fact
+            // never replaces a general one, nor one of another project.
+            let mut similar = state
                 .store
                 .find_similar(
                     &embedding,
-                    &ns,
-                    5,
+                    &target,
+                    10,
                     consolidator.similarity_threshold(),
                 )
                 .await?;
+            similar.retain(|(m, _)| m.namespace == target.as_str());
+            similar.truncate(5);
 
             if !similar.is_empty() {
                 let decision = consolidator
@@ -1136,6 +1146,7 @@ pub async fn add_memory(
                             id,
                             action: "no_change".into(),
                             merged_into: None,
+                            namespace: target.as_str().to_string(),
                         }));
                     }
                     ConsolidationActionType::Update => {
@@ -1155,6 +1166,7 @@ pub async fn add_memory(
                                 id: target_id.clone(),
                                 action: "updated".into(),
                                 merged_into: Some(target_id.clone()),
+                                namespace: target.as_str().to_string(),
                             }));
                         }
                         // Fallthrough to create if target/content missing
@@ -1162,7 +1174,7 @@ pub async fn add_memory(
                     ConsolidationActionType::Supersede => {
                         // Create the new memory first so we have its ID
                         let mut memory = Memory::new(
-                            ns.as_str().to_string(),
+                            target.as_str().to_string(),
                             content,
                             metadata,
                             tags,
@@ -1194,6 +1206,7 @@ pub async fn add_memory(
                             id: new_id,
                             action: "created".into(),
                             merged_into: None,
+                            namespace: target.as_str().to_string(),
                         }));
                     }
                     ConsolidationActionType::Create => {
@@ -1233,7 +1246,7 @@ pub async fn add_memory(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     });
-    let mut memory = Memory::new(ns.as_str().to_string(), final_content, metadata, tags, None);
+    let mut memory = Memory::new(target.as_str().to_string(), final_content, metadata, tags, None);
     memory.episode_id = resolved_episode;
     memory.category = parsed_category;
     memory.confidence = source_confidence;
@@ -1244,14 +1257,29 @@ pub async fn add_memory(
     ingest_identity_hints(&state, &ns, &memory.content, 0.72, Some(&id)).await;
 
     // Enqueue background reflection (micro-batched).
-    enqueue_reflect_batched(&state, ns.as_str(), vec![id.clone()]);
+    enqueue_reflect_batched(&state, target.as_str(), vec![id.clone()]);
 
     Ok(Json(AddMemoryResponse {
         id,
         action: "created".into(),
         merged_into: None,
+        namespace: target.as_str().to_string(),
     }))
 }
+
+/// Where a new memory goes: `<ns>/<project>` for a project fact, `ns` itself
+/// for a global one or when no project is given.
+pub(crate) fn write_target(ns: &anima_core::namespace::Namespace, project: Option<&str>, scope: Option<&str>) -> Result<anima_core::namespace::Namespace, AppError> {
+    match scope.map(str::trim).filter(|s| !s.is_empty()) {
+        None | Some("project") => {}
+        Some("global") => return Ok(ns.clone()),
+        Some(other) => {
+            return Err(AppError::BadRequest(format!("scope must be 'project' or 'global', not '{other}'")))
+        }
+    }
+    Ok(project.and_then(|p| ns.child(p)).unwrap_or_else(|| ns.clone()))
+}
+
 
 pub async fn add_memories_batch(
     State(state): State<Arc<AppState>>,
@@ -3267,6 +3295,11 @@ pub async fn rename_namespace(
         .ok_or_else(|| AppError::BadRequest("missing 'name' field".into()))?;
     let new_ns = anima_core::namespace::Namespace::parse(new_name)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if old_ns.contains(&new_ns) {
+        return Err(AppError::BadRequest(format!(
+            "'{new_ns}' is inside '{old_ns}': a namespace cannot move into itself"
+        )));
+    }
     let count = state.store.rename_namespace(&old_ns, &new_ns).await?;
     Ok(Json(serde_json::json!({
         "old_namespace": old_ns.as_str(),
@@ -5602,6 +5635,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_project_memory_goes_below_the_namespace_and_a_global_one_stays() {
+        let ns = anima_core::namespace::Namespace::parse("default").unwrap();
+        let at = |p: Option<&str>, s: Option<&str>| write_target(&ns, p, s).unwrap().as_str().to_string();
+        assert_eq!(at(Some("Anima"), None), "default/anima");
+        assert_eq!(at(Some("Anima"), Some("project")), "default/anima");
+        assert_eq!(at(Some("Anima"), Some("global")), "default");
+        assert_eq!(at(None, None), "default", "without a project, where it always went");
+        assert_eq!(at(Some("  "), None), "default");
+        assert!(write_target(&ns, Some("x"), Some("everywhere")).is_err());
+    }
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());

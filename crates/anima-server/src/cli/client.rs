@@ -111,11 +111,21 @@ impl Api {
         &self.base
     }
 
+    /// The namespace requests are made in.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
     pub fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.request_in(method, path, &self.namespace)
+    }
+
+    /// A request in another namespace, such as a project's `<namespace>/<project>`.
+    pub fn request_in(&self, method: reqwest::Method, path: &str, namespace: &str) -> reqwest::RequestBuilder {
         let mut req = self
             .http
             .request(method, format!("{}{path}", self.base))
-            .header("X-Anima-Namespace", &self.namespace);
+            .header("X-Anima-Namespace", namespace);
         if let Some(key) = &self.key {
             req = req.bearer_auth(key);
         }

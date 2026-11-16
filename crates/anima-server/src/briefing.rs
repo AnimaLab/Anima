@@ -303,14 +303,38 @@ fn usable_project(project: Option<&str>) -> Option<String> {
     Some(p.chars().take(80).collect())
 }
 
-async fn standing_candidates(state: &AppState, ns: &Namespace) -> Result<Vec<Candidate>, AppError> {
+/// Who the user is: standing memories of the namespace itself and of the
+/// current project. Other projects' preferences stay in their projects.
+async fn standing_candidates(
+    state: &AppState,
+    ns: &Namespace,
+    project_ns: Option<&Namespace>,
+) -> Result<Vec<Candidate>, AppError> {
     let now = Utc::now();
     let mut out = Vec::new();
+    let in_scope = |m: &Memory| m.namespace == ns.as_str() || project_ns.is_some_and(|p| m.namespace == p.as_str());
     for (category, weight) in STANDING {
-        let (memories, _) = state.store.list(ns, Some("active"), None, Some(category), 0, 60).await?;
-        out.extend(memories.iter().map(|m| from_memory(m, "profile", standing_rank(m, *weight, now))));
+        let (memories, _) = state.store.list(ns, Some("active"), None, Some(category), 0, 300).await?;
+        out.extend(
+            memories
+                .iter()
+                .filter(|m| in_scope(m))
+                .take(60)
+                .map(|m| from_memory(m, "profile", standing_rank(m, *weight, now))),
+        );
     }
     Ok(out)
+}
+
+/// The memories stored in the current project's namespace, newest first.
+async fn project_candidates(state: &AppState, project_ns: &Namespace) -> Result<Vec<Candidate>, AppError> {
+    let now = Utc::now();
+    let (memories, _) = state.store.list(project_ns, Some("active"), None, None, 0, 40).await?;
+    Ok(memories
+        .iter()
+        .filter(|m| m.namespace == project_ns.as_str())
+        .map(|m| from_memory(m, "project", standing_rank(m, 0.9, now)))
+        .collect())
 }
 
 async fn search_candidates(
@@ -358,8 +382,13 @@ async fn embeddings_for(state: &AppState, candidates: &[Candidate]) -> HashMap<S
 
 /// The profile part of a session briefing. Prompt mode recomputes it to
 /// avoid repeating what the session already received.
-async fn profile_selection(state: &AppState, ns: &Namespace, budget: usize) -> Result<(Vec<Candidate>, usize), AppError> {
-    let candidates = standing_candidates(state, ns).await?;
+async fn profile_selection(
+    state: &AppState,
+    ns: &Namespace,
+    project_ns: Option<&Namespace>,
+    budget: usize,
+) -> Result<(Vec<Candidate>, usize), AppError> {
+    let candidates = standing_candidates(state, ns, project_ns).await?;
     let embeddings = embeddings_for(state, &candidates).await;
     Ok(fit(collapse_same_topic(candidates, &embeddings), budget, usize::MAX))
 }
@@ -390,7 +419,8 @@ pub async fn briefing(
         if query.is_empty() {
             return Err(AppError::BadRequest("prompt mode needs a query".into()));
         }
-        let (in_session, _) = profile_selection(&state, &ns, SESSION_MEMORY_BUDGET).await?;
+        let project_ns = usable_project(req.project.as_deref()).and_then(|p| ns.child(&p));
+        let (in_session, _) = profile_selection(&state, &ns, project_ns.as_ref(), SESSION_MEMORY_BUDGET).await?;
         let seen: HashSet<&str> = in_session.iter().map(|c| c.id.as_str()).collect();
         let candidates: Vec<Candidate> = search_candidates(&state, &ns, query, "prompt")
             .await?
@@ -414,14 +444,22 @@ pub async fn briefing(
 
     let budget = req.budget_chars.unwrap_or(SESSION_MEMORY_BUDGET);
     let project = usable_project(req.project.as_deref());
+    let project_ns = project.as_deref().and_then(|p| ns.child(p));
 
     // The profile gets first call on the budget; the project gets at least a third.
-    let mut candidates = standing_candidates(&state, &ns).await?;
+    let mut candidates = standing_candidates(&state, &ns, project_ns.as_ref()).await?;
     let profile_ids: HashSet<String> = candidates.iter().map(|c| c.id.clone()).collect();
-    if let Some(p) = &project {
-        // A search that fails must not cost the user their profile.
-        if let Ok(found) = search_candidates(&state, &ns, p, "project").await {
+    if let Some(pns) = &project_ns {
+        if let Ok(found) = project_candidates(&state, pns).await {
             candidates.extend(found.into_iter().filter(|c| !profile_ids.contains(&c.id)));
+        }
+    }
+    if let Some(p) = &project {
+        // Older memories that name the project but sit outside its namespace.
+        // A search that fails must not cost the user their profile.
+        let seen: HashSet<String> = candidates.iter().map(|c| c.id.clone()).collect();
+        if let Ok(found) = search_candidates(&state, &ns, p, "project").await {
+            candidates.extend(found.into_iter().filter(|c| !seen.contains(&c.id)));
         }
     }
     let embeddings = embeddings_for(&state, &candidates).await;
