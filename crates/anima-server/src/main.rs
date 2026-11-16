@@ -324,6 +324,7 @@ async fn start_server(
         max_tier: config.search.max_tier,
         date_start: None,
         date_end: None,
+        category: None,
         category_lambdas,
     };
 

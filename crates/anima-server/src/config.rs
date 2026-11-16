@@ -21,6 +21,10 @@ fn default_vector_weight() -> f64 {
 #[derive(Debug, Clone, Deserialize)]
 pub struct VectorConfig {
     pub name: String,
+    /// Which text the vector embeds, as written in config.toml. The text
+    /// follows `populate`: an ingestion vector embeds the content, an async
+    /// one the processor's summary.
+    #[allow(dead_code)]
     pub source: String,
     #[serde(default = "default_vector_weight")]
     pub weight: f64,
@@ -698,13 +702,9 @@ impl AppConfig {
         ResolvedProfiles { profiles, routing }
     }
 
-    /// Load config from file, falling back to defaults.
-    pub fn load(path: Option<&str>) -> Self {
-        Self::load_with_source(path).0
-    }
-
-    /// Load config like [`AppConfig::load`], and also say which file it came
-    /// from (`None` when the built-in defaults are used).
+    /// Load config from a file, falling back to `config.toml`, then
+    /// `config.default.toml`, then the built-in defaults; also say which file
+    /// it came from (`None` for the defaults).
     pub fn load_with_source(path: Option<&str>) -> (Self, Option<std::path::PathBuf>) {
         if let Some(p) = path {
             if let Ok(content) = std::fs::read_to_string(p) {

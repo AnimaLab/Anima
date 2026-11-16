@@ -14,6 +14,10 @@ Each pull request updates the documentation it affects, in the same PR. The docs
 - **Retrieval, namespaces, memory types, briefing or skills behaviour**: update the matching page under `docs/concepts/`.
 - **Security-relevant change** (authentication, CORS, ACL, Host check): update `docs/security.mdx`.
 
+Enable the pre-commit hook in a fresh clone (`git config core.hooksPath .githooks`): it
+refuses a commit with Rust compiler warnings or failing tests, and checks `web/` and
+`mcp/` when they change. Fix what it reports rather than skipping it.
+
 Before opening the PR:
 - Run `npx mint broken-links` in `docs/`.
 - Preview the touched pages with `npx mint dev` in `docs/`.

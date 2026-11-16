@@ -2499,6 +2499,29 @@ fn search_sync(
         }
     }
 
+    // Filter by category if specified
+    if let Some(category) = scorer_config.category.as_deref() {
+        let candidates: HashSet<String> = vector_scored
+            .iter()
+            .chain(sparse_scored.iter())
+            .chain(keyword_scored.iter())
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut stmt = conn.prepare_cached("SELECT category FROM memories WHERE id = ?1")?;
+        let excluded: HashSet<String> = candidates
+            .into_iter()
+            .filter(|id| {
+                stmt.query_row(params![id], |row| row.get::<_, String>(0))
+                    .map_or(true, |c| c != category)
+            })
+            .collect();
+        if !excluded.is_empty() {
+            vector_scored.retain(|(id, _)| !excluded.contains(id));
+            sparse_scored.retain(|(id, _)| !excluded.contains(id));
+            keyword_scored.retain(|(id, _)| !excluded.contains(id));
+        }
+    }
+
     // Fuse with RRF + temporal decay
     let scorer = HybridScorer::new(scorer_config.clone());
     let mut results = scorer.fuse(&vector_scored, &sparse_scored, &keyword_scored, &timestamps, now);
@@ -2758,7 +2781,7 @@ fn list_sync(
 
     // Build dynamic WHERE clause
     let mut conditions = vec!["(namespace = ?1 OR namespace GLOB ?1 || '/*')".to_string()];
-    let mut count_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope.clone())];
+    let mut count_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope)];
 
     if let Some(st) = status {
         conditions.push(format!("status = ?{}", count_params.len() + 1));
@@ -2826,7 +2849,7 @@ fn list_with_cursor_sync(
 
     // Build WHERE clause for filters (used in both count and data queries)
     let mut conditions = vec!["(namespace = ?1 OR namespace GLOB ?1 || '/*')".to_string()];
-    let mut filter_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope.clone())];
+    let mut filter_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(ns_scope)];
 
     if let Some(st) = status {
         conditions.push(format!("status = ?{}", filter_params.len() + 1));
@@ -3535,7 +3558,7 @@ fn calibration_metrics_sync(
         )
         .map_err(DbError::Sqlite)?;
     let model_rows = models_stmt
-        .query_map(params![ns_scope.clone()], |row| {
+        .query_map(params![ns_scope], |row| {
             Ok(CalibrationModel {
                 namespace: row.get(0)?,
                 prediction_kind: row.get(1)?,
@@ -3560,7 +3583,7 @@ fn calibration_metrics_sync(
         )
         .map_err(DbError::Sqlite)?;
     let bins_rows = bins_stmt
-        .query_map(params![ns_scope.clone()], |row| {
+        .query_map(params![ns_scope], |row| {
             Ok(CalibrationBin {
                 namespace: row.get(0)?,
                 prediction_kind: row.get(1)?,
@@ -6553,6 +6576,29 @@ mod tests {
             assert_eq!(found("work/alpha"), ["work/alpha", "work/alpha/q3"]);
             assert_eq!(found("work/a_pha"), ["work/a_pha"]);
             assert_eq!(found("work/alphabet"), ["work/alphabet"]);
+        });
+    }
+
+    #[test]
+    fn search_keeps_only_the_requested_category() {
+        // Regression, 2026-11-16: the search API and memory_search accepted a
+        // `category` filter that the store never applied.
+        let pool = DbPool::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let conn = pool.writer().await;
+            let dim = DbPool::DEFAULT_DIMENSION;
+            let pref = insert_test_memory(&conn, "default", "Coffee preference memory", &make_embedding(dim, 1));
+            let task = insert_test_memory(&conn, "default", "Coffee task memory", &make_embedding(dim, 1));
+            conn.execute("UPDATE memories SET category = 'preference' WHERE id = ?1", params![pref]).unwrap();
+            conn.execute("UPDATE memories SET category = 'task' WHERE id = ?1", params![task]).unwrap();
+            let config = ScorerConfig { min_score_spread: 0.0, category: Some("preference".into()), ..Default::default() };
+            let results = search_sync(
+                &conn, &make_embedding(dim, 1), &anima_embed::SparseVector::default(), "coffee", &Namespace::parse("default").unwrap(),
+                &SearchMode::Hybrid, 10, &config, &[("content".to_string(), 1.0)],
+            ).unwrap();
+            let ids: Vec<&str> = results.iter().map(|r| r.memory_id.as_str()).collect();
+            assert_eq!(ids, vec![pref.as_str()]);
         });
     }
 
