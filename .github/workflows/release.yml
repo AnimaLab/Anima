@@ -58,9 +58,11 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
-          # On Windows, ort-sys copies DirectML.dll into this folder from its
-          # build script and fails when the folder does not exist yet.
-          mkdir -p "target/${{ matrix.target }}/release/build"
+          # On Windows, ort-sys copies DirectML.dll from its build script. With
+          # Cargo's newer build layout (build/<crate>/<hash>/out) it lands on
+          # release/build instead of release, then fails on the examples and
+          # deps folders below it, which do not exist there.
+          mkdir -p "target/${{ matrix.target }}/release/build/examples" "target/${{ matrix.target }}/release/build/deps"
           cargo build --release --target ${{ matrix.target }} --bin anima-server
 
       - name: Set up Node
@@ -101,7 +103,7 @@ jobs:
           cp models/bge-m3/sparse_linear.bin "${ARCHIVE_NAME}/models/bge-m3/"
           # Runtime libraries the binary links dynamically (DirectML.dll on
           # Windows) sit next to it.
-          find "target/${{ matrix.target }}/release" -maxdepth 2 -name '*.dll' -exec cp {} "${ARCHIVE_NAME}/" \;
+          find "target/${{ matrix.target }}/release" -maxdepth 2 -name '*.dll' -exec cp -L {} "${ARCHIVE_NAME}/" \;
           mkdir -p "${ARCHIVE_NAME}/web"
           cp -r web/dist "${ARCHIVE_NAME}/web/dist"
 
