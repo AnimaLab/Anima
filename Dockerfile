@@ -6,6 +6,9 @@ FROM rust:latest AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+# The server embeds the shipped config as the base of a config.toml written
+# from the web UI's model setup.
+COPY config.default.toml ./
 
 RUN cargo build --release --bin anima-server
 
