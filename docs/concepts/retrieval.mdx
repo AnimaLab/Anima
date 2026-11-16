@@ -3,7 +3,7 @@ title: 'Retrieval'
 description: 'Hybrid search combining vector, keyword, and temporal signals'
 ---
 
-Anima uses a hybrid retrieval pipeline that combines three search strategies to surface the most relevant memories.
+Anima uses a hybrid retrieval pipeline that combines dense vector, sparse, and keyword search with temporal ranking to surface the most relevant memories.
 
 ## Vector Search
 
@@ -36,23 +36,57 @@ populate = "async"
 
 When multiple vectors are configured, search queries all vec tables and blends per-memory results using a weighted average. Query routing heuristics automatically adjust weights: short factual queries boost summary vectors, long narrative queries boost content vectors. All vectors always participate — routing shifts emphasis, never excludes.
 
-If no `[[vectors]]` section is present, a single implicit `content` vector is used and search behaves identically to before.
+If no `[[vectors]]` section is present, a single implicit `content` vector is used.
 
 Vector status is available at `GET /api/v1/vectors/status`.
 
+## Sparse Search
+
+With the local BGE-M3 backend, Anima also computes a sparse vector per memory and per query from BGE-M3's sparse head: a learned weight for each token of the text, which matches exact terms the way keyword search does while weighing them by meaning. It is set in `[sparse]`:
+
+```toml
+[sparse]
+enabled = true
+weights_path = "./models/bge-m3/sparse_linear.bin"   # shipped in the release archive and Docker image
+```
+
+Sparse scores enter the ranking with `weight_sparse` in `[search]`, which defaults to `0.0`. Raise it (for example `weight_sparse = 0.2`) to blend sparse matches into hybrid results.
+
 ## Keyword Search
 
-Full-text search provides exact-match recall. This ensures that specific names, identifiers, or technical terms are not missed by the vector search.
+Full-text search (BM25) provides exact-match recall. This ensures that specific names, identifiers, or technical terms are not missed by the vector search.
 
 ## Temporal Ranking
 
-Recency matters. Temporal weighting lets you bias results toward more recent memories or toward older ones, depending on your use case. The `temporal_weight` parameter in search requests controls this signal.
+Recency matters. Each memory's score is multiplied by `1 - temporal_weight + temporal_weight × decay`, where `decay` falls exponentially with the memory's age, counted from its `event_date` when it has one and from its last update otherwise. `temporal_weight` (default `0.2`, also accepted per search request) sets how much recency counts; `0` turns it off.
+
+The decay rate depends on the memory's category: identity facts are close to permanent, preferences last about 289 days, tasks about 6 days, and `general` memories about 29 days. Override a category, or add one, with `half_life_days` under `[categories.<name>]`; `temporal_lambda` in `[search]` applies to categories without their own rate.
+
+## Score Fusion
+
+Hybrid search combines the raw scores of each signal in a weighted sum:
+
+```
+score = weight_vector × cosine + weight_sparse × sparse / max_sparse + weight_keyword × bm25 / max_bm25
+```
+
+Cosine similarity is used as is; BM25 and sparse scores are divided by the highest score of the same signal in the batch. When `weight_sparse` is `0` or the sparse search returned nothing, `weight_vector` and `weight_keyword` are rescaled to sum to 1 (`0.6` and `0.4` by default). When only one signal returns results, its scores are used directly. Temporal decay is then applied to the fused score.
+
+Vector results below `min_vector_similarity` (default `0.50`) are dropped before fusion. When `min_score_spread` is above `0` and the best and worst of at least three vector results are closer than it, the vector results are treated as noise and dropped.
+
+After fusion, small additive boosts adjust the ranking, and the final score is clamped to `[0, 1]`:
+
+| Setting | Default | Boost |
+|---------|---------|-------|
+| `access_weight` | `0.02` | `access_weight × ln(1 + access_count)`: memories retrieved often rise slightly |
+| `importance_weight` | `0.03` | `importance_weight × (importance − 5) / 5`, from importance 1 to 10 |
+| `tier_boost` | `0.05` | `tier_boost × (tier − 1) / 2`: reflected and deduced memories rank slightly above raw ones |
 
 ## Search Modes
 
 The `search_mode` parameter on the search endpoint controls which strategies are combined:
 
-- **hybrid** (default) — combines vector, keyword, and temporal signals
+- **hybrid** (default) — combines vector, sparse, keyword, and temporal signals
 - **vector** — vector similarity only
 - **keyword** — keyword matching only
 - **ask_retrieval** — runs the full `/ask` multi-stage pipeline (keyword expansion, entity resolution, temporal supplement, episode expansion, entity-linked retrieval) but returns ranked search results instead of an LLM-generated answer
@@ -88,7 +122,7 @@ You can access this pipeline directly via `search_mode: "ask_retrieval"` on the 
 
 ## Cross-Encoder Re-Ranking
 
-After initial retrieval, the top-10 candidates are re-scored by a cross-encoder model (bge-reranker-v2-m3 INT8) to improve precision. The re-ranker is enabled by default and can be configured via the `[reranker]` section in `config.toml`. When the initial retrieval already produces high-confidence results, re-ranking is skipped to avoid unnecessary latency.
+After initial retrieval, the top `top_n` candidates (default 10) are re-scored by a cross-encoder model (bge-reranker-v2-m3 INT8) to improve precision. The re-ranker is enabled by default and can be configured via the `[reranker]` section in `config.toml`. When the top result of the initial retrieval already scores above `0.50`, re-ranking is skipped to avoid unnecessary latency.
 
 The re-ranker can also run elsewhere: with `backend = "openai_compat"`, `api_base_url` and `api_model`, Anima sends the candidates to an OpenAI-style `/rerank` endpoint (vLLM, TEI, Cohere, Jina, Voyage) and downloads no model. The key comes from `api_key`, then `RERANKER_API_KEY`, then `OPENAI_API_KEY`.
 

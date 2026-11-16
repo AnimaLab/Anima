@@ -16,7 +16,7 @@ Returns the current hybrid search weights (`weight_vector` and `weight_keyword`)
 }
 ```
 
-The auto-tuner runs every 5 minutes and adjusts weights based on which source (vector vs keyword) correlates more with positive retrieval outcomes. Changes are only applied if the shift exceeds 5%. Both weights have a floor of 0.1.
+The weights are server-wide, shared by all namespaces. The auto-tuner runs every 300 seconds (`ANIMA_CALIBRATION_RECOMPUTE_SECS`) over the latest 5,000 retrieval observations, once at least 50 are available, and weights each source (vector vs keyword) by how much of its score went to positive retrieval outcomes. Each weight is floored at 0.1 before the pair is normalised to sum to 1. New weights are applied when either one moves by more than 0.05.
 
 ## Example
 

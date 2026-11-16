@@ -16,7 +16,7 @@ description: 'Ask a question with enriched memory retrieval'
 </ParamField>
 
 <ParamField body="llm" type="object">
-  Optional LLM override (`base_url`, `model`, `api_key`, `temperature`, `max_tokens`). Overrides the server profile for this request.
+  Optional LLM override, with the same fields as the [chat endpoint](/api-reference/chat/chat#body-llm) (`base_url`, `model`, `api_key`, `temperature`, `max_tokens`, `system_prompt`, `vision`, `tool_use`). When omitted, the server's `ask` profile is used.
 </ParamField>
 
 <ParamField body="max_results" type="integer" default="30">
@@ -28,11 +28,11 @@ description: 'Ask a question with enriched memory retrieval'
 </ParamField>
 
 <ParamField body="memory_types" type="string[]">
-  Filter by memory types (e.g. `["fact", "event", "preference"]`)
+  Keep only memories whose `memory_type` is in the list (exact match), e.g. `["raw", "reflected", "deduced"]`. Types include `raw`, `reflected`, `deduced`, `induced` and `merged`.
 </ParamField>
 
 <ParamField body="max_tier" type="integer">
-  Maximum memory tier to include (1=raw, 2=+reflected, 3=+deduced, 4=all)
+  Maximum memory tier to include (1=raw, 2=+reflected, 3=+deduced, 4=all), clamped to 1-4
 </ParamField>
 
 <ParamField body="date_start" type="string">
@@ -49,20 +49,24 @@ description: 'Ask a question with enriched memory retrieval'
   The synthesized answer from retrieved memories. When the LLM is unavailable, contains a numbered list of top retrieval results.
 </ResponseField>
 
+<ResponseField name="queries_used" type="string[]">
+  The search queries the retrieval pipeline ran.
+</ResponseField>
+
 <ResponseField name="memories_referenced" type="array">
   Memories used to generate the answer, with `id`, `content`, `memory_type`, `score`, and `created_at`.
 </ResponseField>
 
 <ResponseField name="conflicts" type="array">
-  Detected conflicts among retrieved memories. Each entry shows old vs new content when a memory was superseded. Includes `memory_id`, `conflicting_memory_id`, `old_content`, `new_content`, `resolution`, and `resolved_at`.
+  Detected conflicts among retrieved memories. Each entry shows old vs new content when a memory was superseded. Includes `memory_id`, `conflicting_memory_id`, `old_content`, `new_content`, `resolution`, and `resolved_at`. Omitted when empty.
 </ResponseField>
 
 <ResponseField name="needs_confirmation" type="array">
-  Deduced facts or ambiguous identities that need user confirmation.
+  Deduced facts or ambiguous identities that need user confirmation, each with `question`, `source_memory_id` and `confidence`. Omitted when empty.
 </ResponseField>
 
 <ResponseField name="degraded" type="boolean">
-  `true` when the LLM backend was unavailable and the response was built from retrieval results only.
+  Present and `true` when the LLM backend was unavailable and the response was built from retrieval results only.
 </ResponseField>
 
 <ResponseField name="total_search_results" type="integer">
@@ -71,6 +75,10 @@ description: 'Ask a question with enriched memory retrieval'
 
 <ResponseField name="elapsed_ms" type="number">
   Time taken in milliseconds.
+</ResponseField>
+
+<ResponseField name="provenance" type="object">
+  `namespace`, `generated_at`, `source_ids`, `redaction_applied`, and `sources` (each with `memory_id`, `score`, `source`, `memory_type`, `created_at`; omitted when empty).
 </ResponseField>
 
 ## Example
@@ -84,4 +92,4 @@ curl -X POST http://localhost:3000/api/v1/ask \
 
 ## Graceful Degradation
 
-When the LLM backend is unavailable, `/ask` does not fail — it returns the retrieval results directly as a numbered list in the `answer` field, with `"degraded": true`. The `memories_referenced` and `conflicts` arrays are still populated normally.
+When the LLM backend is unavailable, `/ask` still answers `200`: it returns the retrieval results directly as a numbered list in the `answer` field, with `"degraded": true`. The `memories_referenced` and `conflicts` arrays are still populated normally.

@@ -6,7 +6,7 @@ description: 'Retrieve a single memory by ID'
 ## GET /api/v1/memories/\{id\}
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace. A memory outside it (or its children) gives `403`.
 </ParamField>
 
 <ParamField path="id" type="string" required>
@@ -15,4 +15,23 @@ description: 'Retrieve a single memory by ID'
 
 ## Response
 
-Returns the full memory object including `id`, `content`, `tags`, `memory_type`, `importance`, `category`, `confidence`, `source`, `created_at`, `updated_at`, and `metadata`.
+Returns the memory object:
+
+```json
+{
+  "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "namespace": "default",
+  "content": "I love hiking on weekends.",
+  "metadata": null,
+  "tags": ["preference", "outdoors"],
+  "memory_type": "raw",
+  "category": "general",
+  "confidence": 1.0,
+  "source": "user_stated",
+  "status": "active",
+  "created_at": "2026-11-16T09:12:04.512+00:00",
+  "updated_at": "2026-11-16T09:12:04.512+00:00",
+  "access_count": 3,
+  "importance": 5
+}
+```

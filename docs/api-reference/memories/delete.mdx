@@ -6,7 +6,7 @@ description: 'Delete a memory by ID'
 ## DELETE /api/v1/memories/\{id\}
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace. A memory outside it (or its children) gives `403`.
 </ParamField>
 
 <ParamField path="id" type="string" required>
@@ -15,4 +15,11 @@ description: 'Delete a memory by ID'
 
 ## Response
 
-Returns a confirmation that the memory was deleted. An audit event is recorded.
+The delete is permanent: a final `hard_delete` revision snapshots the memory and records an audit event, then the memory is removed from the store and its vector, keyword and sparse indexes.
+
+```json
+{
+  "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "deleted": true
+}
+```

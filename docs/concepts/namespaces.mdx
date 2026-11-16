@@ -3,7 +3,7 @@ title: 'Namespaces'
 description: 'Isolate memories by namespace for multi-tenant or multi-context use'
 ---
 
-Namespaces provide logical isolation between sets of memories. Each API request targets a specific namespace, and memories in one namespace are invisible to queries in another.
+Namespaces provide logical isolation between sets of memories. Each API request targets a specific namespace, and memories in one namespace are invisible to queries on unrelated namespaces.
 
 ## Setting the Namespace
 
@@ -18,11 +18,30 @@ curl -X POST http://localhost:3000/api/v1/memories \
 
 If the namespace does not exist, it is created automatically on the first write.
 
+## Namespace Tree
+
+Namespaces are hierarchical paths such as `acme/project-alpha/alice`. Each segment, separated by `/`, holds letters, digits, `-`, `_` and `.`; segments are non-empty, and leading or trailing `/` are trimmed.
+
+A namespace covers its whole subtree. A new memory is written to the exact namespace of the request, while searches, listings, `/ask` and `/chat` on `acme` read `acme` and every `acme/*` below it. A request on `acme/project-alpha` sees only that branch.
+
+Skills are the exception: they belong to one exact namespace, and a skill saved in `acme/project-alpha` is listed only from `acme/project-alpha`.
+
 ## Use Cases
 
 - **Multi-user** — give each user their own namespace so memories do not leak across accounts.
 - **Multi-project** — separate work context from personal context, or isolate memories per client engagement.
+- **Shared parents** — put team knowledge in `team` and personal notes in `team/alice`: a request on `team` reads both.
 - **Testing** — use a throwaway namespace for integration tests without polluting production data.
+
+## Access Control
+
+`ANIMA_NAMESPACE_ACL` restricts which principal may read or write each namespace. The principal comes from the `X-Anima-Principal` header (default `anonymous`); `GET`, `HEAD` and `OPTIONS` requests count as reads, every other method as a write.
+
+```bash
+ANIMA_NAMESPACE_ACL="alice=team/alice/*:rw,team:r;*=public/*:r"
+```
+
+Rules are separated by `;`, each `principal=pattern:mode,...` with mode `r`, `w` or `rw` (default `rw`). A pattern is an exact namespace, `prefix/*` for a namespace and its subtree, or `*` for all; principal `*` matches everyone. With the variable unset, every principal reaches every namespace. The caller sets `X-Anima-Principal` itself, so rely on the ACL when every holder of the API key is trusted or when a gateway sets the header.
 
 ## Listing Namespaces
 
@@ -32,4 +51,8 @@ Retrieve all known namespaces via:
 GET /api/v1/namespaces
 ```
 
-This returns a list of namespace identifiers that have been used in the current database.
+This returns one object per namespace used in the current database, with its memory counts:
+
+```json
+[{"namespace": "project-alpha", "total_count": 12, "active_count": 10}]
+```

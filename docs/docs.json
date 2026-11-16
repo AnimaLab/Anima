@@ -101,7 +101,8 @@
               "api-reference/system/stats",
               "api-reference/system/namespaces",
               "api-reference/system/profiles",
-              "api-reference/system/weights"
+              "api-reference/system/weights",
+              "api-reference/system/vectors"
             ]
           }
         ]

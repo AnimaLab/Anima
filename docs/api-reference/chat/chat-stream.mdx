@@ -14,25 +14,81 @@ Same parameters as the [chat endpoint](/api-reference/chat/chat), but returns th
 ## Request Body
 
 <ParamField body="message" type="string" required>
-  The user message
+  The user message. An empty message returns `400`.
 </ParamField>
 
 <ParamField body="history" type="object[]">
-  Previous messages in the conversation
+  Previous messages in the conversation. Each object has `role` and `content` fields.
 </ParamField>
 
-<ParamField body="mode" type="string">
+<ParamField body="mode" type="string" default="rag">
   Chat mode: `rag` or `tool`
 </ParamField>
 
-<ParamField body="llm" type="string">
-  Optional LLM override
+<ParamField body="llm" type="object">
+  Optional LLM override, with the same fields as the [chat endpoint](/api-reference/chat/chat#body-llm) (`base_url`, `model`, `api_key`, `temperature`, `max_tokens`, `system_prompt`, `vision`, `tool_use`).
 </ParamField>
 
 <ParamField body="attachments" type="object[]">
-  Optional file attachments
+  Optional file attachments (`type`, `data`, `media_type`, `name`), as on the [chat endpoint](/api-reference/chat/chat).
 </ParamField>
+
+## Modes
+
+Before calling the LLM, the endpoint runs a hybrid search (top 5, score at least 0.15) and expands the hits with graph neighbours, up to 12 memories.
+
+- **`rag`**: the memories go into the system prompt and the LLM answers in one streamed call.
+- **`tool`**: the LLM gets `memory_search`, `memory_recent` (`limit` 1-30, default 10), `memory_add`, `memory_update` and `send_message` (shows a message to the user mid-work), for up to 8 rounds. After the answer, a follow-up pass may stream one more message with a related memory, contradiction or connection.
+
+In both modes, memorable facts are extracted from the exchange and stored once the reply is complete.
 
 ## Response
 
-Returns an SSE stream. Each event contains a chunk of the assistant's response. The final event includes retrieved memory references.
+Returns an SSE stream. Each event's `data` is a JSON object with a `type` field. Events arrive in this order:
+
+<ResponseField name="memories" type="event">
+  First event, always. `memories_used` holds the retrieved memories (`id`, `content`, `score`, `source` as `search` or `graph`, `memory_type`, `importance`).
+</ResponseField>
+
+<ResponseField name="token" type="event">
+  A chunk of the reply in `content`. Repeated.
+</ResponseField>
+
+<ResponseField name="action" type="event">
+  Tool mode only, when the LLM calls a tool: `tool`, `query` (for `memory_search`), and a human-readable `summary` such as `Searching for "diet"`. A second `action` reports the result, e.g. `Searched "diet" — found 3 results`. `send_message` emits `token` events instead.
+</ResponseField>
+
+<ResponseField name="message_end" type="event">
+  Tool mode only: closes the current message bubble, before tool calls, after each `send_message`, and before the follow-up message.
+</ResponseField>
+
+<ResponseField name="done" type="event">
+  Last event, always. `full_reply` holds the complete reply text.
+</ResponseField>
+
+When the LLM backend is unreachable, the stream sends `memories`, one `token` with a reply built from the retrieved memories, and `done`.
+
+<RequestExample>
+```bash
+curl -N -X POST http://localhost:3000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "X-Anima-Namespace: default" \
+  -d '{"message": "What should I cook tonight?", "mode": "tool", "llm": {"base_url": "http://localhost:11434/v1", "model": "qwen3:32b"}}'
+```
+</RequestExample>
+
+<ResponseExample>
+```text
+data: {"type":"memories","memories_used":[{"id":"01JXYZ8K3M2N4P5Q6R7S8T9V0W","content":"User is vegetarian","score":0.71,"source":"search","memory_type":"raw","importance":6}]}
+
+data: {"type":"action","tool":"memory_search","query":"diet","summary":"Searching for \"diet\""}
+
+data: {"type":"action","tool":"memory_search","query":"diet","summary":"Searched \"diet\" — found 1 result"}
+
+data: {"type":"token","content":"Since you're vegetarian, "}
+
+data: {"type":"token","content":"how about a mushroom risotto?"}
+
+data: {"type":"done","full_reply":"Since you're vegetarian, how about a mushroom risotto?"}
+```
+</ResponseExample>

@@ -6,7 +6,11 @@ description: 'Rollback a memory to a previous revision'
 ## POST /api/v1/memories/\{id\}/rollback
 
 <ParamField header="X-Anima-Namespace" type="string" required>
-  Target namespace
+  Target namespace. A memory outside it (or its children) gives `403`.
+</ParamField>
+
+<ParamField header="X-Anima-Principal" type="string">
+  Actor recorded on the new revision. Default: `api`
 </ParamField>
 
 <ParamField path="id" type="string" required>
@@ -16,13 +20,33 @@ description: 'Rollback a memory to a previous revision'
 ## Request Body
 
 <ParamField body="revision_number" type="integer" required>
-  The revision number to rollback to
+  The revision number to rollback to (a positive integer; an unknown revision gives `404`)
 </ParamField>
 
 <ParamField body="reason" type="string">
-  Reason for the rollback (recorded in audit trail)
+  Reason for the rollback (recorded in the revision and audit trail)
 </ParamField>
 
 ## Response
 
-Returns the memory object restored to the specified revision state. A new revision is created to record the rollback.
+The memory's content, metadata, tags, type, importance and embedding are restored from that revision, its status is set back to `active`, and a new `rollback` revision records the change.
+
+<ResponseField name="id" type="string">
+  Memory ID
+</ResponseField>
+
+<ResponseField name="rolled_back_to_revision" type="integer">
+  The revision restored
+</ResponseField>
+
+<ResponseField name="revision_number" type="integer">
+  Number of the new `rollback` revision
+</ResponseField>
+
+```json
+{
+  "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+  "rolled_back_to_revision": 1,
+  "revision_number": 4
+}
+```

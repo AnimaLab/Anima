@@ -3,7 +3,7 @@ title: 'Web UI'
 description: 'Visual interface for browsing, searching, and inspecting memories'
 ---
 
-The web app provides a visual surface for memories, search results, graph relationships, embedding space, chat, and namespace-aware inspection.
+The web app provides a visual surface for memories, search results, graph relationships, embedding space, chat, skills, background processing and settings, scoped to the selected namespace.
 
 ## Setup
 
@@ -13,16 +13,20 @@ npm install
 npm run dev
 ```
 
-By default, the UI expects the Anima API at `http://localhost:3000`.
+The dev server listens on `http://localhost:5173` and proxies `/api` and `/health` to the Anima server at `http://localhost:3000`, which must be running.
 
-## Features
+## Pages
 
-- **Memory browser** — list, filter, and inspect stored memories with full metadata
-- **Search** — run hybrid, vector, or keyword searches from the UI
-- **Chat** — conversational interface backed by memory-augmented retrieval
-- **Graph view** — visualize relationships between memories
-- **Embedding view** — explore the embedding space of your memory store
-- **Namespace selector** — switch between namespaces without changing code
+- **Dashboard** (`/`) — what Anima remembers in the current namespace, at a glance
+- **Memories** (`/memories`) — list, filter, and inspect stored memories with full metadata
+- **Search** (`/search`) — run hybrid, vector, or keyword searches, or ask a question, with per-signal scores for each result
+- **Skills** (`/skills`) — browse and edit the stored skills
+- **Graph** (`/graph`) — memories linked by similarity
+- **Embeddings** (`/graph3d`) — memories placed by meaning in a 3D view of the vector space
+- **Conflicts** (`/conflicts`) — the ledger of memories that replaced or contradicted an earlier one, with what changed and why
+- **Chat** (`/chat`) — conversational interface backed by memory-augmented retrieval, with saved conversations
+- **Processor** (`/processor`) — log of the background jobs: reflection, deduction, reconsolidation and retention
+- **Settings** (`/settings`) — namespaces (switch, rename, delete), chat model, server profiles, search tiers, background processing, the telemetry switch, and backup and restore
 
 ## Production Build
 

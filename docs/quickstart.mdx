@@ -9,26 +9,30 @@ Pick whichever method gets you running fastest.
 
 <Tabs>
   <Tab title="Download binary">
-    Download the latest binary for your platform from [GitHub Releases](https://github.com/AnimaLab/Anima/releases). No Rust toolchain needed.
+    Download the archive for your platform from [GitHub Releases](https://github.com/AnimaLab/Anima/releases). No Rust toolchain needed. Archives are named `anima-server-<version>-<target>`:
+
+    | Platform | Archive |
+    |----------|---------|
+    | macOS (Apple Silicon) | `anima-server-<version>-aarch64-apple-darwin.tar.gz` |
+    | Linux (x86_64) | `anima-server-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+    | Linux (aarch64) | `anima-server-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+    | Windows (x86_64) | `anima-server-<version>-x86_64-pc-windows-msvc.zip` |
 
     ```bash
-    # macOS (Apple Silicon)
-    curl -L https://github.com/AnimaLab/Anima/releases/latest/download/anima-server-latest-aarch64-apple-darwin.tar.gz | tar xz
-    cd anima-server-* && ./anima-server
+    # macOS (Apple Silicon), with <version> taken from the Releases page, e.g. v0.3.0
+    VERSION=v0.3.0
+    curl -L https://github.com/AnimaLab/Anima/releases/download/$VERSION/anima-server-$VERSION-aarch64-apple-darwin.tar.gz | tar xz
+    cd anima-server-$VERSION-aarch64-apple-darwin && ./anima-server
     ```
 
-    ```bash
-    # Linux (x86_64)
-    curl -L https://github.com/AnimaLab/Anima/releases/latest/download/anima-server-latest-x86_64-unknown-linux-gnu.tar.gz | tar xz
-    cd anima-server-* && ./anima-server
-    ```
-
-    The archive includes the binary, `config.default.toml`, and service templates.
+    The archive holds the binary, `config.default.toml`, the built web UI (`web/dist`), the BGE-M3 sparse weights (`models/bge-m3/sparse_linear.bin`), service templates, `README.md` and `LICENSE`. Run `anima-server` from the extracted folder.
   </Tab>
   <Tab title="Docker">
     ```bash
     docker run -p 3000:3000 -e ANIMA_API_KEY=your-secret-key -v ./anima.db:/app/anima.db ghcr.io/animalab/anima:latest
     ```
+
+    The container listens on all interfaces, so it requires an API key. Add `-H "Authorization: Bearer your-secret-key"` to every `curl` call below (or `X-Anima-Api-Key: your-secret-key` for clients that cannot set `Authorization`).
   </Tab>
   <Tab title="Build from source">
     ```bash
@@ -38,7 +42,7 @@ Pick whichever method gets you running fastest.
   </Tab>
 </Tabs>
 
-Anima starts on `http://localhost:3000`. On first run it downloads the local embedding model (~200 MB) automatically. The web UI is served at the same address.
+Anima starts on `http://localhost:3000`. On first run it downloads the local models: the BGE-M3 embedder (several GB with its weights) and the bge-reranker-v2-m3 re-ranker (571 MB). Set `enabled = false` under `[reranker]` to skip the re-ranker. The web UI is served at the same address.
 
 ## Store and Search
 
@@ -85,7 +89,7 @@ ollama serve
 ollama pull qwen3.5:4b
 ```
 
-To use a cloud API instead (OpenAI, Groq, Together, etc.), edit `config.default.toml`:
+Anima reads `config.toml` from the working directory, then falls back to `config.default.toml`; `anima-server path/to/config.toml` names another file. To change a setting, copy `config.default.toml` to `config.toml` and edit the copy. For example, to use a cloud API instead (OpenAI, Groq, Together, etc.):
 
 ```toml
 [llm]
@@ -113,8 +117,24 @@ api_key = ""  # or set OPENAI_API_KEY env var
     ```json
     {
       "answer": "The user has a golden retriever named Max.",
-      "memories_referenced": [{"id": "...", "content": "I have a golden retriever named Max.", "score": 0.89}],
-      "elapsed_ms": 1234
+      "queries_used": ["What pet does the user have?", "pet"],
+      "memories_referenced": [
+        {
+          "id": "...",
+          "content": "I have a golden retriever named Max.",
+          "memory_type": "raw",
+          "score": 0.89,
+          "created_at": "2026-05-12T09:30:00Z"
+        }
+      ],
+      "total_search_results": 4,
+      "elapsed_ms": 1234.5,
+      "provenance": {
+        "namespace": "default",
+        "generated_at": "2026-05-12T09:31:02Z",
+        "source_ids": ["..."],
+        "redaction_applied": false
+      }
     }
     ```
   </Step>

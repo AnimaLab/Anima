@@ -12,7 +12,7 @@ description: 'Retrieve audit trail events'
 ## Query Parameters
 
 <ParamField query="entity_type" type="string">
-  Filter by entity type (e.g., `memory`)
+  Filter by entity type: `claim` (memory changes), `claim_merge`, `procedure`, `plan`, `plan_checkpoint`, `plan_recovery_branch`, `plan_procedure_binding`
 </ParamField>
 
 <ParamField query="entity_id" type="string">
@@ -20,9 +20,26 @@ description: 'Retrieve audit trail events'
 </ParamField>
 
 <ParamField query="limit" type="integer" default="100">
-  Maximum number of events to return
+  Maximum number of events to return (1-1000)
 </ParamField>
 
 ## Response
 
-Returns an array of audit event objects, each containing `event_type`, `entity_type`, `entity_id`, `details`, and `created_at`.
+Returns an array of audit events, newest first, including events from child namespaces (`<namespace>/...`). Each event:
+
+- `id` — unique event ID
+- `namespace` — namespace the event was recorded in
+- `entity_type` — kind of entity (see above)
+- `entity_id` — ID of the entity (memory ID, plan ID, procedure name...)
+- `operation` — what happened (e.g. `create`, `merge`, `status_update`)
+- `actor` — who made the change, or `null`
+- `reason` — reason given for the change, or `null`
+- `details` — JSON details of the change, or `null`
+- `created_at` — timestamp
+
+## Example
+
+```bash
+curl "http://localhost:3000/api/v1/audit/events?entity_type=claim&limit=20" \
+  -H "X-Anima-Namespace: default"
+```
